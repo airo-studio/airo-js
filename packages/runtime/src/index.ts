@@ -1,5 +1,5 @@
 /**
- * @airo/runtime — layout chunk loader + hydration glue.
+ * @ai-ro/runtime — layout chunk loader + hydration glue.
  *
  * Phase 0 destination for parts of `src/widget-runtime-v0/entries/core.ts`
  * from dotter-widget-studio that are runtime-agnostic (chunk loading,
@@ -8,4 +8,4 @@
  * in dotter-monorepo, NOT this package.
  */
 
-export const PACKAGE_NAME = '@airo/runtime';
+export const PACKAGE_NAME = '@ai-ro/runtime';

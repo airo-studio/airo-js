@@ -29,7 +29,7 @@ cd packages/core && pnpm link --global
 Then in your consuming repo:
 
 ```bash
-pnpm link --global @airo/core
+pnpm link --global @ai-ro/core
 ```
 
 ## What lands in this repo

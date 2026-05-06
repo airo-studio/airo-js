@@ -1,5 +1,5 @@
 {
-  "name": "@airo/core",
+  "name": "@ai-ro/core",
   "version": "0.0.0",
   "private": true,
   "description": "Airo core runtime — createApp, PageManager, EventBus, Theme, IsolationRoot, registry mailbox.",

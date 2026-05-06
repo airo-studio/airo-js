@@ -14,12 +14,12 @@ See `CHANGELOG.md` for what's landing where.
 
 | Package | Role |
 |---|---|
-| `@airo/core` | Runtime engine — `createApp`, `PageManager`, `EventBus`, `Theme`, `IsolationRoot`, `registry`. |
-| `@airo/runtime` | Layout chunk loader + hydration glue between core and per-page bundles. |
-| `@airo/ssr` | Edge SSR pipeline — `renderAppToHTML` + runtime-agnostic dispatch. |
-| `@airo/embed` | ~5 KB bootstrap loader — what customers paste in their HTML. |
-| `@airo/mcp` | MCP tool emission helpers — cartridge-defined tools surface here. |
-| `@airo/cartridge-kit` | The cartridge contract: `Cartridge<TSchema, TConfig>` + DataSource / View / MCP-tool / Template primitives. |
+| `@ai-ro/core` | Runtime engine — `createApp`, `PageManager`, `EventBus`, `Theme`, `IsolationRoot`, `registry`. |
+| `@ai-ro/runtime` | Layout chunk loader + hydration glue between core and per-page bundles. |
+| `@ai-ro/ssr` | Edge SSR pipeline — `renderAppToHTML` + runtime-agnostic dispatch. |
+| `@ai-ro/embed` | ~5 KB bootstrap loader — what customers paste in their HTML. |
+| `@ai-ro/mcp` | MCP tool emission helpers — cartridge-defined tools surface here. |
+| `@ai-ro/cartridge-kit` | The cartridge contract: `Cartridge<TSchema, TConfig>` + DataSource / View / MCP-tool / Template primitives. |
 
 ## Hard scope line
 

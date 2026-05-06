@@ -18,4 +18,4 @@ We aim to acknowledge reports within 3 business days and provide a remediation t
 
 A signed-bundle / Ed25519 spike exists in `dotter-monorepo` as reference-grade code but is **not** loaded in production. Per the v0 launch decision (M11 in the migration plan), Path C work stays a spike and does not block v0.
 
-When signed bundles do ship, they will land as a separate `@airo/runtime-verifier` package alongside the L1/L2 sanitiser, with its own threat-model doc and an explicit release note.
+When signed bundles do ship, they will land as a separate `@ai-ro/runtime-verifier` package alongside the L1/L2 sanitiser, with its own threat-model doc and an explicit release note.

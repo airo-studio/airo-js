@@ -1,5 +1,5 @@
 /**
- * @airo/core — runtime engine.
+ * @ai-ro/core — runtime engine.
  *
  * Source extraction lands in Phase 0 of the migration plan
  * (dotter-widget-studio/.claude/plans/airo-studio-v0-migration.md).
@@ -10,4 +10,4 @@
  * Until then this is an empty placeholder so the workspace builds.
  */
 
-export const PACKAGE_NAME = '@airo/core';
+export const PACKAGE_NAME = '@ai-ro/core';

@@ -1,5 +1,5 @@
 {
-  "name": "@airo/embed",
+  "name": "@ai-ro/embed",
   "version": "0.0.0",
   "private": true,
   "description": "Airo embed — ~5KB browser bootstrap loader. The script customers paste into their HTML.",

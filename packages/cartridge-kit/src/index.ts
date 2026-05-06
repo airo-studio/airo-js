@@ -1,5 +1,5 @@
 /**
- * @airo/cartridge-kit — the cartridge contract.
+ * @ai-ro/cartridge-kit — the cartridge contract.
  *
  * The highest-stakes API surface in airo-js. Phase 0 work unit 4 designs
  * `Cartridge<TSchema, TConfig>` here and validates it against two skeletons
@@ -31,4 +31,4 @@
  * `examples/cartridge-restaurant-skel` (created in Phase 0 wu#4).
  */
 
-export const PACKAGE_NAME = '@airo/cartridge-kit';
+export const PACKAGE_NAME = '@ai-ro/cartridge-kit';

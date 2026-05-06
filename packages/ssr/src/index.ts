@@ -1,5 +1,5 @@
 /**
- * @airo/ssr — runtime-agnostic SSR dispatch + render helper.
+ * @ai-ro/ssr — runtime-agnostic SSR dispatch + render helper.
  *
  * Phase 0 destination for `src/framework/ssr.ts` (renderAppToHTML) and
  * the runtime-agnostic parts of `supabase/functions/ssr-widget/index.ts`
@@ -8,4 +8,4 @@
  * dotter-monorepo, not here.
  */
 
-export const PACKAGE_NAME = '@airo/ssr';
+export const PACKAGE_NAME = '@ai-ro/ssr';

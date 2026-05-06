@@ -1,5 +1,5 @@
 {
-  "name": "@airo/ssr",
+  "name": "@ai-ro/ssr",
   "version": "0.0.0",
   "private": true,
   "description": "Airo SSR — runtime-agnostic edge dispatch + renderAppToHTML helper.",
@@ -21,7 +21,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@airo/core": "workspace:*"
+    "@ai-ro/core": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

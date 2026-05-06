@@ -14,7 +14,7 @@ importers:
 
   packages/cartridge-kit:
     dependencies:
-      '@airo/core':
+      '@ai-ro/core':
         specifier: workspace:*
         version: link:../core
 
@@ -24,19 +24,19 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@airo/cartridge-kit':
+      '@ai-ro/cartridge-kit':
         specifier: workspace:*
         version: link:../cartridge-kit
 
   packages/runtime:
     dependencies:
-      '@airo/core':
+      '@ai-ro/core':
         specifier: workspace:*
         version: link:../core
 
   packages/ssr:
     dependencies:
-      '@airo/core':
+      '@ai-ro/core':
         specifier: workspace:*
         version: link:../core
 
