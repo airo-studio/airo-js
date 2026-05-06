@@ -13,10 +13,10 @@
  *   - Breadcrumb (data-driven navigation trail)
  *   - createRegistry + pushToMailbox (stub-queue plugin self-registration)
  *   - Transformer + PostProcessor + RuntimePipeline (pipeline orchestration)
+ *   - Theme (CSS variable injection + customCSS)
+ *   - IsolationRoot strategies (none / partial / full shadow DOM)
  *   - Page / AppConfig / Slot / Region schema types
  *   - PageRenderer / RenderContext / NavigationState contract
- *
- * Pending: Theme + IsolationRoot (WU#5).
  */
 
 export type {
@@ -93,5 +93,18 @@ export type {
   Registry,
 } from './registry.js';
 export { createRegistry, pushToMailbox } from './registry.js';
+
+export type { ThemeOptions } from './theme.js';
+export { Theme } from './theme.js';
+
+export type {
+  StyleIsolation,
+  IsolationRoot,
+} from './style.js';
+export {
+  setupIsolationRoot,
+  wrapInShadow,
+  resolveStyleRoot,
+} from './style.js';
 
 export const PACKAGE_NAME = '@ai-ro/core';
