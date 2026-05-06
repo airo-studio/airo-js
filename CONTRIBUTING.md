@@ -30,23 +30,18 @@ Install yalc once globally:
 npm i -g yalc
 ```
 
-### From `airo-js/` — push to the local yalc store
+### From `airo-js/` — push to consumers
+
+Two scripts, mirroring yalc's own verbs:
 
 ```bash
-# Build first (yalc only publishes built artifacts)
-pnpm -r --filter './packages/*' run build
-
-# Push every package
-pnpm -r --filter './packages/*' exec yalc publish
+pnpm yalc:push       # build + yalc push  → store + auto-update every linked consumer
+pnpm yalc:publish    # build + yalc publish → store only; consumers run `yalc update`
 ```
 
-Convenience script:
+`yalc:push` is what you want 99% of the time — every consumer that ran `yalc add @ai-ro/...` picks up the new hash automatically, no second step.
 
-```bash
-pnpm yalc:push
-```
-
-This builds + publishes all `@ai-ro/*` packages to the yalc store in one shot. Run after every change you want consumers to see.
+`yalc:publish` is the manual variant: useful when you want to stage a new hash in the store without touching consumers (e.g. CI smoke-publishing, or a consumer mid-debug you don't want to disturb).
 
 ### From the consumer repo — pull updates
 
@@ -56,17 +51,7 @@ First time:
 yalc add @ai-ro/core @ai-ro/runtime @ai-ro/ssr @ai-ro/embed @ai-ro/mcp @ai-ro/cartridge-kit
 ```
 
-Subsequent updates (after `pnpm yalc:push` lands a new version in the yalc store):
-
-```bash
-yalc update
-```
-
-Or skip the manual step on the consumer side by running `yalc push` (instead of `publish`) on the airo-js side — `push` is `publish + auto-update consumers`. Convenience script:
-
-```bash
-pnpm yalc:push:auto
-```
+Subsequent updates: nothing to do if airo-js publisher used `pnpm yalc:push`. If they used `pnpm yalc:publish`, run `yalc update` to pull the latest store hash.
 
 ### When to switch to a real npm publish
 

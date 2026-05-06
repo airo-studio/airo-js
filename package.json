@@ -14,8 +14,8 @@
     "test": "pnpm -r --filter './packages/*' run test",
     "typecheck": "pnpm -r run typecheck",
     "clean": "pnpm -r run clean && rm -rf node_modules",
-    "yalc:push": "pnpm build && pnpm -r --filter './packages/*' exec yalc publish --private",
-    "yalc:push:auto": "pnpm build && pnpm -r --filter './packages/*' exec yalc push --private"
+    "yalc:publish": "pnpm build && pnpm -r --filter './packages/*' exec yalc publish --private",
+    "yalc:push": "pnpm build && pnpm -r --filter './packages/*' exec yalc push --private"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
