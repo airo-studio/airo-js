@@ -7,7 +7,7 @@
  * a `CartridgeRegistry` — they never import cartridge code directly.
  *
  * Each cartridge declares its own mailbox name so multiple cartridges can
- * coexist in the same studio without colliding (M5 of the migration plan).
+ * coexist in the same studio without colliding.
  */
 
 import type { DataSource } from './data-source.js';
@@ -70,8 +70,7 @@ export interface Cartridge<TData = unknown, TConfig = unknown> {
 
   /**
    * Pure data shaping, ordered chain. Framework runs in declared order
-   * before render. Sync at v0; async deferred to v1+ (see §discussion 4
-   * in the proposal).
+   * before render. Sync at v0; async deferred to v1+.
    */
   transformers?: Transformer<TData, TConfig>[];
 
@@ -93,16 +92,17 @@ export interface Cartridge<TData = unknown, TConfig = unknown> {
 
   /**
    * Publication adapters — fan post-Transformer data out to surface-specific
-   * outputs. The load-bearing primitive for products like
-   * DotterWTB-Google-publication. Framework runs each adapter on the
-   * post-pipeline snapshot; studios decide delivery (inline vs signed feed).
+   * outputs. The load-bearing primitive for cartridges that publish typed
+   * feeds (Schema.org JSON-LD, vendor XML, etc.). Framework runs each
+   * adapter on the post-pipeline snapshot; studios decide delivery (inline
+   * vs signed feed).
    */
   publicationAdapters?: PublicationAdapter<TData, unknown, TConfig>[];
 
   /**
    * @deprecated v0.2 — use a `PublicationAdapter` with `format: 'json-ld'`.
    * Kept in the contract for one minor version so existing inline JSON-LD
-   * code can land in WTB cartridge without rewriting on day 1. Removed in v0.3.
+   * code can land without rewriting on day 1. Removed in v0.3.
    */
   jsonLdMappers?: JsonLdMapper<TData>[];
 

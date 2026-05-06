@@ -2,20 +2,21 @@
  * PublicationAdapter — fan post-Transformer data out to surface-specific
  * outputs.
  *
- * The load-bearing primitive for products like DotterWTB-Google-publication.
- * A cartridge declares N adapters; the framework runs each on the post-
+ * The load-bearing primitive for cartridges that publish typed feeds. A
+ * cartridge declares N adapters; the framework runs each on the post-
  * pipeline snapshot to produce the output for that surface (Schema.org
- * JSON-LD, Merchant Center XML, future MCP-tools wrapper, etc.).
+ * JSON-LD, vendor XML feeds, MCP-tools wrappers, etc.).
  *
- * v0 reference adapters:
- *   - schema-org-json-ld:    inline in widget HTML (Product, Offer, AggregateOffer)
- *   - merchant-center-xml:   signed feed URL per customer per locale
+ * Example adapter shapes:
+ *   - inline JSON-LD:   embedded in host page HTML
+ *   - signed XML feed:  stable URL polled by an external indexer, scoped
+ *                       per tenant and locale
  *
  * Three contract guarantees:
  *   1. **Snapshot fidelity.** Adapters consume the SAME post-Transformer
- *      snapshot that views render and MCP tools answer from. Schema.org
- *      JSON-LD inline, the Merchant Center feed, and any MCP tool all
- *      answer the same question — what the rendered widget shows.
+ *      snapshot that views render and MCP tools answer from. Inline
+ *      JSON-LD, an XML feed, and any MCP tool all answer the same
+ *      question — what the rendered widget shows.
  *   2. **Coverage gating.** Adapters declare `requires` (schema field
  *      paths). Framework can skip an adapter when required fields are
  *      absent rather than emit broken output. Studios surface
@@ -23,8 +24,8 @@
  *      the user via this metadata.
  *   3. **Validation as a hard gate.** `validate(output)` runs before the
  *      studio publishes. If `valid: false`, the studio refuses to serve
- *      the output and surfaces errors in the dashboard. The customer-
- *      trust layer — never publish a broken Merchant Center feed.
+ *      the output and surfaces errors. The trust layer — never publish a
+ *      broken feed to a downstream indexer.
  */
 
 export type Duration = { ms: number };
@@ -65,9 +66,9 @@ export interface PublicationContext<TConfig = unknown> {
   locale: string;
   /** ISO 3166-1 alpha-2 — 'GB', 'US'. */
   country: string;
-  /** ISO 4217 — optional; some adapters need it (Merchant Center). */
+  /** ISO 4217 — optional; some adapters need it (e.g. priced feeds). */
   currency?: string;
-  /** Customer-side toggles — e.g. SKUs disabled from publication. */
+  /** Tenant-side toggles — e.g. items disabled from publication. */
   customerOverrides?: Record<string, unknown>;
 }
 
@@ -108,8 +109,8 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
    * cadence within those bounds.
    *
    * Examples:
-   *   - schema-org-json-ld:   { min: 0, max: 6h }     (every render is fine)
-   *   - merchant-center-xml:  { min: 1h, max: 24h }   (Google polls; daily floor)
+   *   - inline JSON-LD:    { min: 0, max: 6h }     (every render is fine)
+   *   - signed XML feed:   { min: 1h, max: 24h }   (external poller; daily floor)
    */
   refreshCadence: { min: Duration; max: Duration };
 
@@ -121,7 +122,7 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
 
   /**
    * Per-adapter validation-failure policy. Default `'block-publish'` —
-   * never publish broken to Google. Override only with explicit reason.
+   * never publish broken output downstream. Override only with explicit reason.
    */
   onValidationFail?: 'block-publish' | 'publish-with-warnings' | 'fail-loud';
 }

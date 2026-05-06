@@ -10,4 +10,4 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 - Apache 2.0 license, README, SECURITY, CONTRIBUTING, this changelog.
 
 ### Notes
-- Package versions stay at `0.0.0` (private) until source extraction from `dotter-widget-studio` lands. Tracked via Phase 0 of `dotter-widget-studio/.claude/plans/airo-studio-v0-migration.md`.
+- Package versions stay at `0.0.0` (private) until source extraction from a private downstream codebase lands.

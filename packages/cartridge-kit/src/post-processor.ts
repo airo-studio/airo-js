@@ -1,29 +1,15 @@
 /**
- * PostProcessor — side-effectful hooks, run after views render.
+ * PostProcessor re-exports.
  *
- * Receive DOM + post-transformer data + event bus. Optional return =
- * teardown function (called on page unmount). Use for analytics hooks,
- * ARIA live regions, scroll restoration. NOT for data shaping — that's
- * what Transformer is for.
+ * The actual definitions live in `@ai-ro/core` (paired with `RuntimePipeline`,
+ * since the post-processor chain is part of the framework's render lifecycle
+ * per M13). Cartridges import via `@ai-ro/cartridge-kit` for convenience —
+ * same names, single source of truth.
  *
- * Shape lifted verbatim from v1's RuntimePipeline.applyPostprocessors,
- * widened to (TData, TConfig).
+ * See `@ai-ro/core/src/transformer.ts` for the contract details + design notes.
  */
 
-import type { IEventBus, NavigationState } from '@ai-ro/core';
-
-export interface PostProcessorContext<TData, TConfig> {
-  container: HTMLElement;
-  config: TConfig;
-  /** POST-transformer — same data the rendered views show. */
-  data: TData;
-  events: IEventBus;
-  navState: NavigationState;
-}
-
-export interface PostProcessor<TData, TConfig = unknown> {
-  name: string;
-  isEnabled(config: TConfig): boolean;
-  /** Returns optional teardown function — called on page unmount. */
-  apply(ctx: PostProcessorContext<TData, TConfig>): void | (() => void);
-}
+export type {
+  PostProcessor,
+  PostProcessorContext,
+} from '@ai-ro/core';

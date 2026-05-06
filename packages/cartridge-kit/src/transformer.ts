@@ -1,62 +1,20 @@
 /**
- * Transformer — pure data shaping. Composed in the order declared on
- * `Cartridge.transformers[]`. Framework provides the chain orchestrator
- * (`TransformerPipeline` below) so all consumers — views, MCP tools,
- * publication adapters — read the same post-transformer snapshot.
+ * Transformer + RuntimePipeline re-exports.
  *
- * Shape is lifted verbatim from v1's RuntimePipeline (in dotter-monorepo),
- * widened from `(FeedData, WidgetConfig)` to `(TData, TConfig)`.
+ * The actual definitions live in `@ai-ro/core` because pipeline orchestration
+ * is rendering, and rendering is the framework's job (M13). Cartridges import
+ * via `@ai-ro/cartridge-kit` for convenience — same names, single source of
+ * truth.
+ *
+ * See `@ai-ro/core/src/transformer.ts` for the contract details + design notes.
  */
 
-import type { NavigationState } from '@ai-ro/core';
+export type {
+  Transformer,
+  TransformerContext,
+  RuntimePipeline,
+  TraceEntry,
+} from '@ai-ro/core';
 
-export interface TransformerContext<TConfig> {
-  config: TConfig;
-  /** Selected category etc. narrows the visible data. */
-  navState: NavigationState;
-  locale?: string;
-}
-
-export interface Transformer<TData, TConfig = unknown> {
-  /** Stable identifier — used in dev tooling traces. */
-  name: string;
-  isEnabled(config: TConfig): boolean;
-  /** Pure: data → data. No side effects. */
-  transform(data: TData, ctx: TransformerContext<TConfig>): TData;
-}
-
-/**
- * Framework-owned pipeline orchestrator. The framework runs the transformer
- * chain before each render and the post-processor chain after each render.
- *
- * Pattern lifted from v1's RuntimePipeline. Cartridges declare
- * `transformers[]` + `postProcessors[]`; the framework orchestrates. This
- * means:
- *   1. ONE place transformer-chain semantics are defined (error policy,
- *      ordering, tracing).
- *   2. ONE place MCP tools and view renderers can subscribe to the
- *      post-transformer data — no chance of drift.
- *   3. Dev tooling (chain trace) is buildable framework-side.
- *
- * The highest-leverage framework-team decision in the proposal (§11).
- * Without this, MCP tools and publication adapters can't be guaranteed to
- * see the same data the rendered widget shows.
- */
-export interface TransformerPipeline<TData, TConfig> {
-  /** Transformer chain run on every render. */
-  runTransformers(input: TData, ctx: TransformerContext<TConfig>): TData;
-
-  /**
-   * Optional dev tooling — when not in production, the framework can emit
-   * a trace of which transformer changed what. Cartridges don't depend on
-   * it; it's a debugging affordance.
-   */
-  enableTrace?(handler: (entry: TraceEntry) => void): void;
-}
-
-export interface TraceEntry {
-  transformerName: string;
-  inputSize: number;
-  outputSize: number;
-  durationMs: number;
-}
+/** @deprecated v0.2-rc.2 — renamed to `RuntimePipeline`. Type alias kept for one minor version. */
+export type { TransformerPipeline } from '@ai-ro/core';

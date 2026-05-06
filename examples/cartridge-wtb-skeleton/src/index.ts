@@ -7,12 +7,10 @@
  * type errors before the framework ships.
  *
  * THROWAWAY. None of this runs. Factories return `{} as ...` stubs.
- * Real implementations land in dotter-monorepo's WTB cartridge port
- * (Phase 1 of the migration plan).
+ * Real implementations live in consuming studio codebases.
  *
- * Contract gaps surfaced while writing this skeleton get logged in the
- * proposal doc's discussion-points section, not fixed inline. Consumer-
- * side intuitions are the input; contract design is the framework's call.
+ * Contract gaps surfaced while writing this skeleton are tracked
+ * separately, not fixed inline.
  */
 
 import type {
@@ -97,10 +95,10 @@ const wtbSchema: SchemaDefinition<WtbData> = {
 
 const feedUrlDataSource: DataSource<WtbData, WtbConfig> = {
   id: 'feed-url',
-  displayName: 'Dotter Feed URL',
+  displayName: 'Product Feed URL',
   onboardingShape: {
     kind: 'url-input',
-    placeholder: 'https://feeds.dotter.me/<your-feed>.json',
+    placeholder: 'https://example.com/feeds/products.json',
   },
   fetch: async (_input, _ctx) => ({ products: [], retailers: {} }),
   cacheTtlMs: 5 * 60_000,

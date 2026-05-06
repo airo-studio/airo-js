@@ -1,6 +1,6 @@
 # Contributing to airo-js
 
-Thanks for considering a contribution. Right now this repo is in `v0.0.x` scaffolding stage and the cartridge-kit contract is being validated against two skeletons (Dotter-WTB + Restaurant) — large API-surface PRs will likely be on hold until that contract stabilises.
+Thanks for considering a contribution. Right now this repo is in `v0.0.x` scaffolding stage and the cartridge-kit contract is being validated against representative cartridge skeletons — large API-surface PRs will likely be on hold until that contract stabilises.
 
 ## Local development
 
@@ -18,19 +18,59 @@ pnpm build
 
 ## Linking into a downstream repo for development
 
-Run from `airo-js/`:
+We use **[yalc](https://github.com/wclr/yalc)** for local linking, not `pnpm link`. Yalc copies the published shape of each package into the consumer's `node_modules` (vs symlinking source), which avoids:
+
+- TypeScript resolution surprises with `workspace:*` protocol crossing repo boundaries
+- Pre-`dist/`-built imports leaking into the consumer's bundler
+- Stale type definitions when the source has new exports the consumer doesn't see
+
+Install yalc once globally:
 
 ```bash
+npm i -g yalc
+```
+
+### From `airo-js/` — push to the local yalc store
+
+```bash
+# Build first (yalc only publishes built artifacts)
 pnpm -r --filter './packages/*' run build
-cd packages/core && pnpm link --global
-# (repeat for each package you want to consume)
+
+# Push every package
+pnpm -r --filter './packages/*' exec yalc publish
 ```
 
-Then in your consuming repo:
+Convenience script:
 
 ```bash
-pnpm link --global @ai-ro/core
+pnpm yalc:push
 ```
+
+This builds + publishes all `@ai-ro/*` packages to the yalc store in one shot. Run after every change you want consumers to see.
+
+### From the consumer repo — pull updates
+
+First time:
+
+```bash
+yalc add @ai-ro/core @ai-ro/runtime @ai-ro/ssr @ai-ro/embed @ai-ro/mcp @ai-ro/cartridge-kit
+```
+
+Subsequent updates (after `pnpm yalc:push` lands a new version in the yalc store):
+
+```bash
+yalc update
+```
+
+Or skip the manual step on the consumer side by running `yalc push` (instead of `publish`) on the airo-js side — `push` is `publish + auto-update consumers`. Convenience script:
+
+```bash
+pnpm yalc:push:auto
+```
+
+### When to switch to a real npm publish
+
+Once cartridge-kit hits `0.2.0` (post-validation, see migration plan §Phase 0 done criteria), we publish to npm under the `@ai-ro` scope. Consumer repos then `pnpm install @ai-ro/core@^0.2` and stop using yalc for that package's surface. Yalc stays useful for `0.x` iteration on packages that aren't yet stable.
 
 ## What lands in this repo
 
@@ -41,8 +81,8 @@ pnpm link --global @ai-ro/core
 
 ## What does NOT land here
 
-- Auth, tenancy, drafts, history, locks, token rotation, the `/load` endpoint, RLS — these are studio concerns. See `airo-studio-v0-migration.md` (in `dotter-widget-studio`) decisions M9 + M13.
-- Cartridge implementations themselves. Cartridges live in their consuming studio's repo (Dotter-WTB → `dotter-monorepo`; Restaurant → Airo studio in `dotter-widget-studio`).
+- Auth, tenancy, drafts, history, locks, token rotation, load endpoints, row-level security — these are studio concerns. During the v0.0.x extraction window, see `airo-studio-v0-migration.md` (in `dotter-widget-studio`) for the migration decisions.
+- Cartridge implementations themselves. Cartridges live in their consuming studio's repo. During the v0.0.x extraction, reference implementations live in private downstream codebases (`dotter-monorepo`, `dotter-widget-studio`); they are not redistributed here.
 
 ## Code style
 

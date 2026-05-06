@@ -1,27 +1,23 @@
 /**
  * @ai-ro/cartridge-kit — the cartridge contract.
  *
- * The highest-stakes API surface in airo-js. v0.2 against the
- * DotterWTB-Google-publication priority pivot: `PublicationAdapter` is a
- * first-class primitive (the load-bearing v0 product mechanism); validation
- * pair is WTB cartridge + PublicationAdapter pair (Schema.org + Merchant
- * Center), not WTB + Restaurant.
+ * The highest-stakes API surface in airo-js. v0.2 promotes
+ * `PublicationAdapter` to a first-class primitive for fanning post-pipeline
+ * data out to typed feed surfaces (Schema.org JSON-LD, vendor XML, etc.);
+ * the deprecated `JsonLdMapper` is kept for one minor version.
  *
  * Three contract guarantees:
  *   1. Snapshot fidelity — views, MCP tools, and publication adapters all
  *      consume the SAME post-Transformer snapshot. No drift between what
- *      the user sees, what an agent answers, and what Google indexes.
+ *      the user sees, what an agent answers, and what indexers consume.
  *   2. Coverage gating — adapters declare required schema field paths;
  *      framework skips broken outputs; studio surfaces gaps to the user.
  *   3. Validation as hard gate — `validate(output)` blocks publish on
- *      failure. Customer trust > publish velocity.
+ *      failure. Output trust > publish velocity.
  *
- * Phase 0.5 designs the lower-level primitives (DataSource ↔ Transformer
- * data flow, MCP tool data-access contract, View vs PageRenderer
- * relationship). This file defines the surface; lower-level wiring is
- * Phase 0.5 work.
- *
- * Companion proposal: `dotter-widget-studio/.claude/plans/airo-cartridge-kit-contract-proposal.md`
+ * This file defines the public surface; lower-level wiring (DataSource ↔
+ * Transformer data flow, MCP tool data-access, View vs PageRenderer) is
+ * defined in the per-primitive files alongside.
  */
 
 export type {
@@ -41,9 +37,12 @@ export type {
 export type {
   Transformer,
   TransformerContext,
-  TransformerPipeline,
+  RuntimePipeline,
   TraceEntry,
 } from './transformer.js';
+
+/** @deprecated v0.2-rc.2 — renamed to `RuntimePipeline`. Type alias kept for one minor version. */
+export type { TransformerPipeline } from './transformer.js';
 
 export type {
   PostProcessor,

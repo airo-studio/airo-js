@@ -8,11 +8,11 @@
  *
  * If the contract holds for both adapters under one schema, the
  * "one cartridge fans out to multiple publication surfaces" property
- * the v0 product spec depends on is type-sound.
+ * is type-sound.
  *
  * THROWAWAY. Generate functions return stubs; validate returns canned
- * passes. Real implementations land in dotter-monorepo's WTB cartridge
- * port (Phase 1). This file's only job is "do these types compose?"
+ * passes. Real implementations live in consuming studio codebases. This
+ * file's only job is "do these types compose?"
  */
 
 import type {

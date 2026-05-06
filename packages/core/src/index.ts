@@ -5,9 +5,9 @@
  * @ai-ro/ssr, and downstream consumers. Everything exported from here is
  * semver-stable for the package's major version.
  *
- * Phase 0 in flight: types are seeded from dotter-widget-studio's
- * `src/framework/`. Lifecycle (createApp, PageManager, Theme, IsolationRoot)
- * and the registry mailbox land in subsequent commits.
+ * Phase 0 in flight: types are seeded from a private downstream codebase.
+ * Lifecycle (createApp, PageManager, Theme, IsolationRoot) and the
+ * registry mailbox land in subsequent commits.
  */
 
 export type {
@@ -33,5 +33,19 @@ export type {
   PageRenderer,
   PageRendererFactory,
 } from './page.js';
+
+export type {
+  Transformer,
+  TransformerContext,
+  PostProcessor,
+  PostProcessorContext,
+  RuntimePipeline,
+  TraceEntry,
+} from './transformer.js';
+
+/** @deprecated v0.2-rc.2 — use `RuntimePipeline`. Alias kept one minor version. */
+export type { TransformerPipeline } from './transformer.js';
+
+export { RuntimePipelineImpl, createPipeline } from './runtime-pipeline.js';
 
 export const PACKAGE_NAME = '@ai-ro/core';

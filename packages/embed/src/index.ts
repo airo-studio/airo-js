@@ -1,11 +1,10 @@
 /**
  * @ai-ro/embed — browser bootstrap loader.
  *
- * Phase 0 destination for `src/embed/index.ts` from dotter-widget-studio
- * (the `<dotter-app dtr-id="...">` custom element + `dotter-embed.js`).
- * Renamed `airo-embed.js` on output. The runtime fork (legacy v1 vs airo)
- * stays — the studio's existing v1 chunks keep loading from `/widgets/v1/`
- * until Phase 2 sunset.
+ * The small script consumers paste into a host page. Provides a custom
+ * element (e.g. `<airo-embed data-id="…">`) plus a bootstrap that
+ * resolves the layout, fetches chunks, and hands off to `@ai-ro/runtime`.
+ * Consumers are free to wrap their own custom-element name on top.
  *
  * Intentionally has no dependency on @ai-ro/core — this bundle ships
  * separately and lazy-loads core on demand so pages that don't hydrate
