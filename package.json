@@ -1,0 +1,21 @@
+{
+  "name": "airo-js",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Airo — rendering-only framework for config-driven, plugin-loaded UI. The substrate Dotter studio + Airo studio's cartridges build on.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.4.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' run build",
+    "test": "pnpm -r --filter './packages/*' run test",
+    "typecheck": "pnpm -r run typecheck",
+    "clean": "pnpm -r run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

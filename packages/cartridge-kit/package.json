@@ -1,0 +1,29 @@
+{
+  "name": "@airo/cartridge-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Airo cartridge contract — Cartridge<TSchema, TConfig> + DataSource / View / MCP tool / Template / OnboardingFlow primitives. The API surface every cartridge implements.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
