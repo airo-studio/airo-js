@@ -74,5 +74,8 @@ export type {
 /** @deprecated v0.2 — use PublicationAdapter with format 'json-ld'. */
 export type { JsonLdMapper } from './json-ld-mapper.js';
 
+export type { CartridgeAppDeps } from './cartridge-app.js';
+export { createCartridgeApp } from './cartridge-app.js';
+
 export const PACKAGE_NAME = '@ai-ro/cartridge-kit';
-export const CONTRACT_VERSION = '0.2.0-rc.1';
+export const CONTRACT_VERSION = '0.2.0-rc.2';
