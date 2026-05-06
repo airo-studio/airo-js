@@ -21,7 +21,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@ai-ro/core": "workspace:*"
+    "@ai-ro/core": "workspace:*",
+    "@ai-ro/cartridge-kit": "workspace:*"
   },
   "publishConfig": {
     "access": "public"
