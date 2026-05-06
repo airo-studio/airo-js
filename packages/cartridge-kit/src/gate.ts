@@ -106,11 +106,37 @@ export interface Gate<TConfig = unknown> {
   destroy(): void;
 
   /**
-   * Optional persistence convention. Studios with a session-storage layer
-   * (Dotter studio, Airo studio) consume this metadata to scope cookies
-   * and localStorage keys per-cartridge per-tenant. Cartridges without a
-   * convention manage their own storage; framework doesn't write
-   * anything based on this field — it's documentation for the studio.
+   * Persistence convention — METADATA ONLY. Cartridge declares the hint;
+   * the studio implements the actual storage write.
+   *
+   * **The framework writes NOTHING based on this field.** Decision
+   * locked-in for v0.2 (and load-bearing for the framework's M13 scope
+   * line), three reasons:
+   *
+   *   1. **Cookie writes are state management, not rendering.** Letting
+   *      the framework own them violates M13. Each "small extension"
+   *      (sameSite/domain rules, rotation policy, "refresh on focus",
+   *      auth-token interaction) quietly redefines "rendering-only"
+   *      until it isn't. Reject the category, not just the instance.
+   *
+   *   2. **Cookie semantics are studio concerns.** Different studios
+   *      have different domains, sameSite policies, SSO interactions,
+   *      GDPR/CCPA compliance shapes. The framework can't standardise
+   *      this without picking sides — and picking sides means forking
+   *      per-studio Gate behaviour later.
+   *
+   *   3. **Contract precedent.** `DataSource.cacheTtlMs` is exactly this
+   *      shape: cartridge declares the hint, studio implements caching.
+   *      `Gate.persist` fits the same envelope — cartridge declares
+   *      `{ key, ttl, scope }`, studio writes whatever storage primitive
+   *      matches its compliance posture.
+   *
+   * Studios that want a default implementation can opt into a separate
+   * `@ai-ro/gate-persist` helper package (when/if it ships). Greenfield
+   * studios get a working default; studios with their own auth/session
+   * stack (Dotter studio's `@dotter/auth`, Airo studio's Supabase) skip
+   * the helper and write the storage primitive themselves. Framework
+   * core stays rendering-only either way.
    */
   persist?: {
     /** Storage key prefix, e.g. 'wtb:age-verified'. */

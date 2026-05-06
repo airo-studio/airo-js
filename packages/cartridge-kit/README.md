@@ -109,6 +109,46 @@ teardown();
 
 Studios with custom semantics (async support, custom error reporting, OTel tracing) implement their own `RuntimePipeline<TData, TConfig>`.
 
+### Gate persistence is metadata, not behaviour
+
+`Gate.persist` is a hint cartridges declare; **the framework writes nothing based on it**. Studios implement the actual storage primitive — cookies, localStorage, server-side session table — with their own compliance posture (sameSite, domain rules, GDPR scope, SSO interaction).
+
+This mirrors how `DataSource.cacheTtlMs` works: cartridge declares the hint, studio decides actual cache policy. Same shape, same envelope.
+
+```ts
+const ageGate: Gate<MyConfig> = {
+  id: 'age-verification',
+  // ... isEnabled, precheck, mount, destroy
+  persist: {
+    key: 'wtb:age-verified',
+    ttl: 30 * 24 * 60 * 60 * 1000, // 30 days
+    scope: 'persistent',
+  },
+};
+```
+
+**Studio side**, two patterns. Pattern A — read in `precheck`, write before `mount` returns `'allow'`:
+
+```ts
+precheck: async (ctx) => {
+  const cookie = readMyStudioCookie(myGate.persist.key);
+  return cookie && !expired(cookie) ? 'allow' : 'gate-required';
+},
+
+mount: async (host, ctx) => {
+  // ... paint UI, await user verification
+  if (verified) {
+    writeMyStudioCookie(myGate.persist.key, { /* ... */ }, myGate.persist.ttl);
+    return 'allow';
+  }
+  return 'block';
+},
+```
+
+Pattern B — studios with their own auth/session stack skip `persist` entirely and use their existing primitives directly. Dotter studio's gates use `@dotter/auth` session tokens; Airo studio's gates use Supabase auth. Both ignore `Gate.persist` and write through the studio's existing layer.
+
+**Future**: a separate `@ai-ro/gate-persist` helper package may ship for greenfield studios that want a default `writeGatePersist({ key, ttl, scope })`. Opt-in. Not in `@ai-ro/core` or `@ai-ro/cartridge-kit` — those stay rendering-only.
+
 ## Boot sequence
 
 A studio shell mounting a cartridge follows this sequence:
