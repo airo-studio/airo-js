@@ -10,10 +10,12 @@
  * coexist in the same studio without colliding.
  */
 
+import type { PageRendererFactory } from '@ai-ro/core';
+
 import type { DataSource } from './data-source.js';
 import type { Transformer } from './transformer.js';
 import type { PostProcessor } from './post-processor.js';
-import type { ViewDefinition } from './view.js';
+import type { ViewDefinition, CartridgeAppContext } from './view.js';
 import type { Template } from './template.js';
 import type { McpToolDefinition } from './mcp-tool.js';
 import type { PublicationAdapter } from './publication-adapter.js';
@@ -125,9 +127,51 @@ export interface Cartridge<TData = unknown, TConfig = unknown> {
  * Studio shell consumes cartridges via this — never imports cartridges by
  * name. Cartridges register themselves at boot (package side-effect or
  * explicit `register(cartridge)` from the studio's manifest).
+ *
+ * Resolution priority for `resolveView(cartridgeId, pageType)`:
+ *   1. Static `cartridge.views[]` — fully-loaded cartridges where every
+ *      view is in the same bundle.
+ *   2. Per-cartridge mailbox (`cartridge.mailboxName`) — cartridges that
+ *      ship their views as separate chunks. The registry drains the
+ *      mailbox at `register()` time and continues to accept late
+ *      registrations after that (stub-queue semantics from
+ *      `@ai-ro/core/createRegistry`).
  */
 export interface CartridgeRegistry {
   register(cartridge: Cartridge): void;
   list(): Cartridge[];
   get(id: string): Cartridge | undefined;
+
+  /**
+   * Resolve a renderer factory for a given cartridge + page type. Checks
+   * the cartridge's static `views[]` first, then falls back to the
+   * per-cartridge chunk mailbox. Returns undefined when neither path
+   * has a matching factory (likely a chunk that hasn't loaded yet).
+   *
+   * The return type uses `unknown` for `TData`/`TConfig` because the
+   * registry is heterogeneous across cartridges. Cartridges narrow when
+   * they pull a factory out of the registry; the typing reflects that
+   * the registry doesn't (and can't) know which cartridge's data shape
+   * a given factory expects.
+   */
+  resolveView(
+    cartridgeId: string,
+    pageType: string,
+  ): PageRendererFactory<string, CartridgeAppContext<unknown, unknown>> | undefined;
+
+  /**
+   * Build a `resolveRenderer` callback scoped to a single cartridge.
+   * Useful for passing into `createApp({ resolveRenderer })` or
+   * `createCartridgeApp({ resolveRenderer })` when a multi-cartridge
+   * studio mounts ONE cartridge at a time.
+   *
+   * Returns `(pageType) => undefined` for an unknown cartridgeId — the
+   * studio sees no factories and the framework falls back to "chunk not
+   * loaded yet" semantics, which is the right user-facing behaviour.
+   */
+  resolverFor(
+    cartridgeId: string,
+  ): (
+    pageType: string,
+  ) => PageRendererFactory<string, CartridgeAppContext<unknown, unknown>> | undefined;
 }

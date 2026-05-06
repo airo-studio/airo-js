@@ -109,6 +109,78 @@ teardown();
 
 Studios with custom semantics (async support, custom error reporting, OTel tracing) implement their own `RuntimePipeline<TData, TConfig>`.
 
+## Boot sequence
+
+A studio shell mounting a cartridge follows this sequence:
+
+```ts
+import { createApp } from '@ai-ro/core';
+import {
+  createCartridgeRegistry,
+  createCartridgeApp,
+  createPipeline,
+} from '@ai-ro/cartridge-kit';
+
+import { wtbCartridge } from '@my-org/wtb-cartridge';
+
+// 1. Build the registry. Multi-cartridge studios pass an array; single-
+//    cartridge studios pass one. Cartridges can also be added later via
+//    registry.register(...).
+const registry = createCartridgeRegistry([wtbCartridge]);
+
+// 2. Studio user picks a template (UI-driven). For headless boot, default
+//    to cartridge.defaultTemplateId.
+const cartridge = registry.get('wtb')!;
+const template = cartridge.templates.find(
+  (t) => t.id === cartridge.defaultTemplateId,
+)!;
+
+// 3. Build the AppConfig the framework consumes. Pages come from the
+//    template; layout/styles default to whatever the cartridge ships
+//    in its component metadata. Studios with their own page editor
+//    rewrite the page tree here.
+const appConfig = {
+  appId: 'my-widget-id',
+  pages: template.pages.map((p) => ({
+    ...p,
+    layout: { regionOrder: [], regions: {} },
+  })),
+};
+
+// 4. Load data via the cartridge's DataSource and run the pipeline.
+//    Snapshot is what views, MCP tools, and publication adapters all read.
+const dataSource = cartridge.dataSources[0];
+const rawData = await dataSource.fetch(input, { config });
+const pipeline = createPipeline(
+  cartridge.transformers ?? [],
+  cartridge.postProcessors ?? [],
+);
+const snapshot = pipeline.runTransformers(rawData, { config, navState: { page: '' } });
+
+// 5. Mount. createCartridgeApp builds CartridgeAppContext, derives the
+//    resolveRenderer from the cartridge's views[], and delegates to
+//    createApp.
+const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
+  host: containerEl,
+  enableRouter: true,
+  // resolveRenderer auto-derived; pass registry.resolverFor('wtb') to use
+  // the multi-cartridge / chunk-mailbox resolution path instead.
+});
+```
+
+### Multi-cartridge resolution
+
+When a studio runs more than one cartridge, pass `registry.resolverFor(cartridgeId)` instead of letting `createCartridgeApp` walk a single cartridge's `views[]`:
+
+```ts
+const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
+  host: containerEl,
+  resolveRenderer: registry.resolverFor('wtb'),
+});
+```
+
+The registry's resolver checks the cartridge's static `views[]` first, then falls back to the per-cartridge chunk mailbox (named by `cartridge.mailboxName`). Cartridges shipping views as separate chunks register them via `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })` from each chunk's IIFE — same pattern as v1's plugin self-registration.
+
 ## Validation skeletons
 
 Two compile-only skeletons live in `examples/` of the airo-js repo and prove the contract holds:
