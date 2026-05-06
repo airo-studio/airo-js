@@ -179,9 +179,9 @@ const ageVerificationGate: Gate<WtbConfig> = {
 
   destroy: () => undefined,
 
-  // Studio-side persistence convention. The Dotter studio reads this and
-  // scopes the cookie key per-tenant; airo studio (or any other) does the
-  // same. Framework writes nothing based on this metadata — it's docs.
+  // Studio-side persistence convention. Studios read this and scope the
+  // cookie key per their tenancy model. Framework writes nothing based on
+  // this metadata — it's docs.
   persist: {
     key: 'wtb:age-verified',
     ttl: 30 * 24 * 60 * 60 * 1000, // 30 days

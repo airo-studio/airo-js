@@ -145,7 +145,7 @@ mount: async (host, ctx) => {
 },
 ```
 
-Pattern B — studios with their own auth/session stack skip `persist` entirely and use their existing primitives directly. Dotter studio's gates use `@dotter/auth` session tokens; Airo studio's gates use Supabase auth. Both ignore `Gate.persist` and write through the studio's existing layer.
+Pattern B — studios with their own auth/session stack skip `persist` entirely and use their existing primitives directly (e.g. session tokens from a hosted auth provider, or a self-managed session store). The studio ignores `Gate.persist` and writes through its existing layer.
 
 **Future**: a separate `@ai-ro/gate-persist` helper package may ship for greenfield studios that want a default `writeGatePersist({ key, ttl, scope })`. Opt-in. Not in `@ai-ro/core` or `@ai-ro/cartridge-kit` — those stay rendering-only.
 

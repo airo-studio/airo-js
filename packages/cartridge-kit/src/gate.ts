@@ -134,9 +134,8 @@ export interface Gate<TConfig = unknown> {
    * Studios that want a default implementation can opt into a separate
    * `@ai-ro/gate-persist` helper package (when/if it ships). Greenfield
    * studios get a working default; studios with their own auth/session
-   * stack (Dotter studio's `@dotter/auth`, Airo studio's Supabase) skip
-   * the helper and write the storage primitive themselves. Framework
-   * core stays rendering-only either way.
+   * stack skip the helper and write the storage primitive themselves.
+   * Framework core stays rendering-only either way.
    */
   persist?: {
     /** Storage key prefix, e.g. 'wtb:age-verified'. */
