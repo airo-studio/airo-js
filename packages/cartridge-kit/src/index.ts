@@ -74,10 +74,24 @@ export type {
 /** @deprecated v0.2 — use PublicationAdapter with format 'json-ld'. */
 export type { JsonLdMapper } from './json-ld-mapper.js';
 
-export type { CartridgeAppDeps } from './cartridge-app.js';
+export type {
+  Gate,
+  GateContext,
+} from './gate.js';
+
+export type {
+  RunGatesOptions,
+  RunGatesResult,
+} from './run-gates.js';
+export { runGates } from './run-gates.js';
+
+export type {
+  CartridgeAppDeps,
+  CartridgeAppResult,
+} from './cartridge-app.js';
 export { createCartridgeApp } from './cartridge-app.js';
 
 export { createCartridgeRegistry } from './cartridge-registry.js';
 
 export const PACKAGE_NAME = '@ai-ro/cartridge-kit';
-export const CONTRACT_VERSION = '0.2.0-rc.3';
+export const CONTRACT_VERSION = '0.2.0-rc.4';

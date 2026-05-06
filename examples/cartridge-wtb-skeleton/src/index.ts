@@ -16,6 +16,7 @@
 import type {
   Cartridge,
   DataSource,
+  Gate,
   McpToolDefinition,
   PostProcessor,
   PublicationAdapter,
@@ -79,6 +80,10 @@ interface WtbConfig {
   storeFinder: {
     enabled: boolean;
     googleMapsKey?: string;
+  };
+  ageVerification: {
+    enabled: boolean;
+    minAge: number;
   };
 }
 
@@ -144,12 +149,43 @@ const localeFilter: Transformer<WtbData, WtbConfig> = {
 
 // ─── 6. PostProcessor ──────────────────────────────────────────────
 
-const ageGateRouter: PostProcessor<WtbData, WtbConfig> = {
-  name: 'age-gate-router',
-  isEnabled: (_config) => true,
-  apply: (_ctx) => {
-    // Skeleton — real impl wires up navigation interception.
-    return () => undefined;
+// Skeleton placeholder — analytics / scroll restoration / ARIA hooks land here.
+const noopPostProcessor: PostProcessor<WtbData, WtbConfig> = {
+  name: 'noop',
+  isEnabled: (_config) => false,
+  apply: (_ctx) => () => undefined,
+};
+
+// ─── 6b. Gate (pre-render) ─────────────────────────────────────────
+
+// Replaces the prior `age-gate-router` PostProcessor placeholder.
+// PostProcessors run AFTER views render — too late to gate visibility.
+// Gates run BEFORE any view paints.
+const ageVerificationGate: Gate<WtbConfig> = {
+  id: 'age-verification',
+  displayName: 'Age verification',
+  isEnabled: (config) => config.ageVerification.enabled,
+
+  // Fast path — read a "verified" cookie / localStorage flag set on a
+  // prior visit. Real impl reads `document.cookie` here. Skeleton just
+  // returns 'gate-required' so the modal always paints.
+  precheck: async (_ctx) => 'gate-required',
+
+  // Real impl: paint a modal asking for DOB, validate against config.minAge,
+  // set the persistence flag on success, resolve 'allow'. On rejection,
+  // resolve 'block' — the gate's UI stays in place; framework paints
+  // nothing else.
+  mount: async (_host, _ctx) => 'allow',
+
+  destroy: () => undefined,
+
+  // Studio-side persistence convention. The Dotter studio reads this and
+  // scopes the cookie key per-tenant; airo studio (or any other) does the
+  // same. Framework writes nothing based on this metadata — it's docs.
+  persist: {
+    key: 'wtb:age-verified',
+    ttl: 30 * 24 * 60 * 60 * 1000, // 30 days
+    scope: 'persistent',
   },
 };
 
@@ -209,6 +245,7 @@ const whereToBuyTemplate: Template<WtbConfig> = {
     retailers: { enabled: [] },
     display: { showRatings: true },
     storeFinder: { enabled: false },
+    ageVerification: { enabled: false, minAge: 18 },
   },
 };
 
@@ -329,7 +366,9 @@ export const wtbCartridge: Cartridge<WtbData, WtbConfig> = {
     localeFilter,
   ],
 
-  postProcessors: [ageGateRouter],
+  postProcessors: [noopPostProcessor],
+
+  gates: [ageVerificationGate],
 
   views: [carouselView, heroView, storefrontView, storeFinderView],
 

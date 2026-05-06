@@ -11,16 +11,18 @@
  * + already-post-Transformer snapshot, and it threads everything into
  * `createApp` with the right typing.
  *
- * Why this lives in `@ai-ro/cartridge-kit` and not `@ai-ro/core` (despite
- * the consumer feedback's suggestion): putting it in core would require
- * core to depend on cartridge-kit (for the `Cartridge` and
- * `CartridgeAppContext` types), creating a circular workspace dependency.
- * Putting it here keeps core dep-free upward and the helper still ergonomic
- * — a single import from `@ai-ro/cartridge-kit` covers both contract types
- * and this wrapper.
+ * Async (returns `Promise<CartridgeAppResult>`) because pre-render Gates
+ * run BEFORE views paint, and Gates are async (precheck() may verify a
+ * token over the network, mount() awaits the user's decision). When all
+ * gates clear, the helper proceeds with `createApp` and returns the App
+ * handle. When any gate blocks, no App is created and the helper returns
+ * `{ blocked: true }` — the gate's UI stays in `host` and the framework
+ * paints nothing else.
  *
- * Studios that don't use cartridges (rare, but possible) ignore this helper
- * and call `createApp` from `@ai-ro/core` directly.
+ * Why this lives in `@ai-ro/cartridge-kit` and not `@ai-ro/core`: putting
+ * it in core would require core to depend on cartridge-kit (for `Cartridge`
+ * and gate types), creating a circular workspace dependency. Keeping it
+ * here lets core stay cartridge-unaware per M13.
  */
 
 import type {
@@ -32,6 +34,7 @@ import { createApp } from '@ai-ro/core';
 
 import type { Cartridge } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';
+import { runGates } from './run-gates.js';
 
 export interface CartridgeAppDeps<TPageType extends string = string>
   extends Omit<
@@ -43,40 +46,76 @@ export interface CartridgeAppDeps<TPageType extends string = string>
     TPageType,
     CartridgeAppContext<unknown, unknown>
   >['resolveRenderer'];
+  /**
+   * Studio-supplied scope passed through to gate `precheck` / `mount`
+   * via `GateContext.scope`. Studios with tenancy or auth use this to
+   * thread user_id / locale / country into gates without making them
+   * studio-specific.
+   */
+  gateScope?: Record<string, string | undefined>;
 }
 
+export type CartridgeAppResult =
+  | { app: App; blocked: false }
+  | { app: null; blocked: true; blockedBy: string };
+
 /**
- * Mount a cartridge against a `host` element. Builds `CartridgeAppContext`
- * from the cartridge id + config + post-Transformer snapshot, derives the
- * `resolveRenderer` callback from the cartridge's `views[]` if not supplied,
- * and delegates to `createApp` from `@ai-ro/core`.
+ * Mount a cartridge against a `host` element. Sequence:
  *
- * Snapshot is REQUIRED — there's no default. The caller has run the
- * cartridge's transformer chain (typically via `createPipeline().runTransformers`)
- * and passes the result here. The framework does not run transformers
- * automatically inside this helper — separating the pipeline from the
- * mount lets consumers decide caching, async pre-fetch, and re-mount
- * semantics without the helper second-guessing them.
+ *   1. Run pre-render gates (see `runGates`). Gates paint into `host` if
+ *      they need user input. First gate that resolves `'block'`
+ *      short-circuits — the helper returns early with `{ blocked: true }`.
+ *   2. Build `CartridgeAppContext` from cartridge id + config + snapshot.
+ *   3. Derive `resolveRenderer` from `cartridge.views[]` (or use the
+ *      override).
+ *   4. Delegate to `createApp` from `@ai-ro/core` for the actual mount.
  *
- * Returns the same `App` handle `createApp` returns.
+ * Snapshot is REQUIRED — caller has run the cartridge's transformer chain
+ * (typically via `createPipeline().runTransformers`) and passes the result
+ * here. Separating the pipeline from the mount lets consumers decide
+ * caching, async pre-fetch, and re-mount semantics.
  */
-export function createCartridgeApp<TData, TConfig, TPageType extends string = string>(
+export async function createCartridgeApp<TData, TConfig, TPageType extends string = string>(
   cartridge: Cartridge<TData, TConfig>,
   config: AppConfig<TPageType>,
   snapshot: TData,
   cartridgeConfig: TConfig,
   deps: CartridgeAppDeps<TPageType>,
-): App {
+): Promise<CartridgeAppResult> {
+  // Phase 1 — gates. Skip gracefully when the cartridge has none.
+  const gates = cartridge.gates ?? [];
+  if (gates.length > 0) {
+    const events = deps.events;
+    if (!events) {
+      throw new Error(
+        '[@ai-ro/cartridge-kit] createCartridgeApp: gates require an `events` bus on deps. Pass `events: new EventBus()` (or your existing one) so gate UIs can emit cross-component signals.',
+      );
+    }
+    const gateResult = await runGates({
+      gates,
+      host: deps.host,
+      ctx: {
+        config: cartridgeConfig,
+        events,
+        scope: deps.gateScope,
+      },
+    });
+    if (gateResult === 'block') {
+      // The first gate to block left its UI in `host`. The framework
+      // paints nothing else; caller checks `result.blocked` to decide
+      // whether to surface a "blocked by" message in the studio.
+      const blockedBy = await firstBlockedGateId(cartridge, cartridgeConfig, deps.gateScope);
+      return { app: null, blocked: true, blockedBy };
+    }
+  }
+
+  // Phase 2 — view mount.
   const appContext: CartridgeAppContext<TData, TConfig> = {
     cartridgeId: cartridge.id,
     config: cartridgeConfig,
     data: snapshot,
   };
 
-  // Default renderer resolver: walk the cartridge's views[], match on
-  // `pageType`, return the matching factory. Consumers can override for
-  // multi-cartridge studios where a single page type might be served by
-  // different cartridges depending on context.
   const resolveRenderer =
     deps.resolveRenderer ??
     ((pageType: TPageType) => {
@@ -89,13 +128,46 @@ export function createCartridgeApp<TData, TConfig, TPageType extends string = st
           : undefined;
     });
 
-  // Cast through unknown — the helper layers `CartridgeAppContext<TData, TConfig>`
-  // on top of `createApp`'s `TAppContext = CartridgeAppContext<unknown, unknown>`
-  // bound. Unification is sound because every renderer's TAppContext bound
-  // is set by the same cartridge.
-  return createApp<TPageType, CartridgeAppContext<unknown, unknown>>(config, {
+  const app = createApp<TPageType, CartridgeAppContext<unknown, unknown>>(config, {
     ...deps,
     appContext: appContext as unknown as CartridgeAppContext<unknown, unknown>,
     resolveRenderer,
   });
+
+  return { app, blocked: false };
+}
+
+/**
+ * Best-effort identification of which gate blocked. Walks the gates again
+ * (precheck-only — mount is one-shot and can't be replayed) and returns
+ * the first id whose precheck would fail. When precheck isn't implemented
+ * for the blocking gate, falls back to a generic id.
+ *
+ * Used only for the diagnostic `blockedBy` field — not on the hot path.
+ */
+async function firstBlockedGateId<TConfig>(
+  cartridge: Cartridge<unknown, TConfig>,
+  config: TConfig,
+  scope: Record<string, string | undefined> | undefined,
+): Promise<string> {
+  for (const gate of cartridge.gates ?? []) {
+    if (!gate.isEnabled(config)) continue;
+    if (!gate.precheck) {
+      // No precheck path; can't distinguish without re-running mount.
+      return gate.id;
+    }
+    // Best effort — replay precheck. Real mount() decisions can't be
+    // re-played idempotently so this is approximate.
+    try {
+      const decision = await gate.precheck({
+        config,
+        events: { on() {}, off() {}, emit() {}, once() {}, clear() {} },
+        scope,
+      });
+      if (decision === 'gate-required') return gate.id;
+    } catch {
+      return gate.id;
+    }
+  }
+  return 'unknown';
 }

@@ -20,6 +20,7 @@ import type { Template } from './template.js';
 import type { McpToolDefinition } from './mcp-tool.js';
 import type { PublicationAdapter } from './publication-adapter.js';
 import type { JsonLdMapper } from './json-ld-mapper.js';
+import type { Gate } from './gate.js';
 
 /**
  * Schema definition pluralism — Zod, JSON Schema, branded types. The
@@ -82,6 +83,18 @@ export interface Cartridge<TData = unknown, TConfig = unknown> {
    * ARIA live regions, scroll restoration. NOT for data shaping.
    */
   postProcessors?: PostProcessor<TData, TConfig>[];
+
+  /**
+   * Pre-render guards. Run sequentially BEFORE any view paints, in the
+   * order declared. Used for content-visibility decisions: age verification,
+   * geo restriction, auth check, paywall, cookie consent, country selector,
+   * maintenance mode. First gate that resolves `'block'` short-circuits;
+   * the framework refuses to mount any view.
+   *
+   * Sync precheck path skips visible UI for already-cleared users (cookie,
+   * verified token, IP-based geo). Async by design.
+   */
+  gates?: Gate<TConfig>[];
 
   /** Views — PageRenderer factories, keyed by page.type. */
   views: ViewDefinition<TData, TConfig>[];
