@@ -12,6 +12,21 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  examples/cartridge-wtb-skeleton:
+    dependencies:
+      '@ai-ro/cartridge-kit':
+        specifier: workspace:*
+        version: link:../../packages/cartridge-kit
+      '@ai-ro/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  examples/publication-adapter-skeleton:
+    dependencies:
+      '@ai-ro/cartridge-kit':
+        specifier: workspace:*
+        version: link:../../packages/cartridge-kit
+
   packages/cartridge-kit:
     dependencies:
       '@ai-ro/core':

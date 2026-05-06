@@ -1,0 +1,16 @@
+{
+  "name": "@ai-ro-examples/publication-adapter-skeleton",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Throwaway type-skeleton: stresses the @ai-ro/cartridge-kit PublicationAdapter primitive with two adapters (Schema.org JSON-LD + Merchant Center XML) sharing a common schema. Compiles only — does not run.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@ai-ro/cartridge-kit": "workspace:*"
+  }
+}

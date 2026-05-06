@@ -1,0 +1,17 @@
+{
+  "name": "@ai-ro-examples/cartridge-wtb-skeleton",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Throwaway type-skeleton: validates the @ai-ro/cartridge-kit contract against a real WTB-shaped cartridge (Product/Retailer/Offer schema). Compiles only — does not run.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@ai-ro/cartridge-kit": "workspace:*",
+    "@ai-ro/core": "workspace:*"
+  }
+}

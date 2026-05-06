@@ -1,13 +1,37 @@
 /**
  * @ai-ro/core — runtime engine.
  *
- * Source extraction lands in Phase 0 of the migration plan
- * (dotter-widget-studio/.claude/plans/airo-studio-v0-migration.md).
- * This package will receive the contents of `src/framework/` from
- * dotter-widget-studio: createApp, PageManager, EventBus, Theme,
- * setupIsolationRoot/wrapInShadow/resolveStyleRoot, registry mailbox.
+ * Public surface used by @ai-ro/cartridge-kit, @ai-ro/runtime,
+ * @ai-ro/ssr, and downstream consumers. Everything exported from here is
+ * semver-stable for the package's major version.
  *
- * Until then this is an empty placeholder so the workspace builds.
+ * Phase 0 in flight: types are seeded from dotter-widget-studio's
+ * `src/framework/`. Lifecycle (createApp, PageManager, Theme, IsolationRoot)
+ * and the registry mailbox land in subsequent commits.
  */
+
+export type {
+  EventCallback,
+  IEventBus,
+} from './events.js';
+export { EventBus } from './events.js';
+
+export type {
+  PageId,
+  ComponentSettings,
+  Slot,
+  Region,
+  PageLayout,
+  Page,
+  AppConfig,
+} from './schema.js';
+
+export type {
+  NavigationState,
+  SubpageActivation,
+  RenderContext,
+  PageRenderer,
+  PageRendererFactory,
+} from './page.js';
 
 export const PACKAGE_NAME = '@ai-ro/core';
