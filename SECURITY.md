@@ -8,11 +8,11 @@ We aim to acknowledge reports within 3 business days and provide a remediation t
 
 ## Trust posture
 
-`airo-js` is a rendering substrate that runs in customer browsers. The threat model lives in the consuming studio, not here, but a few invariants the framework upholds:
+`airo-js` is a rendering substrate that runs in end-user browsers. The threat model lives in the consuming application, not here, but a few invariants the framework upholds:
 
 - **No data exfiltration paths in the framework.** Core renders config + feed; it does not initiate network calls beyond what cartridges explicitly declare via DataSourceAdapter.
 - **Style isolation strategies are the boundary** between widget CSS and host page CSS — `partial` and `full` modes attach a Shadow DOM. `none` is opt-out and documented.
-- **No secrets in framework code.** API keys, tokens, signed bundles are studio-side concerns.
+- **No secrets in framework code.** API keys, tokens, signed bundles are host-app concerns.
 
 ## Signed-bundle work
 

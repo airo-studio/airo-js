@@ -2,7 +2,7 @@
 
 **The rendering-only substrate behind config-driven, plugin-loaded UI.**
 
-`airo-js` is the framework cartridges build on. It owns rendering, lifecycle, style isolation, page routing, and the cartridge-kit contract — and **nothing else**. Drafts, history, auth, tenancy, tokens, and per-studio storage are explicitly outside the framework.
+`airo-js` is the framework cartridges build on. It owns rendering, lifecycle, style isolation, page routing, and the cartridge-kit contract — and **nothing else**. Drafts, history, auth, tenancy, tokens, and per-app storage are explicitly outside the framework.
 
 ## Status
 
@@ -24,7 +24,7 @@ See `CHANGELOG.md` for what's landing where.
 ## Hard scope line
 
 Rendering, lifecycle, style isolation, page routing, MCP tool emission, runtime-agnostic SSR dispatch — yes.
-Drafts, history, auth, tenancy, scope isolation, draft locks, token rotation, load endpoints, row-level security — **never** here. Those live in consuming studios, not in the framework.
+Drafts, history, auth, tenancy, scope isolation, draft locks, token rotation, load endpoints, row-level security — **never** here. Those live in consuming applications, not in the framework.
 
 ## Development
 

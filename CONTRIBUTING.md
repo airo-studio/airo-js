@@ -53,21 +53,21 @@ yalc add @airo-js/core @airo-js/runtime @airo-js/ssr @airo-js/embed @airo-js/mcp
 
 Subsequent updates: nothing to do if airo-js publisher used `pnpm yalc:push`. If they used `pnpm yalc:publish`, run `yalc update` to pull the latest store hash.
 
-### When to switch to a real npm publish
+### yalc vs npm
 
-Once cartridge-kit hits `0.2.0` (post-validation, see migration plan §Phase 0 done criteria), we publish to npm under the `@airo-js` scope. Consumer repos then `pnpm install @airo-js/core@^0.2` and stop using yalc for that package's surface. Yalc stays useful for `0.x` iteration on packages that aren't yet stable.
+Stable releases are published to npm under the `@airo-js` scope; consume them via `pnpm add @airo-js/core` etc. Use yalc only when iterating on a not-yet-released change locally and you want a downstream consumer to pick it up before publish.
 
 ## What lands in this repo
 
 - Rendering, lifecycle, style isolation, page routing, theme engine
-- Cartridge-kit primitives (DataSource, View, MCP tool, Template)
+- Cartridge-kit primitives (DataSource, View, MCP tool, Template, PublicationAdapter, Gate)
 - Embed bootstrap loader
 - SSR dispatch (runtime-agnostic)
 
 ## What does NOT land here
 
-- Auth, tenancy, drafts, history, locks, token rotation, load endpoints, row-level security — these are studio concerns. During the v0.0.x extraction window, see `airo-studio-v0-migration.md` (in `dotter-widget-studio`) for the migration decisions.
-- Cartridge implementations themselves. Cartridges live in their consuming studio's repo. During the v0.0.x extraction, reference implementations live in private downstream codebases (`dotter-monorepo`, `dotter-widget-studio`); they are not redistributed here.
+- Auth, tenancy, drafts, history, locks, token rotation, load endpoints, row-level security — these are host-app concerns and live outside the framework.
+- Cartridge implementations themselves. Cartridges live in the consuming application's own repository, not here.
 
 ## Code style
 
