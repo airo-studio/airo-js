@@ -18,4 +18,4 @@ We aim to acknowledge reports within 3 business days and provide a remediation t
 
 A signed-bundle / Ed25519 spike exists in a private downstream codebase but is **not** loaded in v0. Path C work stays a spike and does not block v0.
 
-When signed bundles do ship, they will land as a separate `@ai-ro/runtime-verifier` package alongside the L1/L2 sanitiser, with its own threat-model doc and an explicit release note.
+When signed bundles do ship, they will land as a separate `@airo-js/runtime-verifier` package alongside the L1/L2 sanitiser, with its own threat-model doc and an explicit release note.

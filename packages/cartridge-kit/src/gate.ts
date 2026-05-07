@@ -35,7 +35,7 @@
  * completes, or skip SSR for gated entry pages.
  */
 
-import type { IEventBus } from '@ai-ro/core';
+import type { IEventBus } from '@airo-js/core';
 
 export interface GateContext<TConfig> {
   /** The cartridge's config — same shape every other primitive sees. */
@@ -43,8 +43,8 @@ export interface GateContext<TConfig> {
   /** App-level event bus. Gates can listen and emit (e.g. `auth:login`). */
   events: IEventBus;
   /**
-   * Studio-supplied scope. Optional and opaque to the framework — studios
-   * pass whatever scoping their tenancy / locale / user model needs.
+   * Host-app-supplied scope. Optional and opaque to the framework — host
+   * apps pass whatever scoping their tenancy / locale / user model needs.
    * Auth gates typically read user_id from here; geo gates read country.
    */
   scope?: Record<string, string | undefined>;
@@ -107,35 +107,36 @@ export interface Gate<TConfig = unknown> {
 
   /**
    * Persistence convention — METADATA ONLY. Cartridge declares the hint;
-   * the studio implements the actual storage write.
+   * the host app implements the actual storage write.
    *
    * **The framework writes NOTHING based on this field.** Decision
-   * locked-in for v0.2 (and load-bearing for the framework's M13 scope
-   * line), three reasons:
+   * locked-in for v0.2 (load-bearing for the framework's rendering-only
+   * scope line), three reasons:
    *
    *   1. **Cookie writes are state management, not rendering.** Letting
-   *      the framework own them violates M13. Each "small extension"
-   *      (sameSite/domain rules, rotation policy, "refresh on focus",
-   *      auth-token interaction) quietly redefines "rendering-only"
-   *      until it isn't. Reject the category, not just the instance.
+   *      the framework own them violates the rendering-only scope line.
+   *      Each "small extension" (sameSite/domain rules, rotation policy,
+   *      "refresh on focus", auth-token interaction) quietly redefines
+   *      "rendering-only" until it isn't. Reject the category, not just
+   *      the instance.
    *
-   *   2. **Cookie semantics are studio concerns.** Different studios
+   *   2. **Cookie semantics are host-app concerns.** Different host apps
    *      have different domains, sameSite policies, SSO interactions,
    *      GDPR/CCPA compliance shapes. The framework can't standardise
    *      this without picking sides — and picking sides means forking
-   *      per-studio Gate behaviour later.
+   *      per-host-app Gate behaviour later.
    *
    *   3. **Contract precedent.** `DataSource.cacheTtlMs` is exactly this
-   *      shape: cartridge declares the hint, studio implements caching.
+   *      shape: cartridge declares the hint, host app implements caching.
    *      `Gate.persist` fits the same envelope — cartridge declares
-   *      `{ key, ttl, scope }`, studio writes whatever storage primitive
+   *      `{ key, ttl, scope }`, host app writes whatever storage primitive
    *      matches its compliance posture.
    *
-   * Studios that want a default implementation can opt into a separate
-   * `@ai-ro/gate-persist` helper package (when/if it ships). Greenfield
-   * studios get a working default; studios with their own auth/session
-   * stack skip the helper and write the storage primitive themselves.
-   * Framework core stays rendering-only either way.
+   * Host apps that want a default implementation can opt into a separate
+   * `@airo-js/gate-persist` helper package (when/if it ships). Greenfield
+   * apps get a working default; apps with their own auth/session stack
+   * skip the helper and write the storage primitive themselves. Framework
+   * core stays rendering-only either way.
    */
   persist?: {
     /** Storage key prefix, e.g. 'wtb:age-verified'. */

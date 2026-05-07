@@ -35,7 +35,7 @@ import type {
   PublicationAdapter,
   PublicationContext,
   ValidationResult,
-} from '@ai-ro/cartridge-kit';
+} from '@airo-js/cartridge-kit';
 
 export interface RunPublicationOptions {
   /** Allowlist by adapter id. Empty/undefined = include all. */
@@ -55,7 +55,7 @@ export interface AdapterRunResult {
   /**
    * True when the caller should publish this output. False when
    * `onValidationFail: 'block-publish'` (the default) and validation
-   * failed — output is in the result for diagnostic, but the studio
+   * failed — output is in the result for diagnostic, but the host app
    * MUST NOT serve it downstream.
    */
   included: boolean;
@@ -85,7 +85,7 @@ export async function runPublicationAdapters<TData, TConfig>(
   for (const adapter of adapters) {
     if (idAllow && !idAllow.has(adapter.id)) continue;
     if (formatAllow && !formatAllow.has(adapter.format)) continue;
-    const delivery = adapter.delivery ?? 'studio-decides';
+    const delivery = adapter.delivery ?? 'host-decides';
     if (deliveryAllow && !deliveryAllow.has(delivery)) continue;
 
     const output = await adapter.generate(snapshot, ctx);
@@ -94,7 +94,7 @@ export async function runPublicationAdapters<TData, TConfig>(
 
     if (!validation.valid && policy === 'fail-loud') {
       const err = new Error(
-        `[@ai-ro/ssr] PublicationAdapter "${adapter.id}" validation failed (onValidationFail='fail-loud'). ` +
+        `[@airo-js/ssr] PublicationAdapter "${adapter.id}" validation failed (onValidationFail='fail-loud'). ` +
           (validation.errors[0]?.message ?? 'no error message'),
       );
       throw err;

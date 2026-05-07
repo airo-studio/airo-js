@@ -1,11 +1,11 @@
 /**
  * Template — pre-composed (view-set, default config) bundle.
  *
- * Studios render one card per template in the picker. The user picks a
- * template, the studio instantiates the cartridge's defaultConfig with
- * any template-specific overrides, and the framework builds the AppConfig
- * from `pages[]`. Maps cleanly to `@ai-ro/core`'s `Page<T>` shape — see
- * AppConfig there.
+ * Host apps render one card per template in the picker. The user picks
+ * a template, the host app instantiates the cartridge's defaultConfig
+ * with any template-specific overrides, and the framework builds the
+ * AppConfig from `pages[]`. Maps cleanly to `@airo-js/core`'s `Page<T>`
+ * shape — see AppConfig there.
  *
  * Templates configure pages + a config envelope; they don't carry data
  * shape — so the type parameter is only `TConfig`. Cartridges that need
@@ -19,7 +19,7 @@ export interface Template<TConfig> {
   description: string;
 
   /**
-   * Pages this template instantiates. Shape matches `@ai-ro/core`'s `Page<T>`
+   * Pages this template instantiates. Shape matches `@airo-js/core`'s `Page<T>`
    * (subset — full layout/styles get filled by the cartridge's defaultConfig).
    */
   pages: Array<{

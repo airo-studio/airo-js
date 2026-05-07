@@ -1,6 +1,6 @@
 /**
  * ViewDefinition — cartridge-shaped wrapper around the framework's
- * existing PageRenderer. Studio shell uses the metadata for the template
+ * existing PageRenderer. The host app uses the metadata for the template
  * picker; the framework uses the factory at render time.
  *
  * The view's `pageType` matches `Page.type` — what the framework dispatches
@@ -8,11 +8,11 @@
  * the cartridge picks which factory wins via its template.
  */
 
-import type { PageRendererFactory } from '@ai-ro/core';
+import type { PageRendererFactory } from '@airo-js/core';
 
 /**
- * The shape `RenderContext.app` carries when the host is a cartridge-aware
- * studio. This is THE consumer-side constraint the cartridge contract adds:
+ * The shape `RenderContext.app` carries in a cartridge-aware host app.
+ * This is THE consumer-side constraint the cartridge contract adds:
  * when a cartridge view renders, `app` is `CartridgeAppContext` (config +
  * post-transformer data + cartridge id), not arbitrary.
  */
@@ -30,15 +30,15 @@ export interface ViewDefinition<TData, TConfig> {
   pageType: string;
 
   /**
-   * PageRendererFactory from @ai-ro/core — unchanged from the framework's
+   * PageRendererFactory from @airo-js/core — unchanged from the framework's
    * existing contract. Cartridge views are PageRenderers with the typed
    * `RenderContext.app` constraint above.
    */
   factory: PageRendererFactory<string, CartridgeAppContext<TData, TConfig>>;
 
-  /** Studio template picker affordance. Optional. */
+  /** Host-app template picker affordance. Optional. */
   preview?: { thumbnail: string; description: string };
 
-  /** Capabilities the studio cares about for filtering / SSR routing. */
+  /** Capabilities the host app cares about for filtering / SSR routing. */
   capabilities?: ('responsive' | 'ssr-safe' | 'hydratable' | 'csr-only')[];
 }

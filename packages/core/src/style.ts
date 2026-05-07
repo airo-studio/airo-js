@@ -8,7 +8,7 @@
  *   'partial' — attach shadow root. Widget styles scoped to the shadow.
  *               Inherited CSS properties (font-family, color, line-height,
  *               letter-spacing) still cascade in from the host page so
- *               the widget adopts the customer's typography.
+ *               the widget adopts the host page's typography.
  *   'full'    — same shadow root, plus `:host { all: initial }` so even
  *               inherited properties are blocked. Total sandbox.
  *
@@ -129,14 +129,14 @@ export function resolveStyleRoot(target: Node): ShadowRoot | HTMLHeadElement {
   const ownerDoc = (target as { ownerDocument?: Document }).ownerDocument
     ?? (typeof document !== 'undefined' ? document : null);
   if (!ownerDoc) {
-    throw new Error('[@ai-ro/core] resolveStyleRoot: no ownerDocument and no global document');
+    throw new Error('[@airo-js/core] resolveStyleRoot: no ownerDocument and no global document');
   }
   return ownerDoc.head;
 }
 
 /**
  * 'full' mode: reset every inherited property at the shadow host so
- * customer page CSS can't bleed in through inheritance. `all: initial`
+ * host page CSS can't bleed in through inheritance. `all: initial`
  * covers font, color, line-height, letter-spacing, direction, etc. in
  * one line — Shadow DOM blocks everything else already.
  *
@@ -155,7 +155,7 @@ function injectHostReset(shadow: ShadowRoot): void {
  * on the shadow wrapper and its descendants. Widget colors, spacing,
  * layout, themed CSS variables stay as authored; font/line-height/
  * letter-spacing inherit from the host page so the widget adopts the
- * customer's typography.
+ * host page's typography.
  *
  * Cartridges that explicitly set these properties on specific components
  * will win specificity over this rule (correct behaviour — `font-family:

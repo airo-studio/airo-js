@@ -7,7 +7,7 @@
  * (via `runPublicationAdapters`), and inlines the `inline-in-host`
  * outputs as `<script type="application/ld+json">` tags before the
  * widget markup. Returns the combined HTML plus per-adapter results
- * so the studio can audit / log / publish non-inline outputs separately.
+ * so the host app can audit / log / publish non-inline outputs separately.
  *
  * What gets inlined:
  *   - format `'json-ld'` adapters with `delivery: 'inline-in-host'`,
@@ -16,25 +16,25 @@
  *
  * What's NOT inlined:
  *   - non-`json-ld` formats (XML feeds, MCP-tool manifests, etc).
- *     Studios deliver these via signed URLs / out-of-band channels.
+ *     Host apps deliver these via signed URLs / out-of-band channels.
  *     They still appear in `adapterResults` for visibility.
  *   - `inline-in-host` adapters that failed validation under the default
  *     `'block-publish'` policy. Output is in the result (`included: false`)
  *     for diagnostic, but never served.
  *
- * Inline placement: JSON-LD scripts go BEFORE the widget HTML. Customers
- * embedding the SSR response into a `<head>`-or-`<body>` slot on their
- * page get the structured data and the widget markup as one blob.
+ * Inline placement: JSON-LD scripts go BEFORE the widget HTML. Host apps
+ * embedding the SSR response into a `<head>`-or-`<body>` slot on the page
+ * get the structured data and the widget markup as one blob.
  */
 
 import type {
   AppConfig,
   PageRendererFactory,
-} from '@ai-ro/core';
+} from '@airo-js/core';
 import type {
   Cartridge,
   PublicationContext,
-} from '@ai-ro/cartridge-kit';
+} from '@airo-js/cartridge-kit';
 
 import {
   renderAppToHTML,
@@ -63,7 +63,7 @@ export interface RenderWithPublicationOptions<
   document?: Document;
   /**
    * Page-renderer resolver. Defaults to `cartridge.views[]` lookup; override
-   * for multi-cartridge studios using `registry.resolverFor(cartridgeId)`.
+   * for multi-cartridge host apps using `registry.resolverFor(cartridgeId)`.
    */
   resolveRenderer?: (
     pageType: TPageType,
@@ -114,8 +114,8 @@ export async function renderAppWithPublication<
         | undefined;
     });
 
-  // Default filter: inline JSON-LD only. Studios that want everything pass
-  // an empty filter or explicit overrides.
+  // Default filter: inline JSON-LD only. Host apps that want everything
+  // pass an empty filter or explicit overrides.
   const filter: RunPublicationOptions = opts.publicationFilter ?? {
     formats: ['json-ld'],
     deliveries: ['inline-in-host'],
@@ -145,7 +145,7 @@ export async function renderAppWithPublication<
 
   // Stitch — JSON-LD blocks (in adapter declaration order) ahead of the
   // widget markup. Non-inline adapter outputs stay in adapterResults for
-  // the studio to consume out-of-band.
+  // the host app to consume out-of-band.
   const inlineScripts = adapterResults
     .filter(
       (r) =>

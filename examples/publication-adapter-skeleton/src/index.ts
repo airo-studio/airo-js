@@ -19,7 +19,7 @@ import type {
   PublicationAdapter,
   PublicationContext,
   ValidationResult,
-} from '@ai-ro/cartridge-kit';
+} from '@airo-js/cartridge-kit';
 
 // ─── Shared schema (mirrors a slice of WtbData) ────────────────────
 

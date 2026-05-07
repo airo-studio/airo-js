@@ -20,10 +20,10 @@ export interface ToolContext<TData, TConfig> {
   locale?: string;
 
   /**
-   * Studio-supplied scope. Optional and opaque to the framework — studios
-   * pass whatever scoping their tenancy model requires (e.g. tenant_id,
-   * locale, user_id). Cartridges read what they need; tools that don't
-   * need scope ignore.
+   * Host-app-supplied scope. Optional and opaque to the framework — host
+   * apps pass whatever scoping their tenancy model requires (e.g.
+   * tenant_id, locale, user_id). Cartridges read what they need; tools
+   * that don't need scope ignore.
    */
   scope?: Record<string, string | undefined>;
 }

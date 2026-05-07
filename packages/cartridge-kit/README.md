@@ -1,6 +1,6 @@
-# `@ai-ro/cartridge-kit`
+# `@airo-js/cartridge-kit`
 
-The cartridge contract for the airo framework. Defines the API surface every cartridge implements and every studio shell consumes.
+The cartridge contract for the airo framework. Defines the API surface every cartridge implements and every host application consumes.
 
 > Status: **v0.2.0-rc.x**. Validation pair (WTB skeleton + PublicationAdapter pair skeleton) compiles. Surface still subject to refinement; cartridges should target `^0.2` until `1.0` ships.
 
@@ -8,7 +8,7 @@ The cartridge contract for the airo framework. Defines the API surface every car
 
 - `Cartridge<TData, TConfig>` — the envelope every cartridge implements
 - `DataSource` — onboarding affordances + data-loading shape
-- `Transformer` / `PostProcessor` / `RuntimePipeline` — runtime pipeline (re-exported from `@ai-ro/core`; pipeline orchestration is rendering, M13)
+- `Transformer` / `PostProcessor` / `RuntimePipeline` — runtime pipeline (re-exported from `@airo-js/core` because pipeline orchestration is rendering, and rendering belongs to the framework)
 - `ViewDefinition` + `CartridgeAppContext` — typed wrapper around the framework's `PageRenderer`
 - `Template<TConfig>` — pre-composed view-set + default config
 - `McpToolDefinition` — agent-facing tools (POST-transformer data)
@@ -18,8 +18,8 @@ The cartridge contract for the airo framework. Defines the API surface every car
 ## Three contract guarantees
 
 1. **Snapshot fidelity.** Views, MCP tools, and publication adapters all consume the SAME post-Transformer snapshot. No drift between what the rendered widget shows, what an agent answers, and what a downstream indexer consumes.
-2. **Coverage gating.** Adapters declare `requires` (schema field paths). The framework can skip an adapter when required fields are absent rather than emit broken output. Studios surface "this adapter needs field X" to the user via this metadata.
-3. **Validation as a hard gate.** `validate(output)` runs before the studio publishes. If `valid: false`, the studio refuses to serve the output. Output trust > publish velocity.
+2. **Coverage gating.** Adapters declare `requires` (schema field paths). The framework can skip an adapter when required fields are absent rather than emit broken output. Host apps surface "this adapter needs field X" to the user via this metadata.
+3. **Validation as a hard gate.** `validate(output)` runs before the host app publishes. If `valid: false`, the host app refuses to serve the output. Output trust > publish velocity.
 
 ## Authoring conventions
 
@@ -71,7 +71,7 @@ This is **transparent**: no build-time magic, no conditional exports tooling. Ca
 
 ### errorPolicy on Transformers
 
-Each Transformer can declare `errorPolicy: 'fail-render' | 'skip'`. Default is `'fail-render'` — when a transform throws, the render breaks (mirrors v1 production). Pick `'skip'` only for transforms whose absence degrades gracefully (sort, enrichment). **Never** use `'skip'` for filters whose absence widens visibility past a tenant's configured scope.
+Each Transformer can declare `errorPolicy: 'fail-render' | 'skip'`. Default is `'fail-render'` — when a transform throws, the render breaks. Pick `'skip'` only for transforms whose absence degrades gracefully (sort, enrichment). **Never** use `'skip'` for filters whose absence widens visibility past a tenant's configured scope.
 
 ```ts
 const enrichWithRatings: Transformer<MyData, MyConfig> = {
@@ -91,10 +91,10 @@ const filterByTenant: Transformer<MyData, MyConfig> = {
 
 ### Default RuntimePipeline implementation
 
-Studios that want default semantics use `createPipeline` from `@ai-ro/core`:
+Host apps that want default semantics use `createPipeline` from `@airo-js/core`:
 
 ```ts
-import { createPipeline } from '@ai-ro/core';
+import { createPipeline } from '@airo-js/core';
 
 const pipeline = createPipeline(cartridge.transformers ?? [], cartridge.postProcessors ?? []);
 
@@ -107,13 +107,13 @@ const teardown = pipeline.runPostProcessors({ container, config, data: snapshot,
 teardown();
 ```
 
-Studios with custom semantics (async support, custom error reporting, OTel tracing) implement their own `RuntimePipeline<TData, TConfig>`.
+Host apps with custom semantics (async support, custom error reporting, OTel tracing) implement their own `RuntimePipeline<TData, TConfig>`.
 
 ### Gate persistence is metadata, not behaviour
 
-`Gate.persist` is a hint cartridges declare; **the framework writes nothing based on it**. Studios implement the actual storage primitive — cookies, localStorage, server-side session table — with their own compliance posture (sameSite, domain rules, GDPR scope, SSO interaction).
+`Gate.persist` is a hint cartridges declare; **the framework writes nothing based on it**. Host apps implement the actual storage primitive — cookies, localStorage, server-side session table — with their own compliance posture (sameSite, domain rules, GDPR scope, SSO interaction).
 
-This mirrors how `DataSource.cacheTtlMs` works: cartridge declares the hint, studio decides actual cache policy. Same shape, same envelope.
+This mirrors how `DataSource.cacheTtlMs` works: cartridge declares the hint, host app decides actual cache policy. Same shape, same envelope.
 
 ```ts
 const ageGate: Gate<MyConfig> = {
@@ -127,48 +127,48 @@ const ageGate: Gate<MyConfig> = {
 };
 ```
 
-**Studio side**, two patterns. Pattern A — read in `precheck`, write before `mount` returns `'allow'`:
+**Host-app side**, two patterns. Pattern A — read in `precheck`, write before `mount` returns `'allow'`:
 
 ```ts
 precheck: async (ctx) => {
-  const cookie = readMyStudioCookie(myGate.persist.key);
+  const cookie = readMyAppCookie(myGate.persist.key);
   return cookie && !expired(cookie) ? 'allow' : 'gate-required';
 },
 
 mount: async (host, ctx) => {
   // ... paint UI, await user verification
   if (verified) {
-    writeMyStudioCookie(myGate.persist.key, { /* ... */ }, myGate.persist.ttl);
+    writeMyAppCookie(myGate.persist.key, { /* ... */ }, myGate.persist.ttl);
     return 'allow';
   }
   return 'block';
 },
 ```
 
-Pattern B — studios with their own auth/session stack skip `persist` entirely and use their existing primitives directly (e.g. session tokens from a hosted auth provider, or a self-managed session store). The studio ignores `Gate.persist` and writes through its existing layer.
+Pattern B — host apps with their own auth/session stack skip `persist` entirely and use their existing primitives directly (e.g. session tokens from a hosted auth provider, or a self-managed session store). The host app ignores `Gate.persist` and writes through its existing layer.
 
-**Future**: a separate `@ai-ro/gate-persist` helper package may ship for greenfield studios that want a default `writeGatePersist({ key, ttl, scope })`. Opt-in. Not in `@ai-ro/core` or `@ai-ro/cartridge-kit` — those stay rendering-only.
+**Future**: a separate `@airo-js/gate-persist` helper package may ship for greenfield apps that want a default `writeGatePersist({ key, ttl, scope })`. Opt-in. Not in `@airo-js/core` or `@airo-js/cartridge-kit` — those stay rendering-only.
 
 ## Boot sequence
 
-A studio shell mounting a cartridge follows this sequence:
+A host app mounting a cartridge follows this sequence:
 
 ```ts
-import { createApp } from '@ai-ro/core';
+import { createApp } from '@airo-js/core';
 import {
   createCartridgeRegistry,
   createCartridgeApp,
   createPipeline,
-} from '@ai-ro/cartridge-kit';
+} from '@airo-js/cartridge-kit';
 
 import { wtbCartridge } from '@my-org/wtb-cartridge';
 
-// 1. Build the registry. Multi-cartridge studios pass an array; single-
-//    cartridge studios pass one. Cartridges can also be added later via
+// 1. Build the registry. Multi-cartridge apps pass an array; single-
+//    cartridge apps pass one. Cartridges can also be added later via
 //    registry.register(...).
 const registry = createCartridgeRegistry([wtbCartridge]);
 
-// 2. Studio user picks a template (UI-driven). For headless boot, default
+// 2. The end user picks a template (UI-driven). For headless boot, default
 //    to cartridge.defaultTemplateId.
 const cartridge = registry.get('wtb')!;
 const template = cartridge.templates.find(
@@ -177,7 +177,7 @@ const template = cartridge.templates.find(
 
 // 3. Build the AppConfig the framework consumes. Pages come from the
 //    template; layout/styles default to whatever the cartridge ships
-//    in its component metadata. Studios with their own page editor
+//    in its component metadata. Host apps with their own page editor
 //    rewrite the page tree here.
 const appConfig = {
   appId: 'my-widget-id',
@@ -210,7 +210,7 @@ const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
 
 ### Multi-cartridge resolution
 
-When a studio runs more than one cartridge, pass `registry.resolverFor(cartridgeId)` instead of letting `createCartridgeApp` walk a single cartridge's `views[]`:
+When a host app runs more than one cartridge, pass `registry.resolverFor(cartridgeId)` instead of letting `createCartridgeApp` walk a single cartridge's `views[]`:
 
 ```ts
 const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
@@ -219,7 +219,7 @@ const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
 });
 ```
 
-The registry's resolver checks the cartridge's static `views[]` first, then falls back to the per-cartridge chunk mailbox (named by `cartridge.mailboxName`). Cartridges shipping views as separate chunks register them via `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })` from each chunk's IIFE — same pattern as v1's plugin self-registration.
+The registry's resolver checks the cartridge's static `views[]` first, then falls back to the per-cartridge chunk mailbox (named by `cartridge.mailboxName`). Cartridges shipping views as separate chunks register them via `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })` from each chunk's IIFE — a stub-queue pattern that lets late-loading chunks register themselves whenever they finish loading.
 
 ## Validation skeletons
 
@@ -232,7 +232,7 @@ Run `pnpm typecheck` from the workspace root to verify both still compile.
 
 ## Contract feedback loop
 
-Cartridge authors finding gaps in the contract: open an issue with a minimal repro. The contract's verification gate (per the migration plan §M6) is "the WTB cartridge + at least one PublicationAdapter pair compile, with no `any`." If your cartridge needs `any` to fit the contract, that's a gap worth surfacing.
+Cartridge authors finding gaps in the contract: open an issue with a minimal repro. The contract's verification bar is "a real cartridge compiles with at least one PublicationAdapter, with no `any`." If your cartridge needs `any` to fit the contract, that's a gap worth surfacing.
 
 ## License
 

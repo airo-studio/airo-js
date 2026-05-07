@@ -15,7 +15,7 @@
  *
  * Apps narrow `RouteState` to declare which keys they actually use; the
  * `pathContextKey` option lets the host pick which key occupies the
- * second path segment (the v1 default was `productId`).
+ * second path segment.
  */
 
 export interface RouteState {
@@ -140,7 +140,7 @@ export class HashRouter implements IHashRouter {
         this.onNavigate(state);
       }
     } catch (error) {
-      console.error('[@ai-ro/core] HashRouter error handling hash change:', error);
+      console.error('[@airo-js/core] HashRouter error handling hash change:', error);
     }
   }
 }

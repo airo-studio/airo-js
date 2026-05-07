@@ -5,9 +5,9 @@
  * (views, MCP tools, publication adapters) read the SAME post-Transformer
  * snapshot.
  *
- * Why these types live in `@ai-ro/core` and not in `@ai-ro/cartridge-kit`:
- * pipeline orchestration IS rendering. Per M13 (rendering-only framework),
- * the runtime types belong in `@ai-ro/core`. `@ai-ro/cartridge-kit`
+ * Why these types live in `@airo-js/core` and not in `@airo-js/cartridge-kit`:
+ * pipeline orchestration IS rendering. The framework is rendering-only, so
+ * the runtime types belong in `@airo-js/core`. `@airo-js/cartridge-kit`
  * re-exports them for cartridge-author convenience — same names, single
  * source of truth.
  *
@@ -39,8 +39,8 @@ export interface Transformer<TData, TConfig = unknown> {
   /**
    * What the orchestrator does when `transform` throws.
    *   - `'fail-render'` (default): error propagates up; render path breaks.
-   *     Mirrors v1 production behaviour. Pick this when a broken transform
-   *     should block the entire widget rather than emit subtly-wrong data.
+   *     Pick this when a broken transform should block the entire widget
+   *     rather than emit subtly-wrong data.
    *   - `'skip'`: log the error and pass the input data through untouched.
    *     Pick this for transforms whose absence degrades gracefully (sort,
    *     enrichment) but never for filters whose absence widens the data

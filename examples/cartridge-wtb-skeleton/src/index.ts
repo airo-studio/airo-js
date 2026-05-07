@@ -1,7 +1,7 @@
 /**
  * WTB cartridge type skeleton.
  *
- * Validates the @ai-ro/cartridge-kit contract against a real cartridge
+ * Validates the @airo-js/cartridge-kit contract against a real cartridge
  * shape — Where-to-Buy: Products with Retailers and Offers. Every primitive
  * the contract defines is exercised here so contract gaps surface as
  * type errors before the framework ships.
@@ -25,8 +25,8 @@ import type {
   Transformer,
   ValidationResult,
   ViewDefinition,
-} from '@ai-ro/cartridge-kit';
-import type { PageRenderer } from '@ai-ro/core';
+} from '@airo-js/cartridge-kit';
+import type { PageRenderer } from '@airo-js/core';
 
 // ─── 1. Schema (TData) ─────────────────────────────────────────────
 

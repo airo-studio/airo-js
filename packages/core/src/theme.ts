@@ -6,9 +6,9 @@
  * variable on the target element. Domain code owns the mapping from its
  * config shape (light/dark colors, shadow levels, …) to this token bag.
  *
- * `customCSS` is appended verbatim into the style root. It's the
- * mechanism the studio's AI Customizer + customer-author CSS escapes
- * use to override the runtime stylesheet without forking the build.
+ * `customCSS` is appended verbatim into the style root. It's the escape
+ * hatch host apps use to override the runtime stylesheet without forking
+ * the build (e.g. host-app CSS overrides, AI-generated customisations).
  */
 
 export interface ThemeOptions {

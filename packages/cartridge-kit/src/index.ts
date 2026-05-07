@@ -1,5 +1,5 @@
 /**
- * @ai-ro/cartridge-kit — the cartridge contract.
+ * @airo-js/cartridge-kit — the cartridge contract.
  *
  * The highest-stakes API surface in airo-js. v0.2 promotes
  * `PublicationAdapter` to a first-class primitive for fanning post-pipeline
@@ -11,7 +11,7 @@
  *      consume the SAME post-Transformer snapshot. No drift between what
  *      the user sees, what an agent answers, and what indexers consume.
  *   2. Coverage gating — adapters declare required schema field paths;
- *      framework skips broken outputs; studio surfaces gaps to the user.
+ *      framework skips broken outputs; host app surfaces gaps to the user.
  *   3. Validation as hard gate — `validate(output)` blocks publish on
  *      failure. Output trust > publish velocity.
  *
@@ -93,5 +93,5 @@ export { createCartridgeApp } from './cartridge-app.js';
 
 export { createCartridgeRegistry } from './cartridge-registry.js';
 
-export const PACKAGE_NAME = '@ai-ro/cartridge-kit';
+export const PACKAGE_NAME = '@airo-js/cartridge-kit';
 export const CONTRACT_VERSION = '0.2.0-rc.4';

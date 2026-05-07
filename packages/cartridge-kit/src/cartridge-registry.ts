@@ -1,9 +1,9 @@
 /**
  * createCartridgeRegistry — concrete `CartridgeRegistry` implementation.
  *
- * Studios construct one of these at boot, register their cartridges, and
- * use `resolverFor(cartridgeId)` to feed `createApp` / `createCartridgeApp`
- * the right renderer-resolver callback.
+ * Host apps construct one of these at boot, register their cartridges,
+ * and use `resolverFor(cartridgeId)` to feed `createApp` /
+ * `createCartridgeApp` the right renderer-resolver callback.
  *
  * Two resolution paths per cartridge, checked in order:
  *
@@ -13,7 +13,7 @@
  *
  *   2. **Per-cartridge chunk mailbox.** When a cartridge ships views as
  *      separate chunks, each chunk pushes to `cartridge.mailboxName` via
- *      `pushToMailbox` from `@ai-ro/core`. The registry calls
+ *      `pushToMailbox` from `@airo-js/core`. The registry calls
  *      `createRegistry(mailboxName)` once at register-time, which drains
  *      pre-loaded chunks AND installs a live-registering proxy for
  *      late-loaded chunks. After that, `resolveView` falls through to
@@ -25,8 +25,8 @@
  * cartridge.
  */
 
-import type { PageRendererFactory } from '@ai-ro/core';
-import { createRegistry, type Registry } from '@ai-ro/core';
+import type { PageRendererFactory } from '@airo-js/core';
+import { createRegistry, type Registry } from '@airo-js/core';
 
 import type { Cartridge, CartridgeRegistry } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';

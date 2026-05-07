@@ -1,11 +1,11 @@
 /**
  * createCartridgeApp — cartridge-aware wrapper around `createApp`.
  *
- * Resolves Gap 4 from the consumer-side mapping feedback: when a cartridge
- * view renders, `RenderContext.app` is `CartridgeAppContext<TData, TConfig>`
- * — a typed envelope of `{ cartridgeId, config, data }`. Today's `createApp`
- * accepts an opaque `appContext: TAppContext`; consumers have to construct
- * the envelope themselves and remember its shape.
+ * When a cartridge view renders, `RenderContext.app` is
+ * `CartridgeAppContext<TData, TConfig>` — a typed envelope of
+ * `{ cartridgeId, config, data }`. `createApp` itself accepts an opaque
+ * `appContext: TAppContext`; without this helper, consumers have to
+ * construct the envelope and thread the typing themselves.
  *
  * This helper does the construction. Consumers pass the cartridge + config
  * + already-post-Transformer snapshot, and it threads everything into
@@ -19,18 +19,18 @@
  * `{ blocked: true }` — the gate's UI stays in `host` and the framework
  * paints nothing else.
  *
- * Why this lives in `@ai-ro/cartridge-kit` and not `@ai-ro/core`: putting
+ * Why this lives in `@airo-js/cartridge-kit` and not `@airo-js/core`: putting
  * it in core would require core to depend on cartridge-kit (for `Cartridge`
  * and gate types), creating a circular workspace dependency. Keeping it
- * here lets core stay cartridge-unaware per M13.
+ * here lets core stay cartridge-unaware.
  */
 
 import type {
   App,
   AppDeps,
   AppConfig,
-} from '@ai-ro/core';
-import { createApp } from '@ai-ro/core';
+} from '@airo-js/core';
+import { createApp } from '@airo-js/core';
 
 import type { Cartridge } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';
@@ -47,10 +47,10 @@ export interface CartridgeAppDeps<TPageType extends string = string>
     CartridgeAppContext<unknown, unknown>
   >['resolveRenderer'];
   /**
-   * Studio-supplied scope passed through to gate `precheck` / `mount`
-   * via `GateContext.scope`. Studios with tenancy or auth use this to
+   * Host-app-supplied scope passed through to gate `precheck` / `mount`
+   * via `GateContext.scope`. Host apps with tenancy or auth use this to
    * thread user_id / locale / country into gates without making them
-   * studio-specific.
+   * host-app-specific.
    */
   gateScope?: Record<string, string | undefined>;
 }
@@ -68,7 +68,7 @@ export type CartridgeAppResult =
  *   2. Build `CartridgeAppContext` from cartridge id + config + snapshot.
  *   3. Derive `resolveRenderer` from `cartridge.views[]` (or use the
  *      override).
- *   4. Delegate to `createApp` from `@ai-ro/core` for the actual mount.
+ *   4. Delegate to `createApp` from `@airo-js/core` for the actual mount.
  *
  * Snapshot is REQUIRED — caller has run the cartridge's transformer chain
  * (typically via `createPipeline().runTransformers`) and passes the result
@@ -88,7 +88,7 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
     const events = deps.events;
     if (!events) {
       throw new Error(
-        '[@ai-ro/cartridge-kit] createCartridgeApp: gates require an `events` bus on deps. Pass `events: new EventBus()` (or your existing one) so gate UIs can emit cross-component signals.',
+        '[@airo-js/cartridge-kit] createCartridgeApp: gates require an `events` bus on deps. Pass `events: new EventBus()` (or your existing one) so gate UIs can emit cross-component signals.',
       );
     }
     const gateResult = await runGates({
@@ -103,7 +103,7 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
     if (gateResult === 'block') {
       // The first gate to block left its UI in `host`. The framework
       // paints nothing else; caller checks `result.blocked` to decide
-      // whether to surface a "blocked by" message in the studio.
+      // whether to surface a "blocked by" message in the host app.
       const blockedBy = await firstBlockedGateId(cartridge, cartridgeConfig, deps.gateScope);
       return { app: null, blocked: true, blockedBy };
     }

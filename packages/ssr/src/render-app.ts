@@ -3,7 +3,7 @@
  *
  * `renderAppToHTML(config, deps)` produces an HTML string for the entry
  * page. No EventBus subscriptions are kept, no router is wired, no
- * listeners attached — the result is safe to inline in the customer's
+ * listeners attached — the result is safe to inline in the host page's
  * initial HTML response.
  *
  * Document handling: the function uses a provided document if given,
@@ -15,7 +15,7 @@
  * `createApp({ hydrate: true })` recomputes everything from `(config,
  * appContext)` on hydrate. This removes the entire class of tampering
  * bugs that come from trusting a state blob round-tripped through the
- * customer's page.
+ * host page.
  */
 
 import {
@@ -23,7 +23,7 @@ import {
   type AppConfig,
   type PageRendererFactory,
   type RenderContext,
-} from '@ai-ro/core';
+} from '@airo-js/core';
 
 export interface RenderToHTMLDeps<
   TPageType extends string = string,
@@ -73,7 +73,7 @@ export function renderAppToHTML<
   const doc = deps.document ?? (globalThis as { document?: Document }).document;
   if (!doc) {
     throw new Error(
-      '[@ai-ro/ssr] renderAppToHTML: no Document available. Pass deps.document or run in an environment with a global document.',
+      '[@airo-js/ssr] renderAppToHTML: no Document available. Pass deps.document or run in an environment with a global document.',
     );
   }
 
@@ -88,7 +88,7 @@ export function renderAppToHTML<
   const factory = deps.resolveRenderer(entry.type);
   if (!factory) {
     throw new Error(
-      `[@ai-ro/ssr] renderAppToHTML: no renderer registered for page type "${entry.type}". Ensure the layout chunk is loaded before calling.`,
+      `[@airo-js/ssr] renderAppToHTML: no renderer registered for page type "${entry.type}". Ensure the layout chunk is loaded before calling.`,
     );
   }
 
@@ -110,7 +110,7 @@ export function renderAppToHTML<
     renderer.renderSSR(container, ctx);
   } else {
     console.warn(
-      `[@ai-ro/ssr] renderAppToHTML: renderer for "${entry.type}" doesn't implement renderSSR(). Falling back to render() — listeners attached will be orphaned.`,
+      `[@airo-js/ssr] renderAppToHTML: renderer for "${entry.type}" doesn't implement renderSSR(). Falling back to render() — listeners attached will be orphaned.`,
     );
     renderer.render(container, ctx);
   }

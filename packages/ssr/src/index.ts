@@ -1,5 +1,5 @@
 /**
- * @ai-ro/ssr — runtime-agnostic edge SSR dispatch.
+ * @airo-js/ssr — runtime-agnostic edge SSR dispatch.
  *
  * Three helpers:
  *
@@ -17,7 +17,7 @@
  *     value-prop landing path.
  *
  * Schema-specific feed adapters (mapping a particular data source's shape
- * onto a cartridge schema) belong in cartridges or studio code, not here.
+ * onto a cartridge schema) belong in cartridges or host-app code, not here.
  */
 
 export type {
@@ -38,4 +38,4 @@ export type {
 } from './render-with-publication.js';
 export { renderAppWithPublication } from './render-with-publication.js';
 
-export const PACKAGE_NAME = '@ai-ro/ssr';
+export const PACKAGE_NAME = '@airo-js/ssr';

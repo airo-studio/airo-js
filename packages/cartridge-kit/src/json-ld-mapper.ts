@@ -3,10 +3,9 @@
  *
  * @deprecated v0.2 — use a `PublicationAdapter` with `format: 'json-ld'`
  * instead. Kept in the contract for one minor version (v0.2 → v0.3) so
- * v1's existing inline JSON-LD code can land in the WTB cartridge without
- * being rewritten to `PublicationAdapter` shape on day 1. Removed in v0.3
- * once SchemaOrgJsonLdAdapter is canonical and all WTB JSON-LD output
- * flows through `PublicationAdapter`.
+ * existing inline JSON-LD code can land without being rewritten to the
+ * `PublicationAdapter` shape on day 1. Removed in v0.3 once
+ * `PublicationAdapter` with `format: 'json-ld'` is the canonical path.
  */
 
 export interface JsonLdMapper<TData> {

@@ -1,11 +1,11 @@
 /**
- * @ai-ro/core — runtime engine.
+ * @airo-js/core — runtime engine.
  *
- * Public surface used by @ai-ro/cartridge-kit, @ai-ro/runtime,
- * @ai-ro/ssr, and downstream consumers. Everything exported from here is
+ * Public surface used by @airo-js/cartridge-kit, @airo-js/runtime,
+ * @airo-js/ssr, and downstream consumers. Everything exported from here is
  * semver-stable for the package's major version.
  *
- * Phase 0 in flight. Surface today:
+ * Surface:
  *   - createApp + App lifecycle FSM
  *   - PageManager (mediator at the framework's core)
  *   - EventBus + IEventBus
@@ -107,4 +107,4 @@ export {
   resolveStyleRoot,
 } from './style.js';
 
-export const PACKAGE_NAME = '@ai-ro/core';
+export const PACKAGE_NAME = '@airo-js/core';

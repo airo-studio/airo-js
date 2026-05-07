@@ -1,8 +1,8 @@
 {
-  "name": "@ai-ro-examples/cartridge-wtb-skeleton",
+  "name": "@airo-js-examples/cartridge-wtb-skeleton",
   "version": "0.0.0",
   "private": true,
-  "description": "Throwaway type-skeleton: validates the @ai-ro/cartridge-kit contract against a real WTB-shaped cartridge (Product/Retailer/Offer schema). Compiles only — does not run.",
+  "description": "Throwaway type-skeleton: validates the @airo-js/cartridge-kit contract against a real WTB-shaped cartridge (Product/Retailer/Offer schema). Compiles only — does not run.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@ai-ro/cartridge-kit": "workspace:*",
-    "@ai-ro/core": "workspace:*"
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*"
   }
 }

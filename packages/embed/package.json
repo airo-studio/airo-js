@@ -1,9 +1,27 @@
 {
-  "name": "@ai-ro/embed",
+  "name": "@airo-js/embed",
   "version": "0.0.0",
   "private": true,
-  "description": "Airo embed — ~5KB browser bootstrap loader. The script customers paste into their HTML.",
+  "description": "Airo embed — ~5KB browser bootstrap loader. The script host pages paste into their HTML to mount an Airo app.",
+  "keywords": [
+    "airo",
+    "framework",
+    "embed",
+    "bootstrap",
+    "browser",
+    "custom-element"
+  ],
+  "author": "AI/RO contributors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/embed"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/embed#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -18,7 +36,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "publishConfig": {
     "access": "public"

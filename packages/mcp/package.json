@@ -1,9 +1,27 @@
 {
-  "name": "@ai-ro/mcp",
+  "name": "@airo-js/mcp",
   "version": "0.0.0",
   "private": true,
-  "description": "Airo MCP — tool emission helpers. Cartridges declare MCP tools via @ai-ro/cartridge-kit; this package handles the runtime registration + invocation plumbing.",
+  "description": "Airo MCP — tool emission helpers. Cartridges declare MCP tools via @airo-js/cartridge-kit; this package handles the runtime registration + invocation plumbing.",
+  "keywords": [
+    "airo",
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "tools",
+    "framework"
+  ],
+  "author": "AI/RO contributors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -18,10 +36,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "dependencies": {
-    "@ai-ro/cartridge-kit": "workspace:*"
+    "@airo-js/cartridge-kit": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

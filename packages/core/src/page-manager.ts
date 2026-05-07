@@ -181,7 +181,7 @@ export class PageManager<
       try {
         this.router.push(this.navState as RouteState);
       } catch (err) {
-        console.warn('[@ai-ro/core] PageManager router.push failed:', err);
+        console.warn('[@airo-js/core] PageManager router.push failed:', err);
       }
     }
 
@@ -207,7 +207,7 @@ export class PageManager<
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
       console.warn(
-        `[@ai-ro/core] PageManager: no renderer registered for page type "${targetPage.type}". Hydrate skipped.`,
+        `[@airo-js/core] PageManager: no renderer registered for page type "${targetPage.type}". Hydrate skipped.`,
       );
       return;
     }
@@ -225,7 +225,7 @@ export class PageManager<
       renderer.hydrate(this.opts.container, ctx);
     } else {
       console.warn(
-        `[@ai-ro/core] PageManager: renderer for "${targetPage.type}" does not implement hydrate(). Falling back to render() — the SSR HTML is being regenerated client-side.`,
+        `[@airo-js/core] PageManager: renderer for "${targetPage.type}" does not implement hydrate(). Falling back to render() — the SSR HTML is being regenerated client-side.`,
       );
       renderer.render(this.opts.container, ctx);
     }
@@ -311,7 +311,7 @@ export class PageManager<
         this.router.replace(this.navState as RouteState);
       }
     } catch (err) {
-      console.warn('[@ai-ro/core] HashRouter init failed; URL routing disabled.', err);
+      console.warn('[@airo-js/core] HashRouter init failed; URL routing disabled.', err);
       this.router?.stop();
       this.router = null;
     }
@@ -327,7 +327,7 @@ export class PageManager<
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
       console.warn(
-        `[@ai-ro/core] PageManager: no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
+        `[@airo-js/core] PageManager: no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
       );
       return;
     }

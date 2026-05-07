@@ -94,7 +94,7 @@ export function createRegistry<T>(mailboxName: string): Registry<T> {
  * works whether core is loaded or not.
  *
  * Usage from a chunk:
- *   import { pushToMailbox } from '@ai-ro/core';
+ *   import { pushToMailbox } from '@airo-js/core';
  *   pushToMailbox('__AIRO_WTB_PAGES__', { key: 'carousel', factory: () => new CarouselRenderer() });
  */
 export function pushToMailbox<T>(mailboxName: string, entry: RegistryEntry<T>): void {

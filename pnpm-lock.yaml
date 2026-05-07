@@ -14,22 +14,22 @@ importers:
 
   examples/cartridge-wtb-skeleton:
     dependencies:
-      '@ai-ro/cartridge-kit':
+      '@airo-js/cartridge-kit':
         specifier: workspace:*
         version: link:../../packages/cartridge-kit
-      '@ai-ro/core':
+      '@airo-js/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/publication-adapter-skeleton:
     dependencies:
-      '@ai-ro/cartridge-kit':
+      '@airo-js/cartridge-kit':
         specifier: workspace:*
         version: link:../../packages/cartridge-kit
 
   packages/cartridge-kit:
     dependencies:
-      '@ai-ro/core':
+      '@airo-js/core':
         specifier: workspace:*
         version: link:../core
 
@@ -39,22 +39,22 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@ai-ro/cartridge-kit':
+      '@airo-js/cartridge-kit':
         specifier: workspace:*
         version: link:../cartridge-kit
 
   packages/runtime:
     dependencies:
-      '@ai-ro/core':
+      '@airo-js/core':
         specifier: workspace:*
         version: link:../core
 
   packages/ssr:
     dependencies:
-      '@ai-ro/cartridge-kit':
+      '@airo-js/cartridge-kit':
         specifier: workspace:*
         version: link:../cartridge-kit
-      '@ai-ro/core':
+      '@airo-js/core':
         specifier: workspace:*
         version: link:../core
 

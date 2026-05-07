@@ -39,7 +39,7 @@ pnpm yalc:push       # build + yalc push  → store + auto-update every linked c
 pnpm yalc:publish    # build + yalc publish → store only; consumers run `yalc update`
 ```
 
-`yalc:push` is what you want 99% of the time — every consumer that ran `yalc add @ai-ro/...` picks up the new hash automatically, no second step.
+`yalc:push` is what you want 99% of the time — every consumer that ran `yalc add @airo-js/...` picks up the new hash automatically, no second step.
 
 `yalc:publish` is the manual variant: useful when you want to stage a new hash in the store without touching consumers (e.g. CI smoke-publishing, or a consumer mid-debug you don't want to disturb).
 
@@ -48,14 +48,14 @@ pnpm yalc:publish    # build + yalc publish → store only; consumers run `yalc 
 First time:
 
 ```bash
-yalc add @ai-ro/core @ai-ro/runtime @ai-ro/ssr @ai-ro/embed @ai-ro/mcp @ai-ro/cartridge-kit
+yalc add @airo-js/core @airo-js/runtime @airo-js/ssr @airo-js/embed @airo-js/mcp @airo-js/cartridge-kit
 ```
 
 Subsequent updates: nothing to do if airo-js publisher used `pnpm yalc:push`. If they used `pnpm yalc:publish`, run `yalc update` to pull the latest store hash.
 
 ### When to switch to a real npm publish
 
-Once cartridge-kit hits `0.2.0` (post-validation, see migration plan §Phase 0 done criteria), we publish to npm under the `@ai-ro` scope. Consumer repos then `pnpm install @ai-ro/core@^0.2` and stop using yalc for that package's surface. Yalc stays useful for `0.x` iteration on packages that aren't yet stable.
+Once cartridge-kit hits `0.2.0` (post-validation, see migration plan §Phase 0 done criteria), we publish to npm under the `@airo-js` scope. Consumer repos then `pnpm install @airo-js/core@^0.2` and stop using yalc for that package's surface. Yalc stays useful for `0.x` iteration on packages that aren't yet stable.
 
 ## What lands in this repo
 

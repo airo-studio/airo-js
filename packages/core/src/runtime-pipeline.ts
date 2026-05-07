@@ -1,16 +1,15 @@
 /**
  * RuntimePipelineImpl — the default `RuntimePipeline` implementation.
  *
- * Lifted shape from v1 production (RuntimePipeline.applyTransformers +
- * applyPostprocessors). Iterates the transformer chain in declared order;
- * iterates the post-processor chain similarly; collects teardowns in a
- * stack so unmount runs them in reverse order (LIFO).
+ * Iterates the transformer chain in declared order; iterates the
+ * post-processor chain similarly; collects teardowns in a stack so unmount
+ * runs them in reverse order (LIFO).
  *
- * Why this lives in @ai-ro/core (not in @ai-ro/cartridge-kit): pipeline
- * orchestration is rendering, and rendering belongs to the framework
- * (M13). cartridge-kit re-exports the types but never the impl.
+ * Why this lives in @airo-js/core (not in @airo-js/cartridge-kit): pipeline
+ * orchestration is rendering, and rendering belongs to the framework.
+ * cartridge-kit re-exports the types but never the impl.
  *
- * Studios can use this directly via `createPipeline(transformers, postProcessors)`
+ * Host apps can use this directly via `createPipeline(transformers, postProcessors)`
  * or implement their own `RuntimePipeline<TData, TConfig>` if they need
  * different semantics (e.g. async support before v0.3).
  */
@@ -71,7 +70,7 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
         // 'skip' — log and pass input through untouched. Don't widen
         // visibility silently if a config/data shape changes.
         console.error(
-          `[@ai-ro/core] Transformer "${t.name}" threw with errorPolicy='skip'; passing input through.`,
+          `[@airo-js/core] Transformer "${t.name}" threw with errorPolicy='skip'; passing input through.`,
           err,
         );
       }
@@ -99,7 +98,7 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
       } catch (err) {
         // Post-processors are side-effect hooks; one failing should not
         // tear down the others. Log and continue.
-        console.error(`[@ai-ro/core] PostProcessor "${p.name}" threw during apply; continuing.`, err);
+        console.error(`[@airo-js/core] PostProcessor "${p.name}" threw during apply; continuing.`, err);
       }
     }
     // Aggregate teardown — LIFO so destruction order mirrors construction.
@@ -108,7 +107,7 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
         try {
           teardowns[i]!();
         } catch (err) {
-          console.error('[@ai-ro/core] PostProcessor teardown threw; continuing.', err);
+          console.error('[@airo-js/core] PostProcessor teardown threw; continuing.', err);
         }
       }
     };
@@ -137,8 +136,8 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
 }
 
 /**
- * Factory shorthand. Studios / cartridges typically don't construct the
- * class directly — they call `createPipeline` with the cartridge's
+ * Factory shorthand. Host apps and cartridges typically don't construct
+ * the class directly — they call `createPipeline` with the cartridge's
  * `transformers[]` and `postProcessors[]`.
  */
 export function createPipeline<TData, TConfig>(

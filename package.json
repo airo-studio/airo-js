@@ -3,7 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "description": "Airo — rendering-only framework for config-driven, plugin-loaded UI.",
+  "author": "AI/RO contributors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
   "packageManager": "pnpm@9.4.0",
   "engines": {
     "node": ">=20",

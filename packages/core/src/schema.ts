@@ -16,7 +16,7 @@ export type PageId = string;
 /**
  * Per-component overrides keyed by the slot's `componentId`. Non-structural
  * data the renderer reads at paint time (visibility, custom props, inline
- * style overrides). Persisted in the App config; live-edits in a studio
+ * style overrides). Persisted in the App config; live-edits in an authoring
  * UI rewrite this without touching the page or template structure.
  */
 export interface ComponentSettings<TProps = Record<string, unknown>> {

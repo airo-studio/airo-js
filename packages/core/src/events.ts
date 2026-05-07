@@ -43,7 +43,7 @@ export class EventBus implements IEventBus {
         try {
           callback(...args);
         } catch (error) {
-          console.error(`[@ai-ro/core] Error in event handler for "${event}":`, error);
+          console.error(`[@airo-js/core] Error in event handler for "${event}":`, error);
         }
       }
     }

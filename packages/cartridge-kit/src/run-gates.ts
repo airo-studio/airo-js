@@ -21,7 +21,7 @@
  * Error semantics: a thrown error inside precheck or mount propagates.
  * Caller's responsibility — typical pattern is to wrap the
  * `createCartridgeApp` call in try/catch and surface the error in the
- * studio's error UI.
+ * host app's error UI.
  */
 
 import type { Gate, GateContext } from './gate.js';

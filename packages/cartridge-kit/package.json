@@ -1,9 +1,30 @@
 {
-  "name": "@ai-ro/cartridge-kit",
+  "name": "@airo-js/cartridge-kit",
   "version": "0.0.0",
   "private": true,
-  "description": "Airo cartridge contract — Cartridge<TSchema, TConfig> + DataSource / View / MCP tool / Template / OnboardingFlow primitives. The API surface every cartridge implements.",
+  "description": "Airo cartridge contract — Cartridge<TData, TConfig> + DataSource / View / MCP tool / Template / PublicationAdapter / Gate primitives. The API surface every cartridge implements.",
+  "keywords": [
+    "airo",
+    "cartridge",
+    "plugin",
+    "framework",
+    "rendering",
+    "ssr",
+    "mcp",
+    "schema-org",
+    "publication-adapter"
+  ],
+  "author": "AI/RO contributors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/cartridge-kit"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/cartridge-kit#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -18,10 +39,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "dependencies": {
-    "@ai-ro/core": "workspace:*"
+    "@airo-js/core": "workspace:*"
   },
   "publishConfig": {
     "access": "public"
