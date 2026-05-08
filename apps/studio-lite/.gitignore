@@ -1,2 +1,5 @@
 public/bundle.js
 public/bundle.js.map
+
+# SQLite store — per-checkout, never committed.
+.studio-data/
