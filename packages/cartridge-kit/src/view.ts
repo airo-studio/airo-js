@@ -41,4 +41,19 @@ export interface ViewDefinition<TData, TConfig> {
 
   /** Capabilities the host app cares about for filtering / SSR routing. */
   capabilities?: ('responsive' | 'ssr-safe' | 'hydratable' | 'csr-only')[];
+
+  /**
+   * Optional raw CSS string the view declares for its own markup. The
+   * cartridge author scopes selectors to their own BEM classes (no
+   * leaking into the host); SSR / publish pipelines inline this into the
+   * served HTML so cartridges render styled without external assets.
+   *
+   * Use design-token CSS custom properties (`--airo-*`) so host apps can
+   * theme by overriding tokens at the document root. Cartridges that
+   * embed Shadow DOM internally don't need this — Lit elements ship
+   * their own styles via `static styles`. This field is for cartridges
+   * whose View emits regular Light DOM HTML (the common case for
+   * SSR-friendly content cartridges).
+   */
+  stylesheet?: string;
 }

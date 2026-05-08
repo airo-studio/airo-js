@@ -170,6 +170,7 @@ export async function publishCartridge<TData, TConfig>(
       crawler,
       jsonLd: jsonLdResult ? jsonLdResult.output : undefined,
       viewHtml: view.html,
+      stylesheets: collectStylesheets(cartridge),
     });
 
     const pagePath = `${slug}/index.html`;
@@ -233,6 +234,7 @@ function assembleHtml(opts: {
   crawler: CrawlerOutput | undefined;
   jsonLd: unknown;
   viewHtml: string;
+  stylesheets: string[];
 }): string {
   const lines: string[] = [];
   lines.push('<!doctype html>');
@@ -260,6 +262,9 @@ function assembleHtml(opts: {
     // still copy-out-of-DevTools readable.
     lines.push(`<script type="application/ld+json">${JSON.stringify(opts.jsonLd)}</script>`);
   }
+  for (const css of opts.stylesheets) {
+    lines.push(`<style>${css}</style>`);
+  }
 
   lines.push('</head>');
   lines.push('<body>');
@@ -267,6 +272,28 @@ function assembleHtml(opts: {
   lines.push('</body>');
   lines.push('</html>');
   return lines.join('\n');
+}
+
+/**
+ * Pull `stylesheet` from each view the cartridge declares. Order is the
+ * declaration order on the cartridge — last view's stylesheet wins on
+ * cascade-equal selectors. De-duplicates by string identity so multiple
+ * views sharing the same stylesheet only emit one <style> block.
+ */
+function collectStylesheets<TData, TConfig>(
+  cartridge: Cartridge<TData, TConfig>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const view of cartridge.views) {
+    if (typeof view.stylesheet === 'string' && view.stylesheet.length > 0) {
+      if (!seen.has(view.stylesheet)) {
+        seen.add(view.stylesheet);
+        out.push(view.stylesheet);
+      }
+    }
+  }
+  return out;
 }
 
 function buildSitemap(entries: Array<{ loc: string; lastmod: string }>): string {
