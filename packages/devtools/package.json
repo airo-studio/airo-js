@@ -1,0 +1,51 @@
+{
+  "name": "@airo-js/devtools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "studio-lite + airo.you devtools cartridges — EditorShell, Sidebar:Score, Sidebar:AdapterCoverage, Preview:Triple. Drop into any airo-js page to author cartridges with multi-surface AIO previews.",
+  "keywords": [
+    "airo",
+    "devtools",
+    "studio",
+    "editor",
+    "lit",
+    "web-components",
+    "aio"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/devtools"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/devtools#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "lit": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
