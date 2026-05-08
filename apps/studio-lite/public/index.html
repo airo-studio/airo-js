@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>studio-lite</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #0a0a0a;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2d70ff;
+      --code-bg: #f6f8fa;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      grid-template-columns: 240px minmax(0, 1.5fr) minmax(0, 1fr);
+      grid-template-areas:
+        "chrome chrome chrome"
+        "sidebar editor preview";
+      height: 100vh;
+    }
+
+    .chrome {
+      grid-area: chrome;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .chrome__brand {
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .chrome__crumb {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .sidebar {
+      grid-area: sidebar;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+      border-right: 1px solid var(--border);
+      background: color-mix(in oklab, var(--border) 16%, white);
+      overflow: auto;
+    }
+    .sidebar > * {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .editor {
+      grid-area: editor;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .editor > * {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .preview {
+      grid-area: preview;
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .preview > * {
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* Skeleton — replaced when bundle.js mounts the elements. */
+    .skeleton {
+      padding: 24px;
+      color: var(--muted);
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="chrome">
+      <span class="chrome__brand">studio-lite</span>
+      <span class="chrome__crumb">DocPage · v0</span>
+    </header>
+    <aside class="sidebar">
+      <studio-aio-score><div class="skeleton">Loading score…</div></studio-aio-score>
+      <studio-adapter-coverage><div class="skeleton">Loading coverage…</div></studio-adapter-coverage>
+    </aside>
+    <main class="editor">
+      <studio-editor><div class="skeleton">Loading editor…</div></studio-editor>
+    </main>
+    <section class="preview">
+      <studio-preview-triple><div class="skeleton">Loading preview…</div></studio-preview-triple>
+    </section>
+  </div>
+  <script type="module" src="/bundle.js"></script>
+</body>
+</html>

@@ -6,16 +6,28 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm build:bundle",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "dev": "node scripts/build-bundle.mjs && tsx src/server/index.ts",
+    "start": "tsx src/server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo public/bundle.js public/bundle.js.map"
   },
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
     "@airo-js/core": "workspace:*",
+    "@airo-js/devtools": "workspace:*",
+    "@airo-js/doc-cartridges": "workspace:*",
     "@airo-js/embed": "workspace:*",
     "@airo-js/mcp": "workspace:*",
     "@airo-js/runtime": "workspace:*",
-    "@airo-js/ssr": "workspace:*"
+    "@airo-js/ssr": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0"
   }
 }

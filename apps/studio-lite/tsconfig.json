@@ -9,9 +9,7 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/cartridge-kit" },
-    { "path": "../../packages/embed" },
-    { "path": "../../packages/mcp" },
-    { "path": "../../packages/runtime" },
-    { "path": "../../packages/ssr" }
+    { "path": "../../packages/devtools" },
+    { "path": "../../packages/doc-cartridges" }
   ]
 }
