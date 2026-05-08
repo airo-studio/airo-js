@@ -12,6 +12,27 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  apps/studio-lite:
+    dependencies:
+      '@airo-js/cartridge-kit':
+        specifier: workspace:*
+        version: link:../../packages/cartridge-kit
+      '@airo-js/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@airo-js/embed':
+        specifier: workspace:*
+        version: link:../../packages/embed
+      '@airo-js/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
+      '@airo-js/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@airo-js/ssr':
+        specifier: workspace:*
+        version: link:../../packages/ssr
+
   examples/cartridge-wtb-skeleton:
     dependencies:
       '@airo-js/cartridge-kit':

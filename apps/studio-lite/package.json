@@ -1,0 +1,21 @@
+{
+  "name": "@airo-js-apps/studio-lite",
+  "version": "0.0.0",
+  "private": true,
+  "description": "studio-lite — schema-driven cartridge composer proving AI Result Optimisation (AIO) authoring as a multi-surface experience. See docs/designs/studio-lite.md.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "@airo-js/embed": "workspace:*",
+    "@airo-js/mcp": "workspace:*",
+    "@airo-js/runtime": "workspace:*",
+    "@airo-js/ssr": "workspace:*"
+  }
+}

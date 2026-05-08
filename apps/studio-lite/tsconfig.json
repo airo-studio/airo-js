@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/cartridge-kit" },
+    { "path": "../../packages/embed" },
+    { "path": "../../packages/mcp" },
+    { "path": "../../packages/runtime" },
+    { "path": "../../packages/ssr" }
+  ]
+}
