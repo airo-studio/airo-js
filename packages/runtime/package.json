@@ -1,0 +1,47 @@
+{
+  "name": "@airo-js/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Airo runtime — layout chunk loader and hydration glue. Built on @airo-js/core.",
+  "keywords": [
+    "airo",
+    "framework",
+    "runtime",
+    "hydration",
+    "chunk-loader"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/runtime#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

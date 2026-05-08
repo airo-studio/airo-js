@@ -1,0 +1,46 @@
+{
+  "name": "@airo-js/core",
+  "version": "0.1.0",
+  "description": "Airo core runtime — createApp, PageManager, EventBus, HashRouter, Theme, IsolationRoot, RuntimePipeline, registry mailbox.",
+  "keywords": [
+    "airo",
+    "framework",
+    "rendering",
+    "runtime",
+    "shadow-dom",
+    "style-isolation",
+    "event-bus",
+    "router"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
