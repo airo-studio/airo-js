@@ -52,15 +52,27 @@ export class StudioPreviewTripleElement extends LitElement {
     _activeTab: { state: true },
   };
 
-  cartridge?: Cartridge;
-  data?: unknown;
-  mcpServerUrl: string = 'http://127.0.0.1:0/mcp/';
+  declare cartridge?: Cartridge;
+  declare data?: unknown;
+  declare mcpServerUrl: string;
 
-  private _previews: ComputedPreviews | null = null;
-  private _computing = false;
-  private _activeTab: PreviewSurface = 'human';
+  // Reactive state — `declare` so Lit's prototype accessor isn't shadowed by
+  // class-field initializers (useDefineForClassFields).
+  declare _previews: ComputedPreviews | null;
+  declare _computing: boolean;
+  declare _activeTab: PreviewSurface;
+
+  // Non-reactive instance state (not in static properties).
   private _debounce: ReturnType<typeof setTimeout> | null = null;
   private _computeId = 0;
+
+  constructor() {
+    super();
+    this.mcpServerUrl = 'http://127.0.0.1:0/mcp/';
+    this._previews = null;
+    this._computing = false;
+    this._activeTab = 'human';
+  }
 
   static override styles = css`
     :host {

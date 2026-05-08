@@ -40,16 +40,25 @@ export class StudioEditorElement extends LitElement {
   };
 
   /** The cartridge being authored. */
-  cartridge?: Cartridge;
+  declare cartridge?: Cartridge;
 
   /** The current value (TData) being edited. Setting this resets the draft. */
-  data?: unknown;
+  declare data?: unknown;
 
-  // Reactive internal state
-  private _draft: JsonValue | undefined = undefined;
-  private _dirty = false;
-  private _validationError: string | null = null;
-  private _saveStatus: 'idle' | 'saving' | 'saved' = 'idle';
+  // Reactive internal state. `declare` keeps Lit's prototype accessor live —
+  // class-field initializers would shadow it under useDefineForClassFields.
+  declare _draft: JsonValue | undefined;
+  declare _dirty: boolean;
+  declare _validationError: string | null;
+  declare _saveStatus: 'idle' | 'saving' | 'saved';
+
+  constructor() {
+    super();
+    this._draft = undefined;
+    this._dirty = false;
+    this._validationError = null;
+    this._saveStatus = 'idle';
+  }
 
   static override styles = css`
     :host {

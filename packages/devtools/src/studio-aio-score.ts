@@ -29,13 +29,23 @@ export class StudioAioScoreElement extends LitElement {
     _computing: { state: true },
   };
 
-  cartridge?: Cartridge;
-  data?: unknown;
+  declare cartridge?: Cartridge;
+  declare data?: unknown;
 
-  private _score: AioScore | null = null;
-  private _computing = false;
+  // Reactive state — `declare` so Lit's prototype accessor isn't shadowed by
+  // class-field initializers (useDefineForClassFields).
+  declare _score: AioScore | null;
+  declare _computing: boolean;
+
+  // Non-reactive instance state (not in static properties — class fields are fine).
   private _debounce: ReturnType<typeof setTimeout> | null = null;
   private _computeId = 0;
+
+  constructor() {
+    super();
+    this._score = null;
+    this._computing = false;
+  }
 
   static override styles = css`
     :host {
