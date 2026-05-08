@@ -56,6 +56,15 @@ importers:
 
   packages/core: {}
 
+  packages/doc-cartridges:
+    dependencies:
+      '@airo-js/cartridge-kit':
+        specifier: workspace:*
+        version: link:../cartridge-kit
+      '@airo-js/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/embed: {}
 
   packages/mcp:

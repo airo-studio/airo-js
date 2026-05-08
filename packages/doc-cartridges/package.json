@@ -1,0 +1,49 @@
+{
+  "name": "@airo-js/doc-cartridges",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Doc-page cartridge family — DocPage today; APIRef, Tutorial, Example, FAQ to follow. Reusable across studio-lite previews and the airo.you docs site.",
+  "keywords": [
+    "airo",
+    "cartridge",
+    "documentation",
+    "schema-org",
+    "llms-txt",
+    "aio"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/doc-cartridges"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/doc-cartridges#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
