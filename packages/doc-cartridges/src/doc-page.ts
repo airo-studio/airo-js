@@ -80,6 +80,18 @@ export interface DocPageData {
   /** OG image URL — used by the crawler-bundle adapter and JSON-LD. */
   ogImage?: string;
 
+  /**
+   * Optional raw markdown source for the page body. When present, host
+   * apps that author markdown-first (e.g. studio-lite) round-trip this
+   * field; the structured `headings`/`sections`/`codeBlocks` arrays are
+   * the host's parsed view of the same body. The cartridge does NOT
+   * parse markdown itself — that keeps @airo-js/* zero-dep. Hosts that
+   * want markdown authoring bring their own parser (markdown-it,
+   * remark, etc.) and feed both `body` AND the derived structured
+   * fields into the cartridge.
+   */
+  body?: string;
+
   // Body
   /** Flat heading outline, document order. */
   headings: DocPageHeading[];
@@ -155,6 +167,7 @@ const docPageJsonSchema = {
     },
     tags: { type: 'array', items: { type: 'string' } },
     ogImage: { type: 'string' },
+    body: { type: 'string' },
     headings: { type: 'array', items: { $ref: '#/definitions/heading' } },
     sections: { type: 'array', items: { $ref: '#/definitions/section' } },
     codeBlocks: { type: 'array', items: { $ref: '#/definitions/codeBlock' } },

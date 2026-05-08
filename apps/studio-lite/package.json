@@ -28,9 +28,13 @@
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "hono": "^4.6.0",
-    "linkedom": "^0.18.12"
+    "linkedom": "^0.18.12",
+    "markdown-it": "^14.1.1",
+    "markdown-it-anchor": "^9.2.0"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/markdown-it-anchor": "^7.0.0",
     "@types/node": "^22.10.0",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0"

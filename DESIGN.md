@@ -2,6 +2,13 @@
 
 The visual language for studio-lite, airo.you, and every future host app built on airo-js. Authored 2026-05-08 during `/plan-design-review` on the studio-lite plan; expected to evolve.
 
+## Amendments
+
+- **2026-05-08 — studio-lite editor adopts Geist + jade.** Per [docs/designs/studio-lite-editor.md](docs/designs/studio-lite-editor.md), the studio-lite editor surface uses a distinct local palette (Geist + Geist Mono typography, jade `#1F6F4E` accent on warm off-white `#FAF7F2` ground) optimised for long-form authoring. The chilopod mark is a geometric sans; Geist is its visually congruent typographic peer. The recommendation in that doc is option 1 (unify across all surfaces); we're staging the migration:
+  - **Authoritative for the studio-lite editor today:** the tokens listed in `studio-lite-editor.md` §Visual language. The compose drawer, page list rail, and stage all use them.
+  - **Still on the original system below:** the `@airo-js/devtools` Lit elements (`<studio-aio-score>`, `<studio-adapter-coverage>`, `<studio-preview-triple>`) and `@airo-js/doc-cartridges`'s published-page stylesheet. They keep Inter + signal-blue until migrated.
+  - **Future:** unify on Geist + jade across the rest. Tracked as a follow-up alongside the other Lane B/C/E migrations.
+
 ## Direction
 
 Clean, simple, monochromatic. Color is intentional restraint, not decoration. A single accent color flairs the moments that genuinely require attention. The product looks like authoring software, not a marketing site. Linear / Notion / Figma's clean professionalism, not Webflow's stock-photo SaaS energy.

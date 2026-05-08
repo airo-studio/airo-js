@@ -1,11 +1,10 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>airo studio lite</title>
-<link rel="icon" type="image/png" href="/chilopod-mono.png">
+<title>airo studio lite · Stage</title>
+<link rel="icon" type="image/png" href="chilopod-mono.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -23,7 +22,6 @@ body{font-family:"Geist",system-ui,sans-serif;background:var(--bg);color:var(--i
 button{font:inherit;cursor:pointer;border:none;background:transparent;color:inherit}
 a{color:inherit}
 .app{display:grid;grid-template-rows:60px 1fr 32px;height:100vh}
-
 /* === topbar === */
 .topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 20px;border-bottom:1px solid var(--rule);background:var(--surface);gap:24px}
 .brand-cluster{display:flex;align-items:center;gap:14px;min-width:0}
@@ -39,23 +37,17 @@ a{color:inherit}
 .audience-nav{display:flex;justify-content:center;gap:2px;background:var(--bg);padding:3px;border-radius:8px;border:1px solid var(--rule);width:fit-content}
 .audience-nav button{padding:6px 14px;color:var(--ink-soft);border-radius:6px;font-weight:500;font-size:13px;letter-spacing:-0.005em}
 .audience-nav button.active{background:var(--ink);color:var(--bg)}
-.audience-nav button[disabled]{opacity:0.5;cursor:not-allowed}
 .audience-nav .dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--accent);margin-right:7px;vertical-align:middle}
 .right-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px}
 .saved-pill{font-family:"Geist Mono",monospace;font-size:11px;color:var(--ink-faint);letter-spacing:0.01em}
 .saved-pill::before{content:"●";color:var(--accent);margin-right:6px;font-size:8px}
-.saved-pill.saving::before{color:var(--warn)}
 .btn-icon{padding:7px;border-radius:6px;color:var(--ink-soft)}
 .btn-icon:hover{background:var(--surface-2)}
 .btn-publish{display:flex;align-items:center;gap:8px;background:var(--ink);color:var(--bg);padding:8px 14px 8px 16px;border-radius:6px;font-weight:500;font-size:13px;letter-spacing:-0.005em}
 .btn-publish .live{font-size:11px;font-family:"Geist Mono",monospace;background:var(--accent);padding:2px 6px;border-radius:3px;color:#fff;letter-spacing:0}
-.btn-publish .live.warn{background:var(--warn)}
 .btn-publish:hover{background:#000}
-.btn-publish[disabled]{opacity:0.6;cursor:not-allowed}
-
 /* === body === */
 .body{display:grid;grid-template-columns:240px 413px 6px 1fr;overflow:hidden}
-
 /* page list */
 .pages{background:var(--surface-2);border-right:1px solid var(--rule);display:flex;flex-direction:column;overflow:hidden}
 .pages-head{padding:14px 16px 8px;display:flex;justify-content:space-between;align-items:center}
@@ -80,9 +72,7 @@ a{color:inherit}
 .page .status-dot.draft{background:transparent;border:1px solid var(--ink-faint)}
 .add-page{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--rule);font-size:12px;color:var(--ink-soft);background:var(--surface-2);width:100%;text-align:left;letter-spacing:-0.005em}
 .add-page:hover{background:var(--bg);color:var(--ink)}
-.add-page[disabled]{opacity:0.5;cursor:not-allowed}
 .add-page .plus{width:18px;height:18px;border-radius:4px;background:var(--ink);color:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-size:14px;line-height:1}
-
 /* === compose drawer === */
 .drawer{background:var(--surface);border-right:1px solid var(--rule);overflow:hidden;display:flex;flex-direction:column;min-width:0}
 .drawer-head{padding:14px 18px 12px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:flex-end}
@@ -95,14 +85,12 @@ a{color:inherit}
 .field input,.field textarea{width:100%;font:inherit;padding:7px 9px;border:1px solid var(--rule);border-radius:5px;background:var(--bg);color:var(--ink);font-size:13px;letter-spacing:-0.005em}
 .field input:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
 .field textarea{min-height:54px;resize:vertical;line-height:1.5}
-
 /* metadata details (collapsed by default) */
 .meta-details{margin-bottom:14px}
 .meta-summary{font-size:10px;text-transform:uppercase;letter-spacing:0.07em;color:var(--ink-faint);margin-bottom:8px;font-weight:500;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
 .meta-summary::after{content:"▾";font-size:9px;color:var(--ink-faint);transition:transform 120ms}
 details[open] .meta-summary::after{transform:rotate(180deg)}
 .meta-summary .pill{font-family:"Geist Mono",monospace;font-size:10px;letter-spacing:0;text-transform:none;color:var(--ink-faint);background:var(--rule-soft);padding:2px 6px;border-radius:10px}
-
 /* === markdown body === */
 .body-section{flex:1;display:flex;flex-direction:column;min-height:0}
 .body-section-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding:0 1px}
@@ -118,44 +106,51 @@ details[open] .meta-summary::after{transform:rotate(180deg)}
 .md-body::placeholder{color:var(--ink-faint)}
 .md-toolbar{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px}
 .md-toolbar .hint{color:var(--ink-faint);font-family:"Geist Mono",monospace;letter-spacing:0}
-
-/* === coverage strip === */
+.md-action{display:inline-flex;align-items:center;gap:5px;color:var(--ink-soft);font-size:11.5px;letter-spacing:-0.005em;padding:3px 7px;border-radius:4px}
+.md-action:hover{color:var(--ink);background:var(--rule-soft)}
+.md-action svg{flex-shrink:0}
+/* === coverage strip (now compact, sits at the bottom of drawer) === */
 .coverage-strip{margin-top:14px;padding-top:14px;border-top:1px solid var(--rule);font-size:11px;color:var(--ink-faint);font-family:"Geist Mono",monospace;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
 .coverage-strip .item{display:inline-flex;align-items:center;gap:5px}
 .coverage-strip .ok{color:var(--accent)}
 .coverage-strip .miss{color:var(--warn)}
-
 /* === draggable divider === */
 .divider-h{background:var(--rule);cursor:col-resize;position:relative;user-select:none;transition:background 120ms;outline:none}
 .divider-h:hover,.divider-h.dragging{background:var(--ink-soft)}
 .divider-h:focus-visible{background:var(--ink-soft);box-shadow:0 0 0 2px var(--accent)}
 .divider-h::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:2px;height:36px;background:var(--ink-faint);border-radius:1px;opacity:0.5;transition:opacity 120ms,background 120ms}
 .divider-h:hover::after,.divider-h.dragging::after,.divider-h:focus-visible::after{background:var(--surface);opacity:1}
-
 /* === stage === */
 .stage{overflow-y:auto;display:flex;justify-content:center;background:var(--bg);min-width:0}
 .preview{max-width:720px;width:100%;padding:64px 56px 120px}
 .preview .meta{font-family:"Geist Mono",monospace;font-size:11px;color:var(--ink-faint);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .preview .meta .pub-tag{background:var(--accent);color:#fff;padding:2px 7px;border-radius:3px;letter-spacing:0.06em;font-weight:500}
-.preview .meta .draft-tag{background:var(--rule);color:var(--ink-soft);padding:2px 7px;border-radius:3px;letter-spacing:0.06em;font-weight:500}
 .preview .meta .live-link{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink)}
 .preview h1{font-weight:600;font-size:56px;line-height:1.0;letter-spacing:-0.04em;margin-bottom:18px;text-wrap:balance;color:var(--ink)}
 .preview .lede{font-size:21px;line-height:1.4;color:var(--ink-soft);font-weight:400;margin-bottom:32px;text-wrap:pretty;letter-spacing:-0.02em}
 .preview .author{font-size:13px;color:var(--ink-faint);margin-bottom:48px;display:flex;gap:12px;align-items:center;letter-spacing:-0.005em}
 .preview .author::before{content:"";display:inline-block;width:24px;height:1px;background:var(--ink-faint)}
+.preview .toc{border-left:2px solid var(--ink);padding:4px 0 4px 16px;margin:0 0 48px}
+.preview .toc-label{font-family:"Geist Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-faint);margin-bottom:8px}
+.preview .toc a{display:block;text-decoration:none;font-size:14px;padding:3px 0;border-bottom:1px solid transparent;width:fit-content;letter-spacing:-0.005em}
+.preview .toc a:hover{border-bottom-color:var(--ink)}
+.preview .toc a.sub{padding-left:14px;font-size:13px;color:var(--ink-soft)}
 .preview h2{font-size:26px;font-weight:600;letter-spacing:-0.03em;margin:44px 0 12px;text-wrap:balance;scroll-margin-top:24px}
 .preview h3{font-size:18px;font-weight:600;letter-spacing:-0.02em;margin:28px 0 8px;color:var(--ink)}
 .preview p{margin-bottom:16px;color:var(--ink-soft);font-size:16px;line-height:1.65;letter-spacing:-0.005em}
 .preview p strong{color:var(--ink);font-weight:500}
 .preview code{font-family:"Geist Mono",monospace;font-size:0.86em;background:rgba(31,111,78,0.08);padding:1px 5px;border-radius:3px;color:var(--accent)}
-.preview pre{background:var(--ink);color:#E8E5DD;padding:14px 18px;border-radius:5px;font-family:"Geist Mono",monospace;font-size:13px;margin:20px 0;line-height:1.55;overflow-x:auto}
-.preview pre code{background:transparent;color:inherit;padding:0;font-size:inherit}
-.preview .toc{border-left:2px solid var(--ink);padding:4px 0 4px 16px;margin:0 0 48px}
-.preview .toc-label{font-family:"Geist Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-faint);margin-bottom:8px}
-.preview .toc a{display:block;text-decoration:none;font-size:14px;padding:3px 0;border-bottom:1px solid transparent;width:fit-content;letter-spacing:-0.005em;color:var(--ink)}
-.preview .toc a:hover{border-bottom-color:var(--ink)}
-.preview .toc a.sub{padding-left:14px;font-size:13px;color:var(--ink-soft)}
-
+.preview pre{background:var(--ink);color:#E8E5DD;padding:14px 18px;border-radius:5px;font-family:"Geist Mono",monospace;font-size:13px;margin:20px 0;line-height:1.55}
+/* === click-to-edit on preview (WYSIWYG layer over markdown source) === */
+.preview [contenteditable]{position:relative;border-radius:5px;transition:background 120ms,box-shadow 120ms;outline:none}
+.preview [contenteditable]:hover{cursor:text;background:rgba(31,111,78,0.04);box-shadow:inset -8px 0 0 -6px rgba(31,111,78,0.4)}
+.preview [contenteditable]:focus,.preview [contenteditable].editing{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent),0 0 0 1px rgba(31,111,78,0.18)}
+.preview [contenteditable]:focus,.preview [contenteditable].editing{padding-left:14px;margin-left:-14px;padding-right:8px;margin-right:-8px}
+.preview .editing::after{content:"editing · synced to markdown";position:absolute;top:-12px;left:-2px;font-family:"Geist Mono",monospace;font-size:9.5px;color:var(--surface);background:var(--accent);padding:3px 8px;border-radius:3px;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;font-weight:500}
+.preview-edithint{font-family:"Geist Mono",monospace;font-size:10.5px;color:var(--ink-faint);letter-spacing:0;display:inline-flex;align-items:center;gap:5px;margin-left:auto}
+.preview-edithint svg{flex-shrink:0;color:var(--accent)}
+/* sync badge on the markdown body header */
+.body-section-head .count.link-active{color:var(--accent);background:var(--accent-soft);padding:2px 7px;border-radius:3px;font-weight:500;letter-spacing:0;display:inline-flex;align-items:center;gap:5px}
 /* statusbar */
 .statusbar{border-top:1px solid var(--rule);background:var(--surface);padding:0 20px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--ink-faint);font-family:"Geist Mono",monospace}
 .statusbar .left{display:flex;gap:18px}
@@ -168,50 +163,70 @@ kbd{font-family:"Geist Mono",monospace;font-size:10px;border:1px solid var(--rul
   <header class="topbar">
     <div class="brand-cluster">
       <div class="brand">
-        <img src="/chilopod-mono.png" alt="airo" class="brand-icon">
+        <img src="chilopod-mono.png" alt="airo" class="brand-icon">
         <span class="brand-sub">studio lite</span>
       </div>
       <span class="brand-divider"></span>
-      <button class="cart-select" aria-haspopup="listbox" id="cart-select" disabled>
+      <button class="cart-select" aria-haspopup="listbox">
         <strong>DocPage</strong><small>v0.0.0</small>
       </button>
     </div>
-    <nav class="audience-nav" aria-label="Audience preview" id="audience-nav">
-      <button class="active" data-audience="human"><span class="dot"></span>Human</button>
-      <button data-audience="seo-aio" disabled title="SEO/AIO preview ships in slice 4">SEO / AIO</button>
-      <button data-audience="agent" disabled title="Agent preview ships in slice 4">Agent</button>
+    <nav class="audience-nav" aria-label="Audience preview">
+      <button class="active"><span class="dot"></span>Human</button>
+      <button>SEO / AIO</button>
+      <button>Agent</button>
     </nav>
     <div class="right-actions">
-      <span class="saved-pill" id="saved-pill">Loading…</span>
-      <button class="btn-publish" id="publish-btn">Publish<span class="live" id="publish-tag">…</span></button>
+      <span class="saved-pill">Saved · just now</span>
+      <button class="btn-icon" title="Capture screenshot">⎙</button>
+      <button class="btn-publish">Publish<span class="live">2 fields</span></button>
     </div>
   </header>
 
-  <main class="body" id="body-grid">
+  <main class="body">
+    <!-- page list -->
     <aside class="pages" aria-label="Pages">
-      <div class="pages-head"><h2>Pages</h2><span class="count" id="pages-count">1</span></div>
-      <div class="pages-search"><input type="search" placeholder="Filter pages…" disabled></div>
-      <div class="pages-list" id="pages-list">
-        <!-- Slice 2 will replace with multi-page rendering. v0 shows the active page only. -->
+      <div class="pages-head"><h2>Pages</h2><span class="count">6</span></div>
+      <div class="pages-search"><input type="search" placeholder="Filter pages…"></div>
+      <div class="pages-list">
+        <button class="page active">
+          <div><div class="name">What is airo-js?</div><div class="row2"><span class="status-dot published"></span><span class="type">DocPage</span><span>· 2m</span></div></div>
+          <div class="score high">92</div>
+        </button>
+        <button class="page">
+          <div><div class="name">Build your first cartridge</div><div class="row2"><span class="status-dot draft"></span><span class="type">Tutorial</span><span>· 1d</span></div></div>
+          <div class="score mid">84</div>
+        </button>
+        <button class="page">
+          <div><div class="name">@airo-js/core API</div><div class="row2"><span class="status-dot published"></span><span class="type">APIRef</span><span>· 3d</span></div></div>
+          <div class="score mid">78</div>
+        </button>
+        <button class="page">
+          <div><div class="name">DataSource shapes</div><div class="row2"><span class="status-dot published"></span><span class="type">APIRef</span><span>· 5d</span></div></div>
+          <div class="score high">88</div>
+        </button>
+        <button class="page">
+          <div><div class="name">Hello DocPage</div><div class="row2"><span class="status-dot draft"></span><span class="type">Example</span><span>· 6d</span></div></div>
+          <div class="score low">63</div>
+        </button>
+        <button class="page">
+          <div><div class="name">Why three audiences?</div><div class="row2"><span class="status-dot draft"></span><span class="type">FAQ</span><span>· never</span></div></div>
+          <div class="score low">47</div>
+        </button>
       </div>
-      <button class="add-page" disabled title="Multi-page support lands in slice 2"><span class="plus">+</span>New page</button>
+      <button class="add-page"><span class="plus">+</span>New page</button>
     </aside>
 
+    <!-- compose drawer -->
     <aside class="drawer" aria-label="Compose">
       <div class="drawer-head">
         <h2>Compose</h2>
-        <div class="crumb" id="compose-crumb"></div>
+        <div class="crumb">what-is-airo-js</div>
       </div>
       <div class="drawer-body">
 
-        <div class="field">
-          <label for="f-title">Title</label>
-          <input id="f-title" type="text" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field">
-          <label for="f-description">Description</label>
-          <textarea id="f-description" rows="2" spellcheck="false"></textarea>
-        </div>
+        <div class="field"><label>Title</label><input type="text" value="What is airo-js?"></div>
+        <div class="field"><label>Description</label><textarea rows="2">A vendor-neutral cartridge framework for AI Result Optimisation (AIO). Emit content for humans, search engines, and AI agents from one authoring action.</textarea></div>
 
         <details class="meta-details">
           <summary class="meta-summary">
@@ -220,70 +235,123 @@ kbd{font-family:"Geist Mono",monospace;font-size:10px;border:1px solid var(--rul
           </summary>
           <div style="margin-top:10px">
             <div class="field-row">
-              <div class="field" style="margin:0">
-                <label for="f-slug">Slug</label>
-                <input id="f-slug" type="text" autocomplete="off" spellcheck="false">
-              </div>
-              <div class="field" style="margin:0">
-                <label for="f-author">Author</label>
-                <input id="f-author" type="text" autocomplete="off" spellcheck="false">
-              </div>
+              <div class="field" style="margin:0"><label>Slug</label><input type="text" value="what-is-airo-js"></div>
+              <div class="field" style="margin:0"><label>Author</label><input type="text" value="AI/RO contributors"></div>
             </div>
-            <div class="field">
-              <label for="f-ogimage">OpenGraph image</label>
-              <input id="f-ogimage" type="text" placeholder="https://… (1200×630)" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="field" style="margin:0">
-              <label for="f-tags">Tags</label>
-              <input id="f-tags" type="text" placeholder="framework, cartridge, aio" autocomplete="off" spellcheck="false">
-            </div>
+            <div class="field"><label>OpenGraph image</label><input type="text" placeholder="https://… (1200×630)"></div>
+            <div class="field" style="margin:0"><label>Tags</label><input type="text" placeholder="framework, cartridge, aio"></div>
           </div>
         </details>
 
         <div class="body-section">
           <div class="body-section-head">
-            <label for="f-body">Body · markdown</label>
-            <span class="count" id="body-count"></span>
+            <label>Body · markdown</label>
+            <span class="count link-active">↔ line 5 · h2 focused</span>
           </div>
-          <textarea id="f-body" class="md-body" spellcheck="false"></textarea>
+          <textarea class="md-body" spellcheck="false">## Overview
+
+airo-js is a rendering-only framework whose architecture **requires** multi-surface output. Every cartridge declares one schema and emits a Web view, a set of MCP tools, and Schema.org / vendor-feed PublicationAdapter outputs from the same post-Transformer snapshot. Author once, serve three audiences.
+
+## Three audiences, one snapshot
+
+SEO optimises content for search-crawler indexers. AIO targets retrieval-augmented agent surfaces. Humans get the rendered View. The cartridge gives you all three from a single source of truth, validated as a hard publish gate.
+
+### Schema.org for SEO
+
+JSON-LD lets search-crawler indexers parse structured data about this page. The DocPage cartridge emits a `TechArticle` entity with author, dates, headline, and canonical URL.
+
+### llms.txt for AIO
+
+llms.txt is the emerging convention for telling AI agents what's here and how to read it. The DocPage cartridge emits a markdown fragment with the page summary and section anchors.
+
+### MCP for Agents
+
+MCP tools let agents query and act on your content with typed inputs and outputs.
+
+## Install
+
+```bash
+pnpm add @airo-js/core @airo-js/cartridge-kit
+```
+
+Cartridge packages (e.g. `@airo-js/doc-cartridges`) layer on top of these primitives.
+</textarea>
           <div class="md-toolbar">
             <span class="hint">## headings build the TOC + llms.txt</span>
+            <a class="md-action" href="#" title="Generate this page with Claude using the cartridge schema">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3"/><path d="M12 18v3"/><path d="m5.6 5.6 2.1 2.1"/><path d="m16.3 16.3 2.1 2.1"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="m5.6 18.4 2.1-2.1"/><path d="m16.3 7.7 2.1-2.1"/></svg>
+              <span>Generate with Claude</span>
+            </a>
           </div>
         </div>
 
-        <div class="coverage-strip" id="coverage-strip"></div>
+        <div class="coverage-strip">
+          <span class="item ok">● JSON-LD</span>
+          <span class="item ok">● llms.txt</span>
+          <span class="item ok">● MCP 2/2</span>
+          <span class="item ok">● sitemap</span>
+          <span class="item miss">○ ogImage</span>
+          <span class="item miss">○ tags</span>
+        </div>
       </div>
     </aside>
 
     <div class="divider-h" role="separator" aria-orientation="vertical" aria-label="Resize compose drawer" tabindex="0" title="Drag to resize · double-click to reset"></div>
 
+    <!-- stage -->
     <section class="stage" aria-label="Audience preview">
-      <article class="preview" id="preview">
-        <div class="meta" id="preview-meta"></div>
-        <h1 id="preview-title"></h1>
-        <p class="lede" id="preview-lede"></p>
-        <div class="author" id="preview-author"></div>
-        <nav class="toc" id="preview-toc"></nav>
-        <div class="md-rendered" id="preview-body"></div>
+      <article class="preview">
+        <div class="meta">
+          <span class="pub-tag">PUBLISHED</span>
+          <span>updated May 8, 2026</span>
+          <span>·</span>
+          <a class="live-link" href="https://airo.dev/docs/what-is-airo-js" target="_blank">View live ↗</a>
+          <span class="preview-edithint" title="Click any heading or paragraph to edit inline, or type in the markdown drawer">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            click to edit · syncs to markdown
+          </span>
+        </div>
+        <h1 contenteditable="true" spellcheck="false">What is airo-js?</h1>
+        <p class="lede" contenteditable="true" spellcheck="false">A vendor-neutral cartridge framework for AI Result Optimisation. Emit content for humans, search engines, and AI agents from one authoring action.</p>
+        <div class="author">By AI/RO contributors</div>
+        <nav class="toc">
+          <div class="toc-label">On this page</div>
+          <a href="#overview">Overview</a>
+          <a href="#three-audiences">Three audiences, one snapshot</a>
+          <a class="sub" href="#schema-org">Schema.org for SEO</a>
+          <a class="sub" href="#llms-txt">llms.txt for AIO</a>
+          <a class="sub" href="#mcp-agents">MCP for Agents</a>
+          <a href="#install">Install</a>
+        </nav>
+        <h2 id="overview" contenteditable="true" spellcheck="false">Overview</h2>
+        <p contenteditable="true" spellcheck="false">airo-js is a rendering-only framework whose architecture <strong>requires</strong> multi-surface output. Every cartridge declares one schema and emits a Web view, a set of MCP tools, and Schema.org / vendor-feed PublicationAdapter outputs from the same post-Transformer snapshot. Author once, serve three audiences.</p>
+        <h2 id="three-audiences" class="editing" contenteditable="true" spellcheck="false">Three audiences, one snapshot</h2>
+        <p contenteditable="true" spellcheck="false">SEO optimises content for search-crawler indexers. AIO targets retrieval-augmented agent surfaces. Humans get the rendered View. The cartridge gives you all three from a single source of truth, validated as a hard publish gate.</p>
+        <h3 id="schema-org" contenteditable="true" spellcheck="false">Schema.org for SEO</h3>
+        <p contenteditable="true" spellcheck="false">JSON-LD lets search-crawler indexers parse structured data about this page. The DocPage cartridge emits a <code>TechArticle</code> entity with author, dates, headline, and canonical URL.</p>
+        <h3 id="llms-txt" contenteditable="true" spellcheck="false">llms.txt for AIO</h3>
+        <p contenteditable="true" spellcheck="false">llms.txt is the emerging convention for telling AI agents what's here and how to read it. The DocPage cartridge emits a markdown fragment with the page summary and section anchors.</p>
+        <h3 id="mcp-agents" contenteditable="true" spellcheck="false">MCP for Agents</h3>
+        <p contenteditable="true" spellcheck="false">MCP tools let agents query and act on your content with typed inputs and outputs.</p>
+        <h2 id="install" contenteditable="true" spellcheck="false">Install</h2>
+        <pre><code>pnpm add @airo-js/core @airo-js/cartridge-kit</code></pre>
       </article>
     </section>
   </main>
 
   <footer class="statusbar">
     <div class="left">
-      <span id="status-saved" class="ok">● Loading</span>
-      <span id="status-revision">SQLite · revision —</span>
-      <span id="status-pages">1 page</span>
+      <span class="ok">● Saved</span>
+      <span>SQLite · revision 47</span>
+      <span>6 pages · 4 published · 2 drafts</span>
     </div>
-    <div><kbd>⇧⌘\</kbd> reset panes</div>
+    <div><kbd>⌘K</kbd> jump · <kbd>⌘P</kbd> publish · <kbd>⌘G</kbd> generate · <kbd>⇧⌘\</kbd> reset panes</div>
   </footer>
 </div>
-
 <script>
-// Drawer↔stage divider drag (inline because it's small + self-contained).
 (function(){
   var divider=document.querySelector('.divider-h');
-  var body=document.getElementById('body-grid');
+  var body=document.querySelector('.body');
   if(!divider||!body) return;
   var dragging=false,startX=0,startW=413;
   var MIN=300,MAX=720,DEFAULT=413;
@@ -325,7 +393,22 @@ kbd{font-family:"Geist Mono",monospace;font-size:10px;border:1px solid var(--rul
     if(e.key==='\\'&&e.shiftKey&&(e.metaKey||e.ctrlKey)){setCols(DEFAULT);e.preventDefault()}
   });
 })();
+
+// Click-to-edit on the preview ↔ markdown source sync indicator
+(function(){
+  var els=document.querySelectorAll('.preview [contenteditable]');
+  var badge=document.querySelector('.body-section-head .count');
+  if(!badge||els.length===0) return;
+  var labels=['Title field','Description field','line 1 · h2 focused','line 3 · p focused','line 5 · h2 focused','line 7 · p focused','line 9 · h3 focused','line 11 · p focused','line 13 · h3 focused','line 15 · p focused','line 17 · h3 focused','line 19 · p focused','line 21 · h2 focused'];
+  els.forEach(function(el,i){
+    el.addEventListener('focus',function(){
+      els.forEach(function(o){o.classList.remove('editing')});
+      el.classList.add('editing');
+      badge.classList.add('link-active');
+      badge.textContent='↔ '+(labels[i]||'?');
+    });
+  });
+})();
 </script>
-<script type="module" src="/bundle.js"></script>
 </body>
 </html>
