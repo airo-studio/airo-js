@@ -84,8 +84,10 @@ fi
 
 echo
 echo "==> Building all packages (typecheck + tsc)"
-pnpm -r typecheck >/dev/null
-pnpm -r build >/dev/null
+# Filter to packages only — apps/* are workspace members for local dev (workspace:*
+# linking) but are not published and must not gate the publish flow.
+pnpm -r --filter './packages/*' typecheck >/dev/null
+pnpm -r --filter './packages/*' build >/dev/null
 echo "    OK"
 
 # ---- dry-run preview -------------------------------------------------------
