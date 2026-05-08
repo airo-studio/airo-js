@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.cache/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# yalc — local linking. The .yalc/ tree shouldn't appear in this repo
+# (yalc add lives in the *consumer's* tree), but guard anyway in case
+# someone runs it here by mistake.
+.yalc/
+yalc.lock
+
+# Temporary
+tmp/
+.tmp/

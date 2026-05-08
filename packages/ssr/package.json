@@ -1,0 +1,50 @@
+{
+  "name": "@airo-js/ssr",
+  "version": "0.1.0",
+  "description": "Airo SSR — runtime-agnostic edge dispatch, renderAppToHTML, and publication-adapter execution.",
+  "keywords": [
+    "airo",
+    "ssr",
+    "edge",
+    "rendering",
+    "schema-org",
+    "json-ld",
+    "publication-adapter",
+    "framework"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/ssr"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/ssr#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/core": "workspace:*",
+    "@airo-js/cartridge-kit": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
