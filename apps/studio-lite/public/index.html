@@ -54,6 +54,30 @@
       font-family: var(--font-mono);
       font-size: 12px;
     }
+    .chrome__spacer { flex: 1; }
+    .chrome__publish-status {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    .chrome__publish {
+      padding: 6px 14px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: filter 80ms ease;
+    }
+    .chrome__publish:hover { filter: brightness(1.05); }
+    .chrome__publish:active { filter: brightness(0.95); }
+    .chrome__publish:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
 
     .sidebar {
       grid-area: sidebar;
@@ -108,6 +132,9 @@
     <header class="chrome">
       <span class="chrome__brand">studio-lite</span>
       <span class="chrome__crumb">DocPage · v0</span>
+      <span class="chrome__spacer"></span>
+      <span id="publish-status" class="chrome__publish-status"></span>
+      <button id="publish-btn" class="chrome__publish" type="button">Publish</button>
     </header>
     <aside class="sidebar">
       <studio-aio-score><div class="skeleton">Loading score…</div></studio-aio-score>

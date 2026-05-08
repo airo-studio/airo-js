@@ -3,3 +3,6 @@ public/bundle.js.map
 
 # SQLite store — per-checkout, never committed.
 .studio-data/
+
+# Static published output — regenerated on each Publish.
+dist-publish/

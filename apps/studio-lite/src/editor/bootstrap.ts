@@ -85,6 +85,14 @@ async function boot(): Promise<void> {
       console.warn('[studio-lite] validation error:', detail.error);
     });
   }
+
+  const publishBtn = document.getElementById('publish-btn') as HTMLButtonElement | null;
+  const publishStatus = document.getElementById('publish-status');
+  if (publishBtn) {
+    publishBtn.addEventListener('click', () => {
+      void runPublish(publishBtn, publishStatus);
+    });
+  }
 }
 
 async function loadInitial(): Promise<{ data: unknown; revisionId: number; seeded: boolean }> {
@@ -136,6 +144,46 @@ async function persistAndTrack(data: unknown): Promise<void> {
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('[studio-lite] /api/save failed', e);
+  }
+}
+
+interface PublishResponse {
+  ok: boolean;
+  pages?: Array<{ slug: string; title: string; canonical: string }>;
+  files?: Array<{ path: string; bytes: number }>;
+  warnings?: Array<{ code: string; message: string }>;
+  outputDir?: string;
+  elapsedMs?: number;
+  error?: string;
+}
+
+async function runPublish(btn: HTMLButtonElement, status: HTMLElement | null): Promise<void> {
+  btn.disabled = true;
+  btn.textContent = 'Publishing…';
+  if (status) status.textContent = '';
+  try {
+    const res = await fetch('/api/publish', { method: 'POST' });
+    const body = (await res.json()) as PublishResponse;
+    if (!res.ok || !body.ok) {
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    // eslint-disable-next-line no-console
+    console.info('[studio-lite] published', body);
+    const firstPage = body.pages?.[0];
+    if (status) {
+      const fileCount = body.files?.length ?? 0;
+      status.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} · ${body.elapsedMs ?? 0}ms`;
+    }
+    if (firstPage) {
+      window.open(`/publish/${firstPage.slug}/`, '_blank', 'noopener,noreferrer');
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[studio-lite] /api/publish failed', e);
+    if (status) status.textContent = `failed: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Publish';
   }
 }
 

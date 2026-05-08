@@ -12,21 +12,30 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { sampleDocPageData } from '@airo-js/doc-cartridges';
+import type { Cartridge } from '@airo-js/cartridge-kit';
+import { docPageCartridge, sampleDocPageData } from '@airo-js/doc-cartridges';
 
 import { CartridgeStateStore } from './db.js';
+import { publishCartridge } from './publish.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = resolve(__dirname, '..', '..');
 const PUBLIC_DIR = resolve(APP_ROOT, 'public');
 const DB_PATH = resolve(APP_ROOT, '.studio-data', 'db.sqlite');
+const PUBLISH_DIR = resolve(APP_ROOT, 'dist-publish');
 
 const store = new CartridgeStateStore(DB_PATH);
+
+// Active cartridge instance the studio is authoring against. Hardcoded to
+// doc-page at v0; multi-cartridge selection arrives with the chrome bar's
+// cartridge dropdown later.
+const ACTIVE_CARTRIDGE: Cartridge = docPageCartridge as unknown as Cartridge;
 
 // Cartridge identity is hardcoded at v0 — single-cartridge studio. Multi-
 // cartridge selection arrives once the cartridge selector lands in the
@@ -116,6 +125,50 @@ app.post('/api/save', async (c) => {
 
 app.get('/api/fixture', (c) => c.json({ data: sampleDocPageData }));
 
+app.post('/api/publish', async (c) => {
+  const state = store.latest(ACTIVE_CARTRIDGE_ID);
+  const data = state ? state.data : sampleDocPageData;
+  try {
+    const result = await publishCartridge({
+      cartridge: ACTIVE_CARTRIDGE,
+      instances: [{ data }],
+      outputDir: PUBLISH_DIR,
+    });
+    return c.json({
+      ok: true,
+      outputDir: result.outputDir,
+      pages: result.pages,
+      files: result.files,
+      warnings: result.warnings,
+      revisionId: state?.revisionId ?? 0,
+      elapsedMs: result.completedAt - result.startedAt,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // eslint-disable-next-line no-console
+    console.error('[studio-lite] publish failed', e);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// Static serving of published artifacts for in-browser preview.
+app.get('/publish/llms.txt', (c) =>
+  servePublishFile(c, 'llms.txt', 'text/plain; charset=utf-8'),
+);
+app.get('/publish/sitemap.xml', (c) =>
+  servePublishFile(c, 'sitemap.xml', 'application/xml; charset=utf-8'),
+);
+app.get('/publish/robots.txt', (c) =>
+  servePublishFile(c, 'robots.txt', 'text/plain; charset=utf-8'),
+);
+app.get('/publish/:slug', (c) => {
+  const slug = c.req.param('slug');
+  return c.redirect(`/publish/${slug}/`);
+});
+app.get('/publish/:slug/', (c) =>
+  servePublishFile(c, `${c.req.param('slug')}/index.html`, 'text/html; charset=utf-8'),
+);
+
 app.get('/healthz', (c) =>
   c.json({
     ok: true,
@@ -123,6 +176,26 @@ app.get('/healthz', (c) =>
     revisions: store.countByCartridge(ACTIVE_CARTRIDGE_ID),
   }),
 );
+
+async function servePublishFile(
+  c: Context,
+  relPath: string,
+  contentType: string,
+): Promise<Response> {
+  try {
+    const body = await readFile(resolve(PUBLISH_DIR, relPath), 'utf8');
+    return c.body(body, 200, {
+      'content-type': contentType,
+      'cache-control': 'no-store',
+    });
+  } catch {
+    return c.text(
+      `Not published yet. Click "Publish" in the studio (or POST /api/publish) to generate this file.`,
+      404,
+      { 'content-type': 'text/plain; charset=utf-8' },
+    );
+  }
+}
 
 // ─────────────────────── boot ────────────────────────────────────────
 
