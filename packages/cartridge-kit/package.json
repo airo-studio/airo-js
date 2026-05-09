@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/cartridge-kit",
-  "version": "0.2.0-rc.5",
+  "version": "0.2.0-rc.6",
   "description": "Airo cartridge contract — Cartridge<TData, TConfig> + DataSource / View / MCP tool / Template / PublicationAdapter / Gate primitives. The API surface every cartridge implements.",
   "keywords": [
     "airo",
@@ -44,7 +44,7 @@
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "dependencies": {
-    "@airo-js/core": "workspace:*"
+    "@airo-js/core": "workspace:^"
   },
   "devDependencies": {
     "vitest": "^2.1.0"
