@@ -14,6 +14,8 @@
  * different semantics (e.g. async support before v0.3).
  */
 
+import { logger } from '@airo-js/log';
+
 import type {
   PostProcessor,
   PostProcessorContext,
@@ -22,6 +24,8 @@ import type {
   Transformer,
   TransformerContext,
 } from './transformer.js';
+
+const log = logger('core');
 
 interface PipelineOptions {
   /**
@@ -69,9 +73,10 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
         }
         // 'skip' — log and pass input through untouched. Don't widen
         // visibility silently if a config/data shape changes.
-        console.error(
-          `[@airo-js/core] Transformer "${t.name}" threw with errorPolicy='skip'; passing input through.`,
+        log.error(
+          `Transformer "${t.name}" threw with errorPolicy='skip'; passing input through.`,
           err,
+          { transformer: t.name, phase: 'pipeline' },
         );
       }
       if (trace) {
@@ -98,7 +103,10 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
       } catch (err) {
         // Post-processors are side-effect hooks; one failing should not
         // tear down the others. Log and continue.
-        console.error(`[@airo-js/core] PostProcessor "${p.name}" threw during apply; continuing.`, err);
+        log.error(`PostProcessor "${p.name}" threw during apply; continuing.`, err, {
+          postProcessor: p.name,
+          phase: 'post-process',
+        });
       }
     }
     // Aggregate teardown — LIFO so destruction order mirrors construction.
@@ -107,7 +115,7 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
         try {
           teardowns[i]!();
         } catch (err) {
-          console.error('[@airo-js/core] PostProcessor teardown threw; continuing.', err);
+          log.error('PostProcessor teardown threw; continuing.', err, { phase: 'post-process-teardown' });
         }
       }
     };

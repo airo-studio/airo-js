@@ -1,25 +1,24 @@
 {
-  "name": "@airo-js/core",
-  "version": "0.2.0",
-  "description": "Airo core runtime — createApp, PageManager, EventBus, HashRouter, Theme, IsolationRoot, RuntimePipeline, registry mailbox.",
+  "name": "@airo-js/log",
+  "version": "0.1.0",
+  "description": "Airo log — sink-based structured event logging for the airo-js framework. Replaces scattered console.* calls across @airo-js/* packages with a single dispatcher; apps replace the sink to feed events into devtools panels, Sentry, Datadog, or stay with the default console behaviour.",
   "keywords": [
     "airo",
     "framework",
-    "rendering",
-    "runtime",
-    "shadow-dom",
-    "style-isolation",
-    "event-bus",
-    "router"
+    "log",
+    "logger",
+    "events",
+    "observability",
+    "devtools-sink"
   ],
   "author": "AI/RO contributors",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/airo-studio/airo-js.git",
-    "directory": "packages/core"
+    "directory": "packages/log"
   },
-  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/core#readme",
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/log#readme",
   "bugs": {
     "url": "https://github.com/airo-studio/airo-js/issues"
   },
@@ -39,9 +38,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
-  },
-  "dependencies": {
-    "@airo-js/log": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

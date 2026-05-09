@@ -12,6 +12,8 @@
  * data the renderers receive).
  */
 
+import { logger } from '@airo-js/log';
+
 import type { Page, PageId } from './schema.js';
 import type {
   NavigationState,
@@ -23,6 +25,8 @@ import type {
 import type { IEventBus } from './events.js';
 import type { IHashRouter, RouteState } from './router.js';
 import { HashRouter } from './router.js';
+
+const log = logger('core');
 import { mountBreadcrumb, type BreadcrumbHandle, type LabelResolver } from './breadcrumb.js';
 
 function findEntryPage<TPageType extends string>(
@@ -181,7 +185,7 @@ export class PageManager<
       try {
         this.router.push(this.navState as RouteState);
       } catch (err) {
-        console.warn('[@airo-js/core] PageManager router.push failed:', err);
+        log.warn('PageManager router.push failed', { err, phase: 'router' });
       }
     }
 
@@ -206,9 +210,10 @@ export class PageManager<
 
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
-      console.warn(
-        `[@airo-js/core] PageManager: no renderer registered for page type "${targetPage.type}". Hydrate skipped.`,
-      );
+      log.warn(`no renderer registered for page type "${targetPage.type}". Hydrate skipped.`, {
+        pageType: targetPage.type,
+        phase: 'hydrate',
+      });
       return;
     }
 
@@ -224,8 +229,9 @@ export class PageManager<
     if (typeof renderer.hydrate === 'function') {
       renderer.hydrate(this.opts.container, ctx);
     } else {
-      console.warn(
-        `[@airo-js/core] PageManager: renderer for "${targetPage.type}" does not implement hydrate(). Falling back to render() — the SSR HTML is being regenerated client-side.`,
+      log.warn(
+        `renderer for "${targetPage.type}" does not implement hydrate(). Falling back to render() — the SSR HTML is being regenerated client-side.`,
+        { pageType: targetPage.type, phase: 'hydrate' },
       );
       renderer.render(this.opts.container, ctx);
     }
@@ -311,7 +317,7 @@ export class PageManager<
         this.router.replace(this.navState as RouteState);
       }
     } catch (err) {
-      console.warn('[@airo-js/core] HashRouter init failed; URL routing disabled.', err);
+      log.warn('HashRouter init failed; URL routing disabled.', { err, phase: 'router' });
       this.router?.stop();
       this.router = null;
     }
@@ -326,8 +332,9 @@ export class PageManager<
 
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
-      console.warn(
-        `[@airo-js/core] PageManager: no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
+      log.warn(
+        `no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
+        { pageType: targetPage.type, phase: 'navigate' },
       );
       return;
     }

@@ -244,6 +244,9 @@ describe('defineAiroApp', () => {
     });
 
     expect(consoleWarn).toHaveBeenCalledTimes(1);
-    expect((consoleWarn.mock.calls[0][0] as string)).toContain(elementName);
+    // Args from @airo-js/log's consoleSink: [tag, msg, data?]. Match across all args.
+    const warnArgs = consoleWarn.mock.calls[0].map(String).join(' ');
+    expect(warnArgs).toContain(elementName);
+    expect(warnArgs).toContain('@airo-js/embed');
   });
 });
