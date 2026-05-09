@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/runtime",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Airo runtime — cartridge mount orchestration. Single-call shell setup, data fetch, pipeline, and mount via createCartridgeApp; hooks for studio-side theme + error UI.",
   "keywords": [
     "airo",
@@ -41,8 +41,8 @@
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "dependencies": {
-    "@airo-js/core": "workspace:*",
-    "@airo-js/cartridge-kit": "workspace:*"
+    "@airo-js/core": "workspace:^",
+    "@airo-js/cartridge-kit": "workspace:^"
   },
   "devDependencies": {
     "happy-dom": "^15.0.0",

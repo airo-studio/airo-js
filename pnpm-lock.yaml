@@ -30,7 +30,7 @@ importers:
   packages/cartridge-kit:
     dependencies:
       '@airo-js/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       vitest:
@@ -79,10 +79,10 @@ importers:
   packages/runtime:
     dependencies:
       '@airo-js/cartridge-kit':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../cartridge-kit
       '@airo-js/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       happy-dom:
@@ -95,13 +95,13 @@ importers:
   packages/ssr:
     dependencies:
       '@airo-js/cartridge-kit':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../cartridge-kit
       '@airo-js/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@airo-js/log':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../log
     devDependencies:
       happy-dom:
