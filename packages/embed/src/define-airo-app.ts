@@ -1,0 +1,324 @@
+/**
+ * defineAiroApp — register a custom element that mounts an Airo cartridge.
+ *
+ * The smallest possible host-page surface: a customer pastes
+ * `<airo-app airo-id="…">` into their HTML, the embed bundle handles
+ * everything else. The host app supplies hooks for the parts that are
+ * inherently studio-specific:
+ *
+ *   - `loadConfig`       — hit your studio backend, return widget config
+ *   - `resolveCartridge` — dynamic-import your cartridge module
+ *   - `fetchSsrHtml`     — optional SSR-hydrate path
+ *   - `onError`          — render studio-branded error UI
+ *   - `onMounted`        — observability anchor
+ *
+ * Everything else (custom-element registration, lifecycle, runtime
+ * lazy-load, mount handoff) is generic and lives here. M13 line: embed
+ * owns generic orchestration; host apps own auth, fetch, and cartridge
+ * resolution.
+ *
+ * Bundle budget: ~5 KB minified / ~2.5 KB gzip. The runtime is lazy-
+ * imported via `await import('@airo-js/runtime')` so customer pages with
+ * many widgets pay the runtime cost once, and pages that never reach a
+ * mount path don't pay it at all.
+ *
+ * SSR-hydrate path: when `loadConfig` returns `ssrHtml` (or `fetchSsrHtml`
+ * does), embed paints it into the host element AND passes `mode: 'hydrate'`
+ * to mountCartridge. The runtime preserves the SSR markup inside the
+ * shadow wrapper and the active page renderer's `hydrate()` runs in place
+ * of `render()` — wiring listeners without repainting. Cartridges that
+ * don't implement `hydrate()` on their views fall back to `render()`
+ * (with a console warning); the SSR markup gets repainted client-side.
+ */
+
+import type { Cartridge } from '@airo-js/cartridge-kit';
+import type { StyleIsolation } from '@airo-js/core';
+
+/**
+ * Result the host app's `loadConfig` returns. Carries the cartridge id
+ * (for `resolveCartridge`), the cartridge-shaped config, plus optional
+ * runtime metadata (CDN base, version pin, SSR HTML, preloaded data).
+ */
+export interface LoadConfigResult<TConfig = unknown> {
+  /** Cartridge config — shape declared by the cartridge's TConfig. */
+  config: TConfig;
+  /** Cartridge id — passed to `resolveCartridge` to load the cartridge module. */
+  cartridgeId: string;
+  /** Template id picked for this widget. Defaults to `cartridge.defaultTemplateId`. */
+  templateId?: string;
+  /** Style isolation strategy. Default: 'partial'. */
+  styleIsolation?: StyleIsolation;
+  /** CDN base URL for runtime + chunk loading (forward-compat for v0.2 chunk loader). */
+  runtimeBase?: string;
+  /** Pinned runtime version. e.g. '0.1.0' (forward-compat for v0.2 chunk loader). */
+  runtimeVersion?: string;
+  /**
+   * Optional pre-rendered HTML for the SSR-hydrate path. v0.1 paints this
+   * as a load skeleton (see file-level note); runtime v0.2 will hydrate
+   * over it.
+   */
+  ssrHtml?: string;
+  /** Optional preloaded data — skips `dataSource.fetch` in mountCartridge. */
+  preloadedData?: unknown;
+}
+
+/**
+ * Phase identifier passed to `onError`. Lets host apps render different
+ * error UI per phase (retry on transient `load-config`, fatal on
+ * `resolve-cartridge`, fall through on `fetch-ssr`).
+ */
+export type EmbedPhase = 'load-config' | 'resolve-cartridge' | 'fetch-ssr' | 'mount';
+
+export interface DefineAiroAppOptions {
+  /**
+   * Custom element tag name. Default: 'airo-app'. Host apps pick a name
+   * that fits their brand: `<dotter-app>`, `<commerce-widget>`, etc. Custom
+   * element names must contain a hyphen per the spec.
+   */
+  elementName?: string;
+  /**
+   * Attribute name carrying the widget id. Default: 'airo-id'. Customer
+   * pastes `<airo-app airo-id="dw_abc123">` to mount.
+   */
+  idAttribute?: string;
+  /**
+   * Attribute name carrying the auth token. Default: 'airo-token'.
+   * Optional per element — same-origin previews typically skip the token.
+   */
+  tokenAttribute?: string;
+
+  /**
+   * Fetch widget config from the host app's studio backend. Called once
+   * per element mount with the id + (optional) token attribute values.
+   * Host app handles auth headers, allowed-domain checks, LoadResponse
+   * envelope unwrapping — embed only sees the result.
+   */
+  loadConfig: (
+    id: string,
+    token: string | null,
+  ) => Promise<LoadConfigResult>;
+
+  /**
+   * Resolve a cartridge by id. Host app typically dynamic-imports the
+   * cartridge module here — keeps the embed bundle tiny because cartridge
+   * code only loads when an element with that id renders:
+   *
+   *   resolveCartridge: async (id) => {
+   *     if (id === 'commerce') return (await import('@my-org/commerce-cartridge')).commerceCartridge;
+   *     throw new Error(`unknown cartridge: ${id}`);
+   *   }
+   */
+  resolveCartridge: (id: string) => Promise<Cartridge<unknown, unknown>>;
+
+  /**
+   * Optional SSR-hydrate path. When implemented AND `loadConfig` didn't
+   * already return `ssrHtml`, embed calls this to fetch the SSR HTML.
+   * Errors fall through to CSR — SSR is opportunistic.
+   */
+  fetchSsrHtml?: (id: string, token: string | null) => Promise<string | null>;
+
+  /**
+   * Hook called when mount fails at any phase. Host app supplies the
+   * studio-branded error UI in `host`. Without this hook, embed logs to
+   * console.error and leaves the host element empty.
+   */
+  onError?: (phase: EmbedPhase, err: unknown, host: HTMLElement) => void;
+
+  /**
+   * Hook called once per successful mount. Host app emits to its own
+   * telemetry from here.
+   */
+  onMounted?: (id: string, host: HTMLElement) => void;
+}
+
+/**
+ * Mount handle the custom element keeps internally so disconnect can
+ * trigger teardown. Mirrors the destroy-only subset of MountCartridgeResult
+ * so we don't take a structural dep on the runtime types at compile time
+ * (the runtime is dynamic-imported).
+ */
+interface MountHandle {
+  destroy: () => void;
+}
+
+const REGISTERED_ELEMENTS = new Set<string>();
+
+/**
+ * Register the custom element. Idempotent — calling twice with the same
+ * `elementName` warns and no-ops; different element names can coexist
+ * (one bundle may register both `<dotter-app>` and `<airo-app>` during
+ * a v1 → cartridge transition).
+ *
+ * Server-safe: when `customElements` is undefined (SSR / old runtimes)
+ * the call returns without error so host apps can register at module
+ * load time without guarding.
+ */
+export function defineAiroApp(opts: DefineAiroAppOptions): void {
+  const elementName = opts.elementName ?? 'airo-app';
+  const idAttribute = opts.idAttribute ?? 'airo-id';
+  const tokenAttribute = opts.tokenAttribute ?? 'airo-token';
+
+  if (typeof customElements === 'undefined') return;
+
+  if (REGISTERED_ELEMENTS.has(elementName)) {
+    console.warn(
+      `[@airo-js/embed] '${elementName}' already registered; skipping.`,
+    );
+    return;
+  }
+
+  class AiroAppElement extends HTMLElement {
+    private mount: MountHandle | null = null;
+    private disposed = false;
+
+    async connectedCallback(): Promise<void> {
+      const id = this.getAttribute(idAttribute);
+      if (!id) {
+        console.error(
+          `[@airo-js/embed] <${elementName}> is missing required attribute '${idAttribute}'.`,
+        );
+        return;
+      }
+      const token = this.getAttribute(tokenAttribute);
+
+      // Phase 1 — host-app config fetch.
+      let loaded: LoadConfigResult;
+      try {
+        loaded = await opts.loadConfig(id, token);
+      } catch (err) {
+        emitError(opts, 'load-config', err, this);
+        return;
+      }
+      if (this.disposed) return;
+
+      // Phase 2 — host-app cartridge resolution.
+      let cartridge: Cartridge<unknown, unknown>;
+      try {
+        cartridge = await opts.resolveCartridge(loaded.cartridgeId);
+      } catch (err) {
+        emitError(opts, 'resolve-cartridge', err, this);
+        return;
+      }
+      if (this.disposed) return;
+
+      // Phase 3 — opportunistic SSR HTML fetch. Errors fall through to CSR.
+      let ssrHtml: string | null = loaded.ssrHtml ?? null;
+      if (!ssrHtml && opts.fetchSsrHtml) {
+        try {
+          ssrHtml = await opts.fetchSsrHtml(id, token);
+        } catch (err) {
+          emitError(opts, 'fetch-ssr', err, this);
+          // Intentional fall-through — SSR is opportunistic.
+        }
+        if (this.disposed) return;
+      }
+
+      // Phase 4 — pick template.
+      const templateId = loaded.templateId ?? cartridge.defaultTemplateId;
+      const template = cartridge.templates.find((t) => t.id === templateId);
+      if (!template) {
+        emitError(
+          opts,
+          'mount',
+          new Error(
+            `[@airo-js/embed] cartridge '${cartridge.id}' has no template '${templateId}'.`,
+          ),
+          this,
+        );
+        return;
+      }
+
+      // Phase 5 — paint SSR HTML into the host before mount. The runtime
+      // (mode: 'hydrate' below) preserves it inside the shadow wrapper and
+      // hands off to renderer.hydrate() instead of renderer.render().
+      const hydrating = Boolean(ssrHtml);
+      if (ssrHtml) {
+        this.innerHTML = ssrHtml;
+      }
+
+      // Phase 6 — lazy-import the runtime. Bundle budget protected by
+      // never statically importing — esbuild + tsc treat dynamic import
+      // as a chunk boundary.
+      let mountCartridge: typeof import('@airo-js/runtime').mountCartridge;
+      try {
+        ({ mountCartridge } = await import('@airo-js/runtime'));
+      } catch (err) {
+        emitError(opts, 'mount', err, this);
+        return;
+      }
+      if (this.disposed) return;
+
+      // Phase 7 — mount.
+      try {
+        const result = await mountCartridge({
+          cartridge,
+          config: loaded.config,
+          template,
+          host: this,
+          styleIsolation: loaded.styleIsolation,
+          widgetId: id,
+          preloadedData: loaded.preloadedData,
+          mode: hydrating ? 'hydrate' : 'csr',
+        });
+        if (this.disposed) {
+          // Element disconnected mid-mount — tear down what we just built.
+          result.destroy();
+          return;
+        }
+        this.mount = result;
+        if (!result.blocked) {
+          opts.onMounted?.(id, this);
+        }
+      } catch (err) {
+        emitError(opts, 'mount', err, this);
+      }
+    }
+
+    disconnectedCallback(): void {
+      this.disposed = true;
+      if (this.mount) {
+        try {
+          this.mount.destroy();
+        } catch (err) {
+          console.error('[@airo-js/embed] destroy threw:', err);
+        }
+        this.mount = null;
+      }
+    }
+  }
+
+  customElements.define(elementName, AiroAppElement);
+  REGISTERED_ELEMENTS.add(elementName);
+}
+
+/**
+ * Default error path — calls the host app's `onError` if provided, falls
+ * back to console.error otherwise. Centralized so the connectedCallback
+ * never silently swallows a phase error.
+ */
+function emitError(
+  opts: DefineAiroAppOptions,
+  phase: EmbedPhase,
+  err: unknown,
+  host: HTMLElement,
+): void {
+  if (opts.onError) {
+    try {
+      opts.onError(phase, err, host);
+    } catch (hookErr) {
+      console.error('[@airo-js/embed] onError hook itself threw:', hookErr);
+    }
+    return;
+  }
+  console.error(`[@airo-js/embed] ${phase} failed:`, err);
+}
+
+/**
+ * Test-only escape hatch — clears the registered-elements memo so a
+ * single test process can call defineAiroApp many times with the same
+ * element name without the idempotency warning. NOT exported from the
+ * package barrel; tests import directly from this file.
+ */
+export function __resetRegisteredElementsForTesting(): void {
+  REGISTERED_ELEMENTS.clear();
+}

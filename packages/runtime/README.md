@@ -2,7 +2,7 @@
 
 Cartridge mount orchestration for the airo framework. Single-call shell setup → optional data fetch → pipeline → mount via `createCartridgeApp`. Studio-side concerns (theme, error UI, debug observers) extend via hooks rather than forking the orchestration.
 
-> Status: **v0.1.0**. CSR-only single-mount surface. SSR hydrate fork, per-page chunk loading, and live `update()` deferred to v0.2 (additive — v0.1 callers won't break).
+> Status: **v0.2.0**. CSR + SSR-hydrate single-mount surface. Per-page chunk loading and live `update()` still deferred (additive — current callers won't break).
 
 ## What's in here
 
@@ -97,9 +97,9 @@ result.destroy();
 | Global / skeleton CSS | **Host app** (via `onShellReady`) |
 | Config-shape translation (studio config → cartridge config) | **Host app** (upstream of `mountCartridge`) |
 | Error UI | **Host app** (via `onError`) |
-| Per-page chunk loading | `@airo-js/runtime` (v0.2 — deferred) |
-| SSR hydrate fork | `@airo-js/runtime` + `@airo-js/ssr` (v0.2 — deferred) |
-| Live `update(opts)` for studio chrome | `@airo-js/runtime` (v0.2 — deferred) |
+| SSR-hydrate fork (`mode: 'hydrate'`) | `@airo-js/runtime` (v0.2 — landed) |
+| Per-page chunk loading | `@airo-js/runtime` (deferred) |
+| Live `update(opts)` for studio chrome | `@airo-js/runtime` (deferred) |
 
 ## Hook contract
 
@@ -138,11 +138,30 @@ const app = createApp(appConfig, { ..., resolveRenderer: cast }); // ← cast sm
 
 Replace it with one call to `mountCartridge(opts)`. The cast disappears (the runtime calls `createCartridgeApp`, which handles the registry's heterogeneous typing internally).
 
-## v0.2 deferred (signature-compatible)
+## SSR-hydrate path (v0.2)
 
-The current signature is a strict subset of the v0.2 surface. Adding the deferred knobs won't break v0.1 callers:
+```ts
+// Customer page already has SSR markup in `host`.
+const result = await mountCartridge({
+  cartridge,
+  config,
+  template,
+  host,
+  preloadedData: ssrSnapshot,    // same data the SSR render saw
+  mode: 'hydrate',
+});
+```
 
-- `mode?: 'csr' | 'hydrate'` — adopt SSR-rendered DOM under `host` instead of painting.
+What `mode: 'hydrate'` does:
+
+- Preserves the existing markup in `host` (moves it inside the shadow wrapper when isolation is `'partial'` / `'full'`).
+- Drives the active page renderer's `hydrate()` instead of `render()` — listeners attach without repainting.
+- Renderers without `hydrate()` fall back to `render()` (with a `[@airo-js/core]` warning); the SSR markup is repainted client-side. Cartridges that ship to SSR pages should implement `hydrate()` on every view that's allowed to be the entry page.
+
+`mode: 'csr'` (the default) ignores any pre-existing markup and paints fresh — the v0.1 behaviour.
+
+## Deferred (signature-compatible — additive)
+
 - `chunkBase?: string` — CDN URL prefix for lazy-loaded per-page chunks.
 - `MountCartridgeResult.update(opts)` — apply config / theme deltas without re-mount.
 - async `onShellReady` — when a real use case (server-fetched theme tokens) shows up.

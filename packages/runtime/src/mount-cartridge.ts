@@ -13,9 +13,6 @@
  * are the contract.
  *
  * v0.2 (deferred, additive — signature-compatible):
- *   - `mode: 'csr' | 'hydrate'`             — SSR-hydrate fork (server-rendered DOM
- *                                              already in `host`, runtime adopts
- *                                              instead of painting).
  *   - `chunkBase: string`                    — CDN URL prefix for lazy page chunks
  *                                              when the cartridge is split per page.
  *   - `MountCartridgeResult.update(opts)`    — live config / theme updates from
@@ -23,8 +20,14 @@
  *   - async `onShellReady`                   — when a real use case (server-fetched
  *                                              theme tokens) shows up.
  *
- * None of these change v0.1's required surface — `cartridge`, `config`,
- * `template`, `host` stay the only required options.
+ * Landed in 0.2.0:
+ *   - `mode: 'csr' | 'hydrate'`              — SSR-hydrate fork. With `'hydrate'`,
+ *                                              the runtime preserves DOM already in
+ *                                              `host` and the active page renderer's
+ *                                              `hydrate()` runs in place of `render()`.
+ *
+ * None of these change the required surface — `cartridge`, `config`,
+ * `template`, `host` remain the only required options.
  */
 
 import {
@@ -99,6 +102,24 @@ export interface MountCartridgeOptions<
   widgetId?: string;
   /** Opt-in URL ↔ NavigationState routing. Default: false. */
   enableRouter?: boolean;
+
+  /**
+   * Mount mode. Default: `'csr'`.
+   *
+   *   - `'csr'`:     paint fresh views into the host. Whatever DOM was in the
+   *                  host before mount gets overwritten.
+   *   - `'hydrate'`: adopt SSR-rendered DOM already in the host. The runtime
+   *                  preserves the existing markup (moves it inside the shadow
+   *                  wrapper when isolation is 'partial' / 'full') and the
+   *                  active page renderer's `hydrate()` runs in place of
+   *                  `render()` — wiring listeners without repainting.
+   *
+   * Page renderers that don't implement `hydrate()` fall back to plain
+   * `render()` (with a warning); the SSR markup gets repainted client-side.
+   * Cartridges that ship to SSR pages should implement `hydrate()` on every
+   * view that's allowed to be the entry page.
+   */
+  mode?: 'csr' | 'hydrate';
 
   /**
    * Skip `dataSource.fetch` and use this data directly. Use when the host
@@ -189,13 +210,27 @@ export async function mountCartridge<
   opts: MountCartridgeOptions<TData, TConfig, TPageType>,
 ): Promise<MountCartridgeResult> {
   const isolation: StyleIsolation = opts.styleIsolation ?? 'partial';
+  const mode: 'csr' | 'hydrate' = opts.mode ?? 'csr';
   const events: IEventBus = opts.events ?? new EventBus();
 
   // Phase 1 — shell. Pure DOM; can't fail under normal browser conditions
   // but we still wrap so onError fires consistently with the other phases.
+  //
+  // Hydrate path: preserve the SSR markup already in `host`. For 'partial'
+  // and 'full' isolation we move it inside the shadow wrapper (matches
+  // `wrapInShadow` in @airo-js/core, inlined here so we keep the full
+  // IsolationRoot handle); for 'none' the SSR markup stays in `host`
+  // untouched.
   let isolationRoot: IsolationRoot;
   try {
-    isolationRoot = setupIsolationRoot(opts.host, isolation);
+    if (mode === 'hydrate' && isolation !== 'none') {
+      const ssrHtml = opts.host.innerHTML;
+      opts.host.innerHTML = '';
+      isolationRoot = setupIsolationRoot(opts.host, isolation);
+      isolationRoot.renderRoot.innerHTML = ssrHtml;
+    } else {
+      isolationRoot = setupIsolationRoot(opts.host, isolation);
+    }
   } catch (err) {
     opts.onError?.('shell', err, null);
     throw err;
@@ -291,6 +326,7 @@ export async function mountCartridge<
         events,
         enableRouter: opts.enableRouter,
         gateScope: opts.gateScope,
+        hydrate: mode === 'hydrate',
       },
     );
   } catch (err) {

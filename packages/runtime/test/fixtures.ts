@@ -40,6 +40,25 @@ export function noopRenderer(): PageRenderer {
   };
 }
 
+/**
+ * Renderer that records which lifecycle method was called. Used to verify
+ * the hydrate fork: `mode: 'hydrate'` should drive `hydrate()`; `mode: 'csr'`
+ * (the default) should drive `render()`.
+ */
+export function recordingRenderer(record: string[]): PageRenderer {
+  return {
+    render() {
+      record.push('render');
+    },
+    hydrate() {
+      record.push('hydrate');
+    },
+    destroy() {
+      record.push('destroy');
+    },
+  };
+}
+
 export function fakeDataSource(
   overrides: Partial<DataSource<TestData, TestConfig>> = {},
 ): DataSource<TestData, TestConfig> {

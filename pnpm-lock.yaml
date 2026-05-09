@@ -35,7 +35,26 @@ importers:
 
   packages/core: {}
 
-  packages/embed: {}
+  packages/embed:
+    devDependencies:
+      '@airo-js/cartridge-kit':
+        specifier: workspace:*
+        version: link:../cartridge-kit
+      '@airo-js/core':
+        specifier: workspace:*
+        version: link:../core
+      '@airo-js/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      esbuild:
+        specifier: ^0.21.0
+        version: 0.21.5
+      happy-dom:
+        specifier: ^15.0.0
+        version: 15.11.7
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(happy-dom@15.11.7)
 
   packages/mcp:
     dependencies:

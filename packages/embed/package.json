@@ -1,15 +1,15 @@
 {
   "name": "@airo-js/embed",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Airo embed — ~5KB browser bootstrap loader. The script host pages paste into their HTML to mount an Airo app.",
+  "version": "0.1.0",
+  "description": "Airo embed — customer-facing browser bootstrap loader. Registers a custom element, fetches widget config + cartridge via host-app hooks, lazy-loads @airo-js/runtime, and mounts. ~5 KB minified bundle.",
   "keywords": [
     "airo",
     "framework",
     "embed",
     "bootstrap",
     "browser",
-    "custom-element"
+    "custom-element",
+    "web-component"
   ],
   "author": "AI/RO contributors",
   "license": "Apache-2.0",
@@ -36,8 +36,24 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "size": "esbuild --bundle --minify --format=iife --external:@airo-js/runtime src/index.ts | wc -c",
+    "size:gzip": "esbuild --bundle --minify --format=iife --external:@airo-js/runtime src/index.ts | gzip -c | wc -c",
+    "size:check": "node ./scripts/size-check.mjs",
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "@airo-js/runtime": "^0.1.0"
+  },
+  "devDependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "@airo-js/runtime": "workspace:*",
+    "esbuild": "^0.21.0",
+    "happy-dom": "^15.0.0",
+    "vitest": "^2.1.0"
   },
   "publishConfig": {
     "access": "public"
