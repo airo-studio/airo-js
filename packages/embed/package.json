@@ -48,7 +48,7 @@
     "@airo-js/log": "workspace:*"
   },
   "peerDependencies": {
-    "@airo-js/runtime": "^0.2.0"
+    "@airo-js/runtime": "^0.1.0 || ^0.2.0"
   },
   "devDependencies": {
     "@airo-js/cartridge-kit": "workspace:*",

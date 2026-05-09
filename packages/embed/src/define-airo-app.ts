@@ -24,11 +24,17 @@
  *
  * SSR-hydrate path: when `loadConfig` returns `ssrHtml` (or `fetchSsrHtml`
  * does), embed paints it into the host element AND passes `mode: 'hydrate'`
- * to mountCartridge. The runtime preserves the SSR markup inside the
- * shadow wrapper and the active page renderer's `hydrate()` runs in place
- * of `render()` — wiring listeners without repainting. Cartridges that
- * don't implement `hydrate()` on their views fall back to `render()`
- * (with a console warning); the SSR markup gets repainted client-side.
+ * to `mountCartridge`. With runtime v0.2+, the runtime preserves the SSR
+ * markup inside the shadow wrapper and the active page renderer's
+ * `hydrate()` runs in place of `render()` — wiring listeners without
+ * repainting. With runtime v0.1, the `mode` option is silently ignored
+ * and `ssrHtml` becomes a paint skeleton (overwritten by a fresh CSR
+ * mount). The peerDep range is `^0.1.0 || ^0.2.0`; both work, hydrate
+ * fidelity scales with the runtime version.
+ *
+ * Cartridges whose views don't implement `hydrate()` fall back to
+ * `render()` even on runtime v0.2 (with a `[@airo-js/core]` warning); the
+ * SSR markup gets repainted client-side.
  */
 
 import { logger } from '@airo-js/log';

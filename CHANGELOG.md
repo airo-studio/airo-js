@@ -31,11 +31,14 @@ Adopts `@airo-js/log` for all internal `console.*` calls. Public API unchanged; 
 
 ## `@airo-js/embed` 0.2.0 — 2026-05-09
 
-Adopts `@airo-js/log`. Public API unchanged; default behaviour identical. Bumps peerDep on `@airo-js/runtime` to `^0.2.0` to match the runtime line.
+Adopts `@airo-js/log`. Public API unchanged; default behaviour identical.
 
 ### Changed
 - All embed `console.warn` / `console.error` → `logger('embed').warn/error(...)`.
 - Bundle-size budget impact: +710 B minified / +298 B gzip (still well under the 5 KB / 2.5 KB ceiling — current 3.20 KB / 1.43 KB).
+
+### Peer dependency
+- Widened `@airo-js/runtime` peer range from `^0.1.0` (embed 0.1.0) to `^0.1.0 || ^0.2.0`. Addresses a footnote raised by downstream consumers: runtime 0.2 is documented additive, so embed should not block consumers from upgrading the runtime line independently. SSR-hydrate fidelity scales with the runtime version (paint skeleton on 0.1; true hydration on 0.2).
 
 ## `@airo-js/ssr` 0.2.0 — 2026-05-09
 
