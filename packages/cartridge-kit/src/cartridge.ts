@@ -21,6 +21,7 @@ import type { McpToolDefinition } from './mcp-tool.js';
 import type { PublicationAdapter } from './publication-adapter.js';
 import type { JsonLdMapper } from './json-ld-mapper.js';
 import type { Gate } from './gate.js';
+import type { ComponentSchema, ThemeSchema } from './editor-schema.js';
 
 /**
  * Schema definition pluralism — Zod, JSON Schema, branded types. The
@@ -51,11 +52,16 @@ export interface OnboardingStep {
 
 /**
  * The cartridge envelope. Host apps discover cartridges via a registry;
- * every cartridge implements this shape. Generic over `TData` (the
- * schema's data shape) and `TConfig` (the cartridge's editable
- * configuration shape).
+ * every cartridge implements this shape. Generic over:
+ *
+ *   - `TData`   — the schema's data shape (post-pipeline snapshot)
+ *   - `TConfig` — the cartridge's editable configuration shape
+ *   - `TStyles` — the cartridge's curated style surface (typically derived
+ *                 via `defineStyleSurface` + `StyleValuesOf<typeof ...>`).
+ *                 Defaults to `unknown` for cartridges that don't ship a
+ *                 `componentSchema`.
  */
-export interface Cartridge<TData = unknown, TConfig = unknown> {
+export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown> {
   /** Identity */
   id: string;
   industry: string;
@@ -135,6 +141,25 @@ export interface Cartridge<TData = unknown, TConfig = unknown> {
    * Convention: `__AIRO_<CARTRIDGE_ID>_PAGES__` (uppercase, underscored).
    */
   mailboxName: string;
+
+  /**
+   * Per-component editable schema. Studios render Component-panel inputs
+   * (props + style controls) from this — without it they fall through to
+   * their own defaults, so existing cartridges remain valid. The
+   * `TStyles` generic ties `styles.allowed` to the cartridge's style
+   * surface; cartridges declare it via `defineStyleSurface` and pass the
+   * derived value type as the `TStyles` parameter.
+   */
+  componentSchema?: Record<string, ComponentSchema<TStyles>>;
+
+  /**
+   * Token catalog grouped by `app` / `page` / `component` scope. Studios
+   * render Style-panel inputs from this. The `component` scope is
+   * typically derived via `deriveComponentTokens` from the same
+   * `componentSchema` + style surface declaration so the cartridge
+   * author keeps a single source of truth.
+   */
+  themeSchema?: ThemeSchema;
 }
 
 /**
