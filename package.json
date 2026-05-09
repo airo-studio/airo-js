@@ -19,7 +19,7 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "build": "pnpm -r --filter './packages/*' run build",
+    "build": "pnpm -r --filter './packages/*' --filter './cartridges/*' run build",
     "test": "pnpm -r --filter './packages/*' run test",
     "typecheck": "pnpm -r run typecheck",
     "clean": "pnpm -r run clean && rm -rf node_modules",

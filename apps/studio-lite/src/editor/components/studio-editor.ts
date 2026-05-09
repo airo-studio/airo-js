@@ -27,7 +27,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import type { Cartridge } from '@airo-js/cartridge-kit';
 
-import { renderSchemaForm, setIn, type JsonPath, type JsonValue, type SchemaFragment } from './schema-form.js';
+import { renderSchemaForm, setIn, type JsonPath, type JsonValue, type SchemaFragment } from '../schema-form.js';
 
 export class StudioEditorElement extends LitElement {
   static override properties = {

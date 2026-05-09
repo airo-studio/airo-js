@@ -14,18 +14,15 @@ importers:
 
   apps/studio-lite:
     dependencies:
+      '@airo-js-cartridges/doc-page':
+        specifier: workspace:*
+        version: link:../../cartridges/doc-page
       '@airo-js/cartridge-kit':
         specifier: workspace:*
         version: link:../../packages/cartridge-kit
       '@airo-js/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@airo-js/devtools':
-        specifier: workspace:*
-        version: link:../../packages/devtools
-      '@airo-js/doc-cartridges':
-        specifier: workspace:*
-        version: link:../../packages/doc-cartridges
       '@airo-js/embed':
         specifier: workspace:*
         version: link:../../packages/embed
@@ -50,6 +47,9 @@ importers:
       linkedom:
         specifier: ^0.18.12
         version: 0.18.12
+      lit:
+        specifier: ^3.2.0
+        version: 3.3.2
       markdown-it:
         specifier: ^14.1.1
         version: 14.1.1
@@ -73,6 +73,15 @@ importers:
         specifier: ^4.19.0
         version: 4.21.0
 
+  cartridges/doc-page:
+    dependencies:
+      '@airo-js/cartridge-kit':
+        specifier: workspace:*
+        version: link:../../packages/cartridge-kit
+      '@airo-js/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/cartridge-wtb-skeleton:
     dependencies:
       '@airo-js/cartridge-kit':
@@ -95,27 +104,6 @@ importers:
         version: link:../core
 
   packages/core: {}
-
-  packages/devtools:
-    dependencies:
-      '@airo-js/cartridge-kit':
-        specifier: workspace:*
-        version: link:../cartridge-kit
-      '@airo-js/core':
-        specifier: workspace:*
-        version: link:../core
-      lit:
-        specifier: ^3.2.0
-        version: 3.3.2
-
-  packages/doc-cartridges:
-    dependencies:
-      '@airo-js/cartridge-kit':
-        specifier: workspace:*
-        version: link:../cartridge-kit
-      '@airo-js/core':
-        specifier: workspace:*
-        version: link:../core
 
   packages/embed:
     devDependencies:

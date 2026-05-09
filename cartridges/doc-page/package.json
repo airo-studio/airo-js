@@ -1,15 +1,13 @@
 {
-  "name": "@airo-js/devtools",
+  "name": "@airo-js-cartridges/doc-page",
   "version": "0.0.0",
   "private": true,
-  "description": "studio-lite + airo.you devtools cartridges — EditorShell, Sidebar:Score, Sidebar:AdapterCoverage, Preview:Triple. Drop into any airo-js page to author cartridges with multi-surface AIO previews.",
+  "description": "DocPage cartridge — schema-driven documentation pages with full AIO surface coverage (Schema.org TechArticle, llms.txt, MCP tools). First-party reference cartridge for the airo-js framework.",
   "keywords": [
-    "airo",
-    "devtools",
-    "studio",
-    "editor",
-    "lit",
-    "web-components",
+    "airo-cartridge",
+    "documentation",
+    "schema-org",
+    "llms-txt",
     "aio"
   ],
   "author": "AI/RO contributors",
@@ -17,9 +15,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/airo-studio/airo-js.git",
-    "directory": "packages/devtools"
+    "directory": "cartridges/doc-page"
   },
-  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/devtools#readme",
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/cartridges/doc-page#readme",
   "bugs": {
     "url": "https://github.com/airo-studio/airo-js/issues"
   },
@@ -42,10 +40,6 @@
   },
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
-    "@airo-js/core": "workspace:*",
-    "lit": "^3.2.0"
-  },
-  "publishConfig": {
-    "access": "public"
+    "@airo-js/core": "workspace:*"
   }
 }

@@ -20,7 +20,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import type { Cartridge } from '@airo-js/cartridge-kit';
 
-import { analyzeAdapterCoverage, type AdapterCoverageRow } from './adapter-coverage.js';
+import { analyzeAdapterCoverage, type AdapterCoverageRow } from '../adapter-coverage.js';
 
 const RECOMPUTE_DEBOUNCE_MS = 300;
 

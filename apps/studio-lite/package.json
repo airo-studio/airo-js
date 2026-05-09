@@ -17,10 +17,9 @@
     "clean": "rm -rf dist *.tsbuildinfo public/bundle.js public/bundle.js.map"
   },
   "dependencies": {
+    "@airo-js-cartridges/doc-page": "workspace:*",
     "@airo-js/cartridge-kit": "workspace:*",
     "@airo-js/core": "workspace:*",
-    "@airo-js/devtools": "workspace:*",
-    "@airo-js/doc-cartridges": "workspace:*",
     "@airo-js/embed": "workspace:*",
     "@airo-js/mcp": "workspace:*",
     "@airo-js/runtime": "workspace:*",
@@ -29,6 +28,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "hono": "^4.6.0",
     "linkedom": "^0.18.12",
+    "lit": "^3.2.0",
     "markdown-it": "^14.1.1",
     "markdown-it-anchor": "^9.2.0"
   },

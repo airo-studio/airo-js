@@ -17,7 +17,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import type { Cartridge } from '@airo-js/cartridge-kit';
 
-import { computeAioScore, type AioScore } from './score-formula.js';
+import { computeAioScore, type AioScore } from '../score-formula.js';
 
 const RECOMPUTE_DEBOUNCE_MS = 300;
 

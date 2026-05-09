@@ -30,7 +30,7 @@ import {
   type HumanPreviewOutput,
   type RenderResult,
   type SeoAioSnippet,
-} from './preview-renderer.js';
+} from '../preview-renderer.js';
 
 const RECOMPUTE_DEBOUNCE_MS = 300;
 type PreviewSurface = 'human' | 'seo-aio' | 'agent';

@@ -24,8 +24,8 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Cartridge } from '@airo-js/cartridge-kit';
-import { docPageCartridge } from '@airo-js/doc-cartridges';
-import { analyzeAdapterCoverage, type AdapterCoverageRow } from '@airo-js/devtools';
+import { docPageCartridge } from '@airo-js-cartridges/doc-page';
+import { analyzeAdapterCoverage, type AdapterCoverageRow } from '../editor/adapter-coverage.js';
 
 import { CartridgeStateStore } from './db.js';
 import { publishCartridge } from './publish.js';

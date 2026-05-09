@@ -71,7 +71,7 @@ export const sampleDocPageData: DocPageData = {
       id: 'install',
       depth: 2,
       title: 'Install',
-      html: '<pre><code class="language-bash">pnpm add @airo-js/core @airo-js/cartridge-kit</code></pre><p>Cartridge packages (e.g. <code>@airo-js/doc-cartridges</code>) layer on top of these primitives.</p>',
+      html: '<pre><code class="language-bash">pnpm add @airo-js/core @airo-js/cartridge-kit</code></pre><p>Cartridge packages (e.g. <code>@airo-js-cartridges/doc-page</code>) layer on top of these primitives.</p>',
     },
   ],
 

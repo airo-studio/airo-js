@@ -9,7 +9,6 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/cartridge-kit" },
-    { "path": "../../packages/devtools" },
-    { "path": "../../packages/doc-cartridges" }
+    { "path": "../../cartridges/doc-page" }
   ]
 }

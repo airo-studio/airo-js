@@ -40,7 +40,7 @@ In parallel, airo.you (the framework's own docs site, follow-on product) is buil
 | Item | Effort | Notes |
 |---|---|---|
 | B1 monolithic web studio | M-L | Single host app, SQLite, schema-driven editor, single-process preview iframe |
-| Multi-surface preview pane | M (~1 wk) | Lives in new `@airo-js/devtools` framework package, not in studio-lite |
+| Multi-surface preview pane | M (~1 wk) | In-app Lit components under `apps/studio-lite/src/editor/components/` (`<studio-preview-triple>` etc.) |
 | AIO Score (Lighthouse-for-AI) | S-M (~3-5 d) | Five inputs across Schema.org, adapters, MCP, content, crawler |
 | PublicationAdapter coverage display | S (~2-3 d) | Surfaces existing framework metadata in the editor |
 | Doc-page cartridge family | M (~5-7 d) | DocPage, APIRef, Tutorial, Example, FAQ — reusable for the airo.you follow-on |
@@ -51,7 +51,7 @@ In parallel, airo.you (the framework's own docs site, follow-on product) is buil
 - **State propagation: revision-id pattern** — `EventBus` is invalidation-only (synchronous, lossy). The save endpoint emits a monotonic `revision_id` (SQLite autoincrement). Cartridge listeners track the highest revision they've seen and discard in-flight fetches for older revisions. Eliminates preview-lag races during fast editing.
 - **Real implementation footing** — `@airo-js/embed`, `@airo-js/runtime`, and `@airo-js/mcp` are stub packages at rc.4. studio-lite calls `createApp` (in `@airo-js/core`) and `createCartridgeApp` (in `@airo-js/cartridge-kit`) directly. Building studio-lite forces those three stub packages to mature.
 - **Schema-driven editor** — renders the cartridge's `SchemaDefinition.toJsonSchema()` as the editor form. Cartridges that omit `toJsonSchema()` get a fallback raw-JSON editor. `DataSource.onboardingShape` is used only at first-run data-source connection (URL paste, file upload, OAuth, sheet picker), never for ongoing content edits.
-- **Multi-surface preview pane** — three preview surfaces: human (iframe with `@airo-js/embed` once the embed stub matures), SEO-AIO (renders the cartridge's Schema.org JSON-LD output as a Google-AI-Overview-style snippet), agent (structured display of MCP tool inputs/outputs against the current snapshot, plus "open in Claude Desktop" copy-paste link with the studio's MCP server URL). All three update synchronously on save (via revision-id pattern). Shipped as a cartridge in a new `@airo-js/devtools` package — cartridge authors drop it into any airo-js page.
+- **Multi-surface preview pane** — three preview surfaces: human (iframe with `@airo-js/embed`), SEO-AIO (renders the cartridge's Schema.org JSON-LD output as a Google-AI-Overview-style snippet), agent (structured display of MCP tool inputs/outputs against the current snapshot, plus "open in Claude Desktop" copy-paste link with the studio's MCP server URL). All three update synchronously on save (via revision-id pattern). Implemented as in-app Lit components under `apps/studio-lite/src/editor/components/` (`<studio-preview-triple>`, `<studio-aio-score>`, `<studio-adapter-coverage>`, `<studio-editor>`) — studio-lite-specific UI, not a framework package.
 - **Cartridge contract refinement (framework gap)** — Sidebar:Score, Sidebar:AdapterCoverage, EditorShell are presentation-only and stretch the existing self-contained-content cartridge contract. The framework needs a "presentation cartridge" variant or explicit optionality on `DataSource`/`Transformer`/`PublicationAdapter`. Captured as a v0.x cartridge-kit design item; first implementation surfaces the precise shape needed.
 - **AIO Score** — sidebar component computing a 0-100 score from five inputs: (1) Schema.org field coverage, (2) PublicationAdapter readiness (% adapters that pass `validate()`), (3) MCP tool fillness, (4) content completeness, (5) crawler-surface completeness. Names the top 3 fixes inline.
 - **PublicationAdapter coverage display** — sidebar component listing every adapter the cartridge declares with status (ready / partially-blocked / fully-blocked). For blocked adapters, surfaces the missing `requires` field paths.
@@ -142,7 +142,8 @@ No critical gaps at the plan stage.
    │                 └────────────┘    └───────────┘               │
    │                                                                │
    │     uses: @airo-js/core, @airo-js/cartridge-kit, @airo-js/ssr │
-   │           @airo-js/embed, @airo-js/mcp, @airo-js/devtools     │
+   │           @airo-js/embed, @airo-js/mcp                         │
+   │     loads: @airo-js-cartridges/doc-page  (+ store-loaded)      │
    └────────────────────────────────────────────────────────────────┘
 ```
 

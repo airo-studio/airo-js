@@ -17,7 +17,7 @@
  * the same shape across cartridge types.
  */
 
-import type { DocPageData } from '@airo-js/doc-cartridges';
+import type { DocPageData } from '@airo-js-cartridges/doc-page';
 
 import { parseMarkdownBody } from './markdown.js';
 

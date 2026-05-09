@@ -28,7 +28,7 @@ import type {
   DocPageHeading,
   DocPageHeadingDepth,
   DocPageSection,
-} from '@airo-js/doc-cartridges';
+} from '@airo-js-cartridges/doc-page';
 
 const md = new MarkdownIt({
   html: false, // user markdown can't inject raw HTML for v0

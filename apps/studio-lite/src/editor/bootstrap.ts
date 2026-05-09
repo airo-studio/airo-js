@@ -21,7 +21,7 @@
  *   - Authoring-side write-MCP (slice 5)
  */
 
-import type { AdapterCoverageRow } from '@airo-js/devtools';
+import type { AdapterCoverageRow } from './adapter-coverage.js';
 
 const SAVE_DEBOUNCE_MS = 300;
 

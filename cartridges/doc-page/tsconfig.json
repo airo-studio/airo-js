@@ -8,7 +8,7 @@
   },
   "include": ["src/**/*"],
   "references": [
-    { "path": "../core" },
-    { "path": "../cartridge-kit" }
+    { "path": "../../packages/core" },
+    { "path": "../../packages/cartridge-kit" }
   ]
 }

@@ -23,7 +23,7 @@
  *
  * Adapter-id lookup is convention-based: 'json-ld' adapters are matched by
  * format; 'llms-txt-fragment', 'classic-crawler-surface' by id (both shipped
- * by @airo-js/doc-cartridges). Cartridges that follow these conventions get
+ * by @airo-js-cartridges/doc-page). Cartridges that follow these conventions get
  * site-level aggregation for free; cartridges that don't still get their
  * inline JSON-LD + per-page HTML emitted.
  */

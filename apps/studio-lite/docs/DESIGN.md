@@ -6,7 +6,7 @@ The visual language for studio-lite, airo.you, and every future host app built o
 
 - **2026-05-08 — studio-lite editor adopts Geist + jade.** Per [docs/designs/studio-lite-editor.md](docs/designs/studio-lite-editor.md), the studio-lite editor surface uses a distinct local palette (Geist + Geist Mono typography, jade `#1F6F4E` accent on warm off-white `#FAF7F2` ground) optimised for long-form authoring. The chilopod mark is a geometric sans; Geist is its visually congruent typographic peer. The recommendation in that doc is option 1 (unify across all surfaces); we're staging the migration:
   - **Authoritative for the studio-lite editor today:** the tokens listed in `studio-lite-editor.md` §Visual language. The compose drawer, page list rail, and stage all use them.
-  - **Still on the original system below:** the `@airo-js/devtools` Lit elements (`<studio-aio-score>`, `<studio-adapter-coverage>`, `<studio-preview-triple>`) and `@airo-js/doc-cartridges`'s published-page stylesheet. They keep Inter + signal-blue until migrated.
+  - **Still on the original system below:** the in-app Lit elements under `apps/studio-lite/src/editor/components/` (`<studio-aio-score>`, `<studio-adapter-coverage>`, `<studio-preview-triple>`) and `@airo-js-cartridges/doc-page`'s published-page stylesheet. They keep Inter + signal-blue until migrated.
   - **Future:** unify on Geist + jade across the rest. Tracked as a follow-up alongside the other Lane B/C/E migrations.
 
 ## Direction
@@ -143,7 +143,7 @@ If everything competes, nothing wins. Subtraction default.
 |---|---|
 | studio-lite | This design system applied directly. |
 | airo.you (docs site) | Same palette, same type. Docs pages can use slightly more generous whitespace and a wider type scale for reading. Code blocks use Mono. The AI Overview preview in the docs (when showing AIO Score / cartridge demos) uses the accent. |
-| Cartridge author tools (future @airo-js/devtools) | Same system applied to cartridge dev surfaces. |
+| Cartridge author tools (in-app, under `apps/studio-lite/src/editor/components/`) | Same system applied to cartridge dev surfaces. |
 | Marketing material (if any) | Same system. The framework's "look" is consistent across surfaces. No marketing-site-with-different-design moments. |
 
 ## What's NOT in this design system
