@@ -139,7 +139,7 @@ export interface Gate<TConfig = unknown> {
    * core stays rendering-only either way.
    */
   persist?: {
-    /** Storage key prefix, e.g. 'commerce:age-verified'. */
+    /** Storage key prefix, e.g. 'gate:age-verified'. */
     key: string;
     /** Time-to-live in milliseconds. Omit for indefinite. */
     ttl?: number;
