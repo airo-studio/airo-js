@@ -35,6 +35,7 @@ import type {
   Cartridge,
   PublicationContext,
 } from '@airo-js/cartridge-kit';
+import { getDefaultRenderResolver } from '@airo-js/cartridge-kit';
 
 import {
   renderAppToHTML,
@@ -104,15 +105,17 @@ export async function renderAppWithPublication<
 >(
   opts: RenderWithPublicationOptions<TData, TConfig, TPageType>,
 ): Promise<RenderWithPublicationResult> {
-  // Default the renderer resolver to the cartridge's static views.
+  // Default the renderer resolver via cartridge-kit's getDefaultRenderResolver.
+  // Supports both static `views[]` and per-cartridge chunk mailboxes
+  // (`cartridge.mailboxName`). Cast: registry returns its heterogeneous
+  // ChunkFactory shape; the call site narrows to TPageType — sound because
+  // every factory the registry returns originated from this cartridge's
+  // `views[]` or `pushToMailbox(cartridge.mailboxName, ...)`.
   const resolveRenderer =
     opts.resolveRenderer ??
-    ((pageType: TPageType) => {
-      const view = opts.cartridge.views.find((v) => v.pageType === pageType);
-      return view?.factory as
-        | PageRendererFactory<TPageType, unknown>
-        | undefined;
-    });
+    (getDefaultRenderResolver(opts.cartridge) as (
+      pageType: TPageType,
+    ) => PageRendererFactory<TPageType, unknown> | undefined);
 
   // Default filter: inline JSON-LD only. Host apps that want everything
   // pass an empty filter or explicit overrides.

@@ -32,6 +32,10 @@ importers:
       '@airo-js/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(happy-dom@15.11.7)
 
   packages/core: {}
 
@@ -86,6 +90,13 @@ importers:
       '@airo-js/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      happy-dom:
+        specifier: ^15.0.0
+        version: 15.11.7
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(happy-dom@15.11.7)
 
 packages:
 

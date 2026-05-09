@@ -35,6 +35,7 @@ import { createApp } from '@airo-js/core';
 import type { Cartridge } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';
 import { runGates } from './run-gates.js';
+import { getDefaultRenderResolver } from './cartridge-registry.js';
 
 export interface CartridgeAppDeps<TPageType extends string = string>
   extends Omit<
@@ -116,17 +117,20 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
     data: snapshot,
   };
 
+  // Default resolver supports both static `views[]` and the per-cartridge
+  // chunk mailbox (drained + live-proxy-installed by getDefaultRenderResolver
+  // ↪ createCartridgeRegistry). Cast: the registry returns its
+  // heterogeneous-typed `ChunkFactory`; this call site narrows to the
+  // caller-provided TPageType, which is sound because every factory the
+  // registry returns originated from `cartridge.views[]` or
+  // `pushToMailbox(cartridge.mailboxName, ...)` — both authored against
+  // the cartridge's own page-type union.
   const resolveRenderer =
     deps.resolveRenderer ??
-    ((pageType: TPageType) => {
-      const view = cartridge.views.find((v) => v.pageType === pageType);
-      return view?.factory as
-        | AppDeps<TPageType, CartridgeAppContext<unknown, unknown>>['resolveRenderer'] extends (
-            ...args: unknown[]
-          ) => infer R
-          ? R
-          : undefined;
-    });
+    (getDefaultRenderResolver(cartridge) as AppDeps<
+      TPageType,
+      CartridgeAppContext<unknown, unknown>
+    >['resolveRenderer']);
 
   const app = createApp<TPageType, CartridgeAppContext<unknown, unknown>>(config, {
     ...deps,

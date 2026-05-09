@@ -398,6 +398,14 @@ Common loss site: visual centering math via custom property, SSR HTML byte-equiv
 
 Same trap as runtime. If `@airo-js/embed` doesn't ship the auth/fetch/cartridge-resolution shape your studio needs, **flag the gap**. Don't extend your existing v1 embed loader with a cartridge branch and call it "studio-specific" — most of that branch is generic plumbing that should live in `@airo-js/embed` via hooks.
 
+### 3.9 Don't ship helper defaults that ignore part of the contract
+
+When a helper has a default for a contract field — e.g. `resolveRenderer` in `createCartridgeApp` and `renderAppWithPublication` — that default must handle every shape the contract supports. The mailbox/chunk pattern is on the `Cartridge` contract via `mailboxName`; helpers that only walk `views[]` have undocumented contract limitations and turn `mailboxName` into a "phantom" field — declarative but unsupported by the very helpers consumers reach for.
+
+This bug class is hard to spot in review because the helper *looks* complete from the call site. Audit framework helper defaults against the full contract surface — especially when the contract grows new fields. If a contract field is genuinely opt-in, the default's failure mode should be a clear error, not silent "works for the static case only."
+
+Where bugs in helper defaults get fixed: in the helper, not papered over a layer up. Wrapping a broken default in the orchestration layer above creates a precedent — every helper defect becomes runtime's problem, and copy-pasted defaults (the `createCartridgeApp` ↔ `renderAppWithPublication` pair) drift independently.
+
 ---
 
 ## 4. Host app patterns

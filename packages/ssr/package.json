@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/ssr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Airo SSR — runtime-agnostic edge dispatch, renderAppToHTML, and publication-adapter execution.",
   "keywords": [
     "airo",
@@ -37,12 +37,18 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
   "dependencies": {
     "@airo-js/core": "workspace:*",
     "@airo-js/cartridge-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "happy-dom": "^15.0.0",
+    "vitest": "^2.1.0"
   },
   "publishConfig": {
     "access": "public"

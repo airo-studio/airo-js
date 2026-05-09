@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { EventBus } from '@airo-js/core';
+import { EventBus, pushToMailbox } from '@airo-js/core';
 
 import { mountCartridge } from '../src/mount-cartridge.js';
 import {
@@ -253,5 +253,50 @@ describe('mountCartridge', () => {
     if (result.blocked) throw new Error('expected unblocked branch');
     expect(result.shell.events).toBe(events);
     expect(result.app.events).toBe(events);
+  });
+
+  // Regression: pre-fix, cartridges with views: [] + mailboxName + chunk
+  // pushes via pushToMailbox couldn't resolve renderers — createCartridgeApp's
+  // default resolveRenderer walked views[] only and ignored mailboxName.
+  // Fixed by routing the default through getDefaultRenderResolver
+  // (cartridge-kit) which drains the mailbox and installs a live proxy.
+  test('chunk-mailbox cartridge (views: [] + mailboxName) resolves renderers from pushed chunks', async () => {
+    const lifecycle: string[] = [];
+    const mailboxName = '__AIRO_TEST_MOUNT_INTEGRATION__';
+
+    // Simulate a chunk that loaded BEFORE mount: pushes its factory to
+    // the mailbox as a bare-array entry. This is what happens when host
+    // page parallel-loads cartridge core + page chunk and the chunk
+    // wins the race.
+    pushToMailbox(mailboxName, {
+      key: 'home',
+      factory: () => recordingRenderer(lifecycle),
+    });
+
+    try {
+      const cartridge = fakeCartridge({
+        views: [], // chunk pattern — no static views
+        mailboxName,
+      });
+
+      const result = await mountCartridge({
+        cartridge,
+        config: {},
+        template: fakeTemplate(),
+        host,
+        preloadedData: { items: [] },
+      });
+
+      if (result.blocked) throw new Error('expected unblocked branch');
+      // If the renderer resolved from the mailbox push, render() ran.
+      expect(lifecycle).toContain('render');
+      // And globalThis[mailboxName] is now a live { push } proxy, not the
+      // raw array — the matching contract from registry.ts.
+      const slot = (globalThis as Record<string, unknown>)[mailboxName];
+      expect(slot).toBeDefined();
+      expect(typeof (slot as { push?: unknown })?.push).toBe('function');
+    } finally {
+      delete (globalThis as Record<string, unknown>)[mailboxName];
+    }
   });
 });

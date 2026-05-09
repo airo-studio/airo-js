@@ -112,3 +112,48 @@ export function createCartridgeRegistry(
     },
   };
 }
+
+/**
+ * Per-cartridge default-resolver cache. WeakMap keyed on the Cartridge
+ * object itself so the registry (and its mailbox subscription) is GC'd
+ * when the cartridge object falls out of scope.
+ *
+ * Why memoize: helpers like `createCartridgeApp` and
+ * `renderAppWithPublication` build a default resolver lazily when the
+ * caller doesn't pass one. Without memoization, mounting the same
+ * cartridge twice would build two separate chunk registries — chunks
+ * registered between mounts would land in the first registry and be
+ * invisible to the second mount. Keying on object identity (not `id`)
+ * lets two distinct cartridge objects with the same id keep their own
+ * registries, which is the right behaviour for parallel test fixtures.
+ */
+const DEFAULT_REGISTRIES = new WeakMap<
+  Cartridge<unknown, unknown>,
+  CartridgeRegistry
+>();
+
+/**
+ * Build (or return the cached) `resolveRenderer` callback for a single
+ * cartridge that supports both static `views[]` and chunk-mailbox
+ * resolution. Wraps `createCartridgeRegistry([cartridge])` with WeakMap
+ * memoization on the cartridge identity.
+ *
+ * Used as the default fallback inside `createCartridgeApp` and
+ * `renderAppWithPublication`. Host apps with multiple cartridges should
+ * construct their own `createCartridgeRegistry(...)` and pass
+ * `registry.resolverFor(cartridgeId)` explicitly — this default is for
+ * the single-cartridge mount case, which is the dominant pattern.
+ */
+export function getDefaultRenderResolver<TData, TConfig>(
+  cartridge: Cartridge<TData, TConfig>,
+): (
+  pageType: string,
+) => PageRendererFactory<string, CartridgeAppContext<unknown, unknown>> | undefined {
+  const key = cartridge as unknown as Cartridge<unknown, unknown>;
+  let registry = DEFAULT_REGISTRIES.get(key);
+  if (!registry) {
+    registry = createCartridgeRegistry([cartridge as unknown as Cartridge]);
+    DEFAULT_REGISTRIES.set(key, registry);
+  }
+  return registry.resolverFor(cartridge.id);
+}
