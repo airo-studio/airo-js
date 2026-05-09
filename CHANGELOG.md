@@ -6,6 +6,44 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/log` 0.1.0 — 2026-05-09
+
+First release. Sink-based structured event logging — the framework's logging substrate. Layer 1 of the framework devtools story (a separate `@airo-js/devtools` panel that consumes the sink will follow on demand).
+
+### Added
+- `logger(channel)` — channel-bound `ChannelLogger` with `debug` / `info` / `warn` / `error` methods. Framework packages call this at module scope and replace direct `console.*` invocations.
+- `AiroEvent` — structured event type (timestamp, channel, level, message, optional phase / widgetId / cartridgeId / data / error info).
+- `AiroSink` — `{ emit(event): void }`. Replaceable via `setSink(...)`; defaults to `consoleSink` (verbatim console behaviour preservation).
+- `consoleSink`, `noopSink`, `setSink`, `getSink`, `resetSink`.
+
+## `@airo-js/core` 0.2.0 — 2026-05-09
+
+Adopts `@airo-js/log` for all internal `console.*` calls. Public API unchanged; default behaviour identical (same `[@airo-js/core] ...` messages reach the console).
+
+### Changed
+- `EventBus.emit` handler-error log → `logger('core').error(...)`
+- `RuntimePipelineImpl` transformer / post-processor / teardown error logs → `logger('core').error(...)`
+- `PageManager` no-renderer / hydrate-fallback / router-init / router-push warnings → `logger('core').warn(...)`
+- `HashRouter` hash-change error log → `logger('core').error(...)`
+
+### Added (transitive surface)
+- New runtime dep on `@airo-js/log` (~80 LOC, identity-mapped behaviour by default). Apps that want to feed framework events into devtools / Sentry / Datadog now `setSink(...)` from `@airo-js/log`.
+
+## `@airo-js/embed` 0.2.0 — 2026-05-09
+
+Adopts `@airo-js/log`. Public API unchanged; default behaviour identical. Bumps peerDep on `@airo-js/runtime` to `^0.2.0` to match the runtime line.
+
+### Changed
+- All embed `console.warn` / `console.error` → `logger('embed').warn/error(...)`.
+- Bundle-size budget impact: +710 B minified / +298 B gzip (still well under the 5 KB / 2.5 KB ceiling — current 3.20 KB / 1.43 KB).
+
+## `@airo-js/ssr` 0.2.0 — 2026-05-09
+
+Adopts `@airo-js/log`. Public API unchanged.
+
+### Changed
+- `renderAppToHTML` `renderSSR()`-fallback warning → `logger('ssr').warn(...)`.
+
 ## `@airo-js/embed` 0.1.0 — 2026-05-09
 
 First public release. Replaces the v0.0.0 placeholder.

@@ -31,8 +31,12 @@
  * (with a console warning); the SSR markup gets repainted client-side.
  */
 
+import { logger } from '@airo-js/log';
+
 import type { Cartridge } from '@airo-js/cartridge-kit';
 import type { StyleIsolation } from '@airo-js/core';
+
+const log = logger('embed');
 
 /**
  * Result the host app's `loadConfig` returns. Carries the cartridge id
@@ -161,9 +165,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
   if (typeof customElements === 'undefined') return;
 
   if (REGISTERED_ELEMENTS.has(elementName)) {
-    console.warn(
-      `[@airo-js/embed] '${elementName}' already registered; skipping.`,
-    );
+    log.warn(`'${elementName}' already registered; skipping.`, { elementName });
     return;
   }
 
@@ -174,9 +176,10 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
     async connectedCallback(): Promise<void> {
       const id = this.getAttribute(idAttribute);
       if (!id) {
-        console.error(
-          `[@airo-js/embed] <${elementName}> is missing required attribute '${idAttribute}'.`,
-        );
+        log.error(`<${elementName}> is missing required attribute '${idAttribute}'.`, undefined, {
+          elementName,
+          idAttribute,
+        });
         return;
       }
       const token = this.getAttribute(tokenAttribute);
@@ -280,7 +283,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         try {
           this.mount.destroy();
         } catch (err) {
-          console.error('[@airo-js/embed] destroy threw:', err);
+          log.error('destroy threw', err);
         }
         this.mount = null;
       }
@@ -306,11 +309,11 @@ function emitError(
     try {
       opts.onError(phase, err, host);
     } catch (hookErr) {
-      console.error('[@airo-js/embed] onError hook itself threw:', hookErr);
+      log.error('onError hook itself threw', hookErr);
     }
     return;
   }
-  console.error(`[@airo-js/embed] ${phase} failed:`, err);
+  log.error(`${phase} failed`, err, { phase });
 }
 
 /**

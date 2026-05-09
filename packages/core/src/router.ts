@@ -23,6 +23,10 @@ export interface RouteState {
   [key: string]: string | undefined;
 }
 
+import { logger } from '@airo-js/log';
+
+const log = logger('core');
+
 export type RouterOnNavigate = (state: RouteState) => void;
 
 export interface IHashRouter {
@@ -140,7 +144,7 @@ export class HashRouter implements IHashRouter {
         this.onNavigate(state);
       }
     } catch (error) {
-      console.error('[@airo-js/core] HashRouter error handling hash change:', error);
+      log.error('HashRouter error handling hash change', error, { phase: 'router' });
     }
   }
 }

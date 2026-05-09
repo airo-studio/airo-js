@@ -8,6 +8,10 @@
  * This is the contract Node's EventEmitter has too.
  */
 
+import { logger } from '@airo-js/log';
+
+const log = logger('core');
+
 export type EventCallback = (...args: unknown[]) => void;
 
 export interface IEventBus {
@@ -43,7 +47,7 @@ export class EventBus implements IEventBus {
         try {
           callback(...args);
         } catch (error) {
-          console.error(`[@airo-js/core] Error in event handler for "${event}":`, error);
+          log.error(`Error in event handler for "${event}"`, error);
         }
       }
     }

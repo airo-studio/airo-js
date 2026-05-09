@@ -103,9 +103,17 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@airo-js/log':
+        specifier: workspace:*
+        version: link:../log
 
   packages/embed:
+    dependencies:
+      '@airo-js/log':
+        specifier: workspace:*
+        version: link:../log
     devDependencies:
       '@airo-js/cartridge-kit':
         specifier: workspace:*
@@ -125,6 +133,8 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.18)(happy-dom@15.11.7)
+
+  packages/log: {}
 
   packages/mcp:
     dependencies:
@@ -156,6 +166,9 @@ importers:
       '@airo-js/core':
         specifier: workspace:*
         version: link:../core
+      '@airo-js/log':
+        specifier: workspace:*
+        version: link:../log
 
 packages:
 
