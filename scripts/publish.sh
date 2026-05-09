@@ -51,10 +51,16 @@ done
 
 # ---- config ----------------------------------------------------------------
 
-# Order: core → cartridge-kit → ssr. Each entry: "<filter> [extra-flags]"
+# Order: core → cartridge-kit → runtime → ssr.
+#   - core has no airo deps (publish first).
+#   - cartridge-kit depends on core.
+#   - runtime depends on core + cartridge-kit (publish after both).
+#   - ssr depends on core + cartridge-kit (independent of runtime).
+# Each entry: "<filter> [extra-flags]"
 PACKAGES=(
   "@airo-js/core"
   "@airo-js/cartridge-kit --tag rc"
+  "@airo-js/runtime"
   "@airo-js/ssr"
 )
 
@@ -148,6 +154,7 @@ echo
 echo "Done. Verify on npmjs.com:"
 echo "  https://www.npmjs.com/package/@airo-js/core"
 echo "  https://www.npmjs.com/package/@airo-js/cartridge-kit"
+echo "  https://www.npmjs.com/package/@airo-js/runtime"
 echo "  https://www.npmjs.com/package/@airo-js/ssr"
 echo
 echo "cartridge-kit is on the 'rc' dist-tag. Consumers opt in with:"
