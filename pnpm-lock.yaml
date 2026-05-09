@@ -40,13 +40,13 @@ importers:
   packages/core:
     dependencies:
       '@airo-js/log':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../log
 
   packages/embed:
     dependencies:
       '@airo-js/log':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../log
     devDependencies:
       '@airo-js/cartridge-kit':
@@ -73,7 +73,7 @@ importers:
   packages/mcp:
     dependencies:
       '@airo-js/cartridge-kit':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../cartridge-kit
 
   packages/runtime:
