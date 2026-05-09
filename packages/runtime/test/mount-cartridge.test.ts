@@ -8,6 +8,7 @@ import {
   fakeDataSource,
   fakeTemplate,
   failingTransformer,
+  recordingRenderer,
 } from './fixtures.js';
 
 let host: HTMLElement;
@@ -178,6 +179,64 @@ describe('mountCartridge', () => {
 
     expect(result.app.state).toBe('destroyed');
     expect(renderRootBefore.innerHTML).toBe('');
+  });
+
+  test("mode: 'hydrate' preserves SSR HTML inside the shadow wrapper and drives renderer.hydrate()", async () => {
+    const lifecycle: string[] = [];
+    const cartridge = fakeCartridge({
+      views: [
+        {
+          id: 'home-view',
+          displayName: 'Home',
+          pageType: 'home',
+          factory: () => recordingRenderer(lifecycle),
+        },
+      ],
+    });
+
+    // Customer page state — SSR HTML in the host before mountCartridge runs.
+    host.innerHTML = '<div data-ssr="true">server-rendered content</div>';
+
+    const result = await mountCartridge({
+      cartridge,
+      config: {},
+      template: fakeTemplate(),
+      host,
+      preloadedData: { items: [] },
+      styleIsolation: 'partial',
+      mode: 'hydrate',
+    });
+
+    if (result.blocked) throw new Error('expected unblocked branch');
+    expect(lifecycle).toContain('hydrate');
+    expect(lifecycle).not.toContain('render');
+    expect(result.shell.renderRoot.innerHTML).toContain('server-rendered content');
+  });
+
+  test("default mode 'csr' drives renderer.render() (no hydrate call)", async () => {
+    const lifecycle: string[] = [];
+    const cartridge = fakeCartridge({
+      views: [
+        {
+          id: 'home-view',
+          displayName: 'Home',
+          pageType: 'home',
+          factory: () => recordingRenderer(lifecycle),
+        },
+      ],
+    });
+
+    const result = await mountCartridge({
+      cartridge,
+      config: {},
+      template: fakeTemplate(),
+      host,
+      preloadedData: { items: [] },
+    });
+
+    if (result.blocked) throw new Error('expected unblocked branch');
+    expect(lifecycle).toContain('render');
+    expect(lifecycle).not.toContain('hydrate');
   });
 
   test('host-supplied events bus is threaded through (not replaced)', async () => {

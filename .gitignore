@@ -35,3 +35,5 @@ yalc.lock
 # Temporary
 tmp/
 .tmp/
+
+.claude/

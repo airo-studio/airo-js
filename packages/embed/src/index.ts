@@ -1,14 +1,24 @@
 /**
  * @airo-js/embed — browser bootstrap loader.
  *
- * The small script consumers paste into a host page. Provides a custom
- * element (e.g. `<airo-embed data-id="…">`) plus a bootstrap that
- * resolves the layout, fetches chunks, and hands off to `@airo-js/runtime`.
- * Consumers are free to wrap their own custom-element name on top.
+ * Customer pastes `<airo-app airo-id="…">` into their HTML; this bundle
+ * registers the custom element, fetches the widget config from the
+ * studio backend (host-app hook), resolves the cartridge module
+ * (host-app hook), lazy-imports `@airo-js/runtime`, and mounts.
  *
- * Intentionally has no dependency on @airo-js/core — this bundle ships
- * separately and lazy-loads core on demand so pages that don't hydrate
- * (bots, pre-interactive snapshots) never pay the runtime cost.
+ * Bundle target: ~5 KB minified / ~2.5 KB gzip. Runtime + cartridge
+ * load on demand via dynamic import.
+ *
+ * @airo-js/runtime is a peer dependency — it loads dynamically when an
+ * element mounts, so the embed bundle stays small and customer pages
+ * with multiple widgets pay the runtime cost once.
  */
+
+export type {
+  LoadConfigResult,
+  DefineAiroAppOptions,
+  EmbedPhase,
+} from './define-airo-app.js';
+export { defineAiroApp } from './define-airo-app.js';
 
 export const PACKAGE_NAME = '@airo-js/embed';
