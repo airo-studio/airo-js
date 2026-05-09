@@ -2,7 +2,7 @@
   "name": "@airo-js-apps/studio-lite",
   "version": "0.0.0",
   "private": true,
-  "description": "studio-lite — schema-driven cartridge composer proving AI Result Optimisation (AIO) authoring as a multi-surface experience. See docs/designs/studio-lite.md.",
+  "description": "studio-lite — schema-driven cartridge composer proving AI Result Optimisation (AIO) authoring as a multi-surface experience. See docs/studio-lite.md.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

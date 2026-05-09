@@ -6,6 +6,54 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/embed` 0.1.0 — 2026-05-09
+
+First public release. Replaces the v0.0.0 placeholder.
+
+Customer-facing browser bootstrap loader. Ships ahead of demand to prevent the runtime mistake from repeating: every host app that needs production cartridge embed would otherwise inline ~250-540 LOC of generic plumbing (custom-element registration, lifecycle, runtime lazy-load, SSR-hydrate wiring). This package owns that plumbing; host apps extend via hooks (`loadConfig`, `resolveCartridge`, `fetchSsrHtml`, `onError`, `onMounted`).
+
+### Added
+- `defineAiroApp(opts)` — register a custom element that mounts a cartridge on `connectedCallback` and tears down on `disconnectedCallback`
+- `DefineAiroAppOptions` — required: `loadConfig`, `resolveCartridge`. Optional: `elementName`, `idAttribute`, `tokenAttribute`, `fetchSsrHtml`, `onError`, `onMounted`
+- `LoadConfigResult<TConfig>` — what `loadConfig` returns: `config`, `cartridgeId`, `templateId`, `styleIsolation`, `runtimeBase`, `runtimeVersion`, `ssrHtml`, `preloadedData`
+- `EmbedPhase` — phase identifier for `onError`: `'load-config' | 'resolve-cartridge' | 'fetch-ssr' | 'mount'`
+- Bundle-size CI gate (`pnpm size:check`): minified ≤ 5 KB, gzip ≤ 2.5 KB. Current: 2.51 KB / 1.14 KB.
+
+### Notes
+- `@airo-js/runtime ^0.2` is a **peer** dep — loaded dynamically on first element mount, not bundled. Customer pages with N widgets pay the runtime cost once. Pages with no widget elements never pay it.
+- SSR-hydrate path: when `loadConfig` returns `ssrHtml` (or `fetchSsrHtml` does), embed paints the markup AND passes `mode: 'hydrate'` to `mountCartridge`. Cartridges intending to ship to SSR pages should implement `hydrate()` on every view.
+- Idempotent registration — a second `defineAiroApp` call with the same `elementName` warns and no-ops; different names can coexist (e.g. `<dotter-app>` v1 alongside `<airo-app>` cartridge during a transition).
+
+## `@airo-js/runtime` 0.2.0 — 2026-05-09
+
+Adds the SSR-hydrate fork. Additive minor — every v0.1 call site keeps working unchanged.
+
+### Added
+- `MountCartridgeOptions.mode: 'csr' | 'hydrate'` — when `'hydrate'`, the runtime preserves DOM already in `host` (moves it inside the shadow wrapper for `'partial'` / `'full'` isolation) and the active page renderer's `hydrate()` runs in place of `render()`. Renderers without `hydrate()` fall back to `render()` with a `[@airo-js/core]` warning.
+
+### Notes
+- `mode` defaults to `'csr'` — v0.1 behaviour is preserved verbatim. No code changes required for existing callers.
+- The runtime's hydrate path delegates to `@airo-js/core`'s `pageManager.hydrateEntry` (already shipped); this release wires the fork into the cartridge mount surface.
+
+## `@airo-js/runtime` 0.1.0 — 2026-05-09
+
+First public release. Replaces the v0.0.0 placeholder (which exported only a `PACKAGE_NAME` constant).
+
+Cartridge mount orchestration: every host app that runs a cartridge would otherwise inline ~75 LOC of phase-by-phase plumbing (shell setup → fetch → pipeline → mount). This package ships that plumbing as a single call and exposes studio-specific extensions via hooks.
+
+### Added
+- `mountCartridge(opts)` — single-call orchestration: shell setup → optional `dataSource.fetch` (or `preloadedData` shortcut) → transformer pipeline → mount via `createCartridgeApp` (which handles gates internally) → unified `destroy()`
+- `MountCartridgeOptions<TData, TConfig>` — required: `cartridge`, `config`, `template`, `host`. Optional: `styleIsolation`, `widgetId`, `enableRouter`, `preloadedData`, `dataSourceId`, `dataSourceInput`, `credentials`, `gateScope`, `events`, `onShellReady`, `onError`
+- `MountCartridgeResult` — discriminated union: `{ blocked: false, app, shell, destroy }` or `{ blocked: true, blockedBy, shell, destroy }`
+- `ShellHandle` — passed to `onShellReady`: `renderRoot`, `styleRoot`, `events`, `rootId`
+- `MountPhase` — phase identifier passed to `onError`: `'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount'`
+
+### Deferred (signature-compatible — additive in v0.2)
+- Per-page chunk loading + `chunkBase` URL prefix
+- SSR-hydrate fork (`mode: 'csr' | 'hydrate'`)
+- Live `update(opts)` for studio chrome (theme + config deltas without re-mount)
+- async `onShellReady`
+
 ## `@airo-js/cartridge-kit` 0.2.0-rc.4 — 2026-05-07
 
 First public release candidate. The cartridge contract is the highest-stakes API surface; expect refinement based on feedback before `1.0`. Cartridges should target `^0.2`.
