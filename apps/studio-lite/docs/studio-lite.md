@@ -87,7 +87,7 @@ CSRF token in HTML head + middleware enforcement on writes. Session token in loc
 
 ## Resolved at /plan-design-review (2026-05-08)
 
-- **Design system:** see [DESIGN.md](../../DESIGN.md). Monochromatic neutrals + signal-blue accent (`#2D70FF`). Inter Display + Inter + JetBrains Mono. 4px base spacing scale. The full system applies to studio-lite, airo.you, and every future host app.
+- **Design system:** see [DESIGN.md](./DESIGN.md). Monochromatic neutrals + signal-blue accent (`#2D70FF`). Inter Display + Inter + JetBrains Mono. 4px base spacing scale. The full system applies to studio-lite, airo.you, and every future host app.
 - **Information hierarchy** (locked): top chrome bar (logo · cartridge selector · save state · screenshot capture button) → left sidebars (AIO Score panel above adapter coverage panel, 240px) → editor canvas (60% of remaining width) → three preview panes stacked vertically on the right (40% of remaining width: human / SEO-AIO / agent). The AIO Score number is the largest visual weight on the screen.
 - **Interaction states** — every feature has a designed loading / empty / error / success / partial state. See the design system review's interaction state table; empty states have a primary action, never just "no items found."
 - **Responsive scope:** desktop-only edit (≥1024px). Below that, read-only mobile preview shows cartridge selector + 3 preview panes stacked + AIO Score visible; editor hidden behind "Open on desktop to edit" message.
