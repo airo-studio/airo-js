@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Airo core runtime — createApp, PageManager, EventBus, HashRouter, Theme, IsolationRoot, RuntimePipeline, registry mailbox.",
   "keywords": [
     "airo",
@@ -40,8 +40,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
-  "dependencies": {
-    "@airo-js/log": "workspace:*"
+  "peerDependencies": {
+    "@airo-js/log": "workspace:^"
   },
   "publishConfig": {
     "access": "public"

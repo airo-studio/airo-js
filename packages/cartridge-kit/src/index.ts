@@ -97,4 +97,4 @@ export {
 } from './cartridge-registry.js';
 
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
-export const CONTRACT_VERSION = '0.2.0-rc.6';
+export const CONTRACT_VERSION = '0.3.0-rc.0';

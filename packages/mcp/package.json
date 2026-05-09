@@ -39,8 +39,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
-  "dependencies": {
-    "@airo-js/cartridge-kit": "workspace:*"
+  "peerDependencies": {
+    "@airo-js/cartridge-kit": "workspace:^"
   },
   "publishConfig": {
     "access": "public"
