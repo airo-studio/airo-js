@@ -24,6 +24,9 @@ import {
   type PageRendererFactory,
   type RenderContext,
 } from '@airo-js/core';
+import { logger } from '@airo-js/log';
+
+const log = logger('ssr');
 
 export interface RenderToHTMLDeps<
   TPageType extends string = string,
@@ -109,8 +112,9 @@ export function renderAppToHTML<
   if (typeof renderer.renderSSR === 'function') {
     renderer.renderSSR(container, ctx);
   } else {
-    console.warn(
-      `[@airo-js/ssr] renderAppToHTML: renderer for "${entry.type}" doesn't implement renderSSR(). Falling back to render() — listeners attached will be orphaned.`,
+    log.warn(
+      `renderAppToHTML: renderer for "${entry.type}" doesn't implement renderSSR(). Falling back to render() — listeners attached will be orphaned.`,
+      { pageType: entry.type, phase: 'ssr' },
     );
     renderer.render(container, ctx);
   }

@@ -153,13 +153,22 @@ Without an `onError` hook, embed logs to `console.error` and leaves the host ele
 
 ## Peer dependency
 
-`@airo-js/runtime ^0.2` is a **peer** dep, not a regular one. The embed bundle is intentionally tiny and dynamic-imports the runtime on first mount. Host apps must install the runtime alongside:
+`@airo-js/runtime` is a **peer** dep, not a regular one. The embed bundle is intentionally tiny and dynamic-imports the runtime on first mount. Host apps must install the runtime alongside:
 
 ```bash
 pnpm add @airo-js/embed @airo-js/runtime
 ```
 
-Runtime v0.2.0 is the minimum because embed uses `mode: 'hydrate'` (added in v0.2). v0.1 of the runtime would type-check but would silently ignore the `mode` option and CSR-paint over SSR content.
+The peer range is `^0.1.0 || ^0.2.0` — embed works with either runtime line. The catch: `mode: 'hydrate'` is a v0.2 option, so behaviour differs by runtime version when SSR HTML is supplied:
+
+| Runtime | SSR HTML behaviour |
+|---|---|
+| `^0.1.0` | embed paints `ssrHtml` into the host, then runtime overwrites with a fresh CSR mount. SSR HTML acts as a load skeleton; the renderer's `hydrate()` is **not** called (the option is silently ignored). |
+| `^0.2.0` | embed paints `ssrHtml`, then runtime preserves it inside the shadow wrapper and the renderer's `hydrate()` runs. True hydration. |
+
+CSR-only widgets (no `ssrHtml`) behave identically across both runtime lines.
+
+Recommendation: pin the runtime at `^0.2.0` if your cartridges implement `hydrate()` on their views and you ship SSR HTML. Otherwise either range works.
 
 ## License
 
