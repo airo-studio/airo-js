@@ -10,7 +10,7 @@
  *   - PageManager (mediator at the framework's core)
  *   - EventBus + IEventBus
  *   - HashRouter (URL ↔ NavState bridge)
- *   - Breadcrumb (data-driven navigation trail)
+ *   - buildCrumbs (data-only navigation trail helper — cartridges render)
  *   - createRegistry + pushToMailbox (stub-queue plugin self-registration)
  *   - Transformer + PostProcessor + RuntimePipeline (pipeline orchestration)
  *   - Theme (CSS variable injection + customCSS)
@@ -68,15 +68,8 @@ export { HashRouter } from './router.js';
 export type {
   Crumb,
   LabelResolver,
-  BreadcrumbHandle,
-  MountBreadcrumbOptions,
 } from './breadcrumb.js';
-export {
-  buildCrumbs,
-  renderCrumbsHtml,
-  attachClickHandlers,
-  mountBreadcrumb,
-} from './breadcrumb.js';
+export { buildCrumbs } from './breadcrumb.js';
 
 export type { PageManagerOptions } from './page-manager.js';
 export { PageManager } from './page-manager.js';

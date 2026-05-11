@@ -1,37 +1,36 @@
 /**
- * Style isolation strategies — Strategy pattern, three modes.
+ * Style isolation strategies — Strategy pattern, two modes.
  *
- *   'none'    — no shadow boundary. Widget renders into the host's light
+ *   'light'   — no shadow boundary. Widget renders into the host's light
  *               DOM. Stylesheets target document.head. Compatibility mode
  *               for hosts that need widget styles to flow into the page
  *               (and accept the cost of host CSS leaking in).
- *   'partial' — attach shadow root. Widget styles scoped to the shadow.
- *               Inherited CSS properties (font-family, color, line-height,
- *               letter-spacing) still cascade in from the host page so
- *               the widget adopts the host page's typography.
- *   'full'    — same shadow root, plus `:host { all: initial }` so even
- *               inherited properties are blocked. Total sandbox.
+ *   'shadow'  — attach shadow root. Widget styles scoped to the shadow.
+ *               Framework injects ZERO CSS — cartridges decide their own
+ *               sandbox posture by shipping `:host { all: initial }` (full
+ *               sandbox), font-family inheritance rules (let host typography
+ *               cascade), or whatever else they want in their own
+ *               `ViewDefinition.stylesheet`.
  *
- * Pure DOM. No domain knowledge — drops into any framework that needs a
- * shadow-root strategy abstracted from the renderer.
+ * Pure DOM. No domain knowledge, no visual policy — the framework owns the
+ * shadow-boundary mechanism only; cartridges own every CSS rule that lands
+ * inside it.
  */
 
-export type StyleIsolation = 'none' | 'partial' | 'full';
+export type StyleIsolation = 'light' | 'shadow';
 
 export interface IsolationRoot {
-  /** Element renderers paint into. Light-DOM host for 'none', a wrapper
-   *  inside the shadow root for 'partial' and 'full'. */
+  /** Element renderers paint into. Light-DOM host for 'light', a wrapper
+   *  inside the shadow root for 'shadow'. */
   renderRoot: HTMLElement;
-  /** Where stylesheets append. document.head for 'none', the ShadowRoot
-   *  otherwise. */
+  /** Where stylesheets append. document.head for 'light', the ShadowRoot
+   *  for 'shadow'. */
   styleRoot: ShadowRoot | HTMLHeadElement;
   /** True if a shadow boundary was attached. */
   isolated: boolean;
 }
 
 const SHADOW_WRAPPER_CLASS = 'airo-shadow-root';
-const HOST_RESET_STYLE_ID = 'airo-shadow-host-reset';
-const PARTIAL_INHERIT_STYLE_ID = 'airo-shadow-partial-inherit';
 
 /**
  * Attach a shadow root (if mode demands it) and create a render wrapper
@@ -42,7 +41,7 @@ export function setupIsolationRoot(
   host: HTMLElement,
   mode: StyleIsolation,
 ): IsolationRoot {
-  if (mode === 'none') {
+  if (mode === 'light') {
     return {
       renderRoot: host,
       styleRoot: document.head,
@@ -58,18 +57,7 @@ export function setupIsolationRoot(
   if (!wrapper) {
     wrapper = document.createElement('div');
     wrapper.className = SHADOW_WRAPPER_CLASS;
-    // Pass-through dimensions: without explicit 100% the wrapper
-    // collapses to content-based sizing, which breaks `height: 100%`
-    // chains inside the widget (e.g. embedded maps go to 0px).
-    wrapper.style.width = '100%';
-    wrapper.style.height = '100%';
     shadow.appendChild(wrapper);
-  }
-
-  if (mode === 'full') {
-    injectHostReset(shadow);
-  } else if (mode === 'partial') {
-    injectPartialInheritance(shadow);
   }
 
   return {
@@ -85,13 +73,13 @@ export function setupIsolationRoot(
  * server-rendered light-DOM markup into shadow-DOM before the runtime
  * attaches event listeners.
  *
- * No-op for `'none'` mode (returns the host unchanged).
+ * No-op for `'light'` mode (returns the host unchanged).
  */
 export function wrapInShadow(
   host: HTMLElement,
   mode: StyleIsolation,
 ): HTMLElement {
-  if (mode === 'none') return host;
+  if (mode === 'light') return host;
   if (typeof document === 'undefined') return host;
 
   // Idempotent re-call — return the existing wrapper without re-wrapping.
@@ -132,47 +120,4 @@ export function resolveStyleRoot(target: Node): ShadowRoot | HTMLHeadElement {
     throw new Error('[@airo-js/core] resolveStyleRoot: no ownerDocument and no global document');
   }
   return ownerDoc.head;
-}
-
-/**
- * 'full' mode: reset every inherited property at the shadow host so
- * host page CSS can't bleed in through inheritance. `all: initial`
- * covers font, color, line-height, letter-spacing, direction, etc. in
- * one line — Shadow DOM blocks everything else already.
- *
- * `display: block` restores the host's box (initial display is inline).
- */
-function injectHostReset(shadow: ShadowRoot): void {
-  if (shadow.querySelector(`#${HOST_RESET_STYLE_ID}`)) return;
-  const style = document.createElement('style');
-  style.id = HOST_RESET_STYLE_ID;
-  style.textContent = `:host { all: initial; display: block; }`;
-  shadow.appendChild(style);
-}
-
-/**
- * 'partial' mode: re-enable inheritance of typography-related properties
- * on the shadow wrapper and its descendants. Widget colors, spacing,
- * layout, themed CSS variables stay as authored; font/line-height/
- * letter-spacing inherit from the host page so the widget adopts the
- * host page's typography.
- *
- * Cartridges that explicitly set these properties on specific components
- * will win specificity over this rule (correct behaviour — `font-family:
- * inherit` is the framework default, component overrides are the
- * cartridge author's intent).
- */
-function injectPartialInheritance(shadow: ShadowRoot): void {
-  if (shadow.querySelector(`#${PARTIAL_INHERIT_STYLE_ID}`)) return;
-  const style = document.createElement('style');
-  style.id = PARTIAL_INHERIT_STYLE_ID;
-  style.textContent = `
-    .${SHADOW_WRAPPER_CLASS},
-    .${SHADOW_WRAPPER_CLASS} * {
-      font-family: inherit;
-      line-height: inherit;
-      letter-spacing: inherit;
-    }
-  `;
-  shadow.appendChild(style);
 }

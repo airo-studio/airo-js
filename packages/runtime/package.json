@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/runtime",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Airo runtime — cartridge mount orchestration. Single-call shell setup, data fetch, pipeline, and mount via createCartridgeApp; hooks for studio-side theme + error UI.",
   "keywords": [
     "airo",

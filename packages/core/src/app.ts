@@ -15,7 +15,6 @@ import type {
   NavigationState,
   SubpageActivation,
 } from './page.js';
-import type { LabelResolver } from './breadcrumb.js';
 import { PageManager } from './page-manager.js';
 
 /**
@@ -41,8 +40,6 @@ export interface AppDeps<
   host: HTMLElement;
   /** Optional pre-built event bus; one is created if absent. */
   events?: IEventBus;
-  /** Optional element the breadcrumb paints into. Single-page apps skip this. */
-  breadcrumbMount?: HTMLElement;
   /** Opt-in URL ↔ NavState routing. */
   enableRouter?: boolean;
   /**
@@ -54,10 +51,6 @@ export interface AppDeps<
   ) => PageRendererFactory<TPageType, TAppContext> | undefined;
   /** Predicate identifying gate pages (e.g. age verification). */
   isGatePage?: (pageType: TPageType) => boolean;
-  /** Resolver for breadcrumb labels. */
-  breadcrumbLabel?: LabelResolver<TPageType>;
-  /** Crumb separator. */
-  breadcrumbSeparator?: string;
   /** Opaque app-context the consumer hands through to every renderer. */
   appContext: TAppContext;
   /**
@@ -100,14 +93,11 @@ export function createApp<
 
   const pageManager = new PageManager<TPageType, TAppContext>({
     container: deps.host,
-    breadcrumbMount: deps.breadcrumbMount,
     pages: config.pages,
     events,
     appContext: deps.appContext,
     resolveRenderer: deps.resolveRenderer,
     isGatePage: deps.isGatePage,
-    breadcrumbLabel: deps.breadcrumbLabel,
-    breadcrumbSeparator: deps.breadcrumbSeparator,
     enableRouter: deps.enableRouter,
   });
 

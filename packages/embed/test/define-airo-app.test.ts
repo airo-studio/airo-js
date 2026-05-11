@@ -161,7 +161,7 @@ describe('defineAiroApp', () => {
         cartridgeId: 'fake',
         templateId: 'main',
         preloadedData: { items: [] },
-        styleIsolation: 'partial',
+        styleIsolation: 'shadow',
         ssrHtml: '<div data-ssr="yes">server-rendered</div>',
       }),
       resolveCartridge: async () => fakeCartridge(lifecycle),

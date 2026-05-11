@@ -2,10 +2,13 @@
  * PageManager — the Mediator at the framework's core.
  *
  * Owns navigation state and is the only module that talks to: the renderer
- * registry (resolve), the active renderer (mount/destroy), the breadcrumb
- * (update), the router (push/parse), and the event bus (emit
- * navigation:changed). Every other module talks to PageManager, never to
- * its peers.
+ * registry (resolve), the active renderer (mount/destroy), the router
+ * (push/parse), and the event bus (emit navigation:changed). Every other
+ * module talks to PageManager, never to its peers.
+ *
+ * Headless: PageManager never paints DOM beyond delegating to the active
+ * renderer. Anything visual (breadcrumbs, chrome) subscribes to
+ * `navigation:changed` on the event bus and renders itself.
  *
  * Generic over `TPageType` (a string narrowing — domain apps narrow this
  * to their own enum) and over `TAppContext` (the opaque bag of app-level
@@ -27,7 +30,6 @@ import type { IHashRouter, RouteState } from './router.js';
 import { HashRouter } from './router.js';
 
 const log = logger('core');
-import { mountBreadcrumb, type BreadcrumbHandle, type LabelResolver } from './breadcrumb.js';
 
 function findEntryPage<TPageType extends string>(
   pages: ReadonlyArray<Page<TPageType>>,
@@ -42,8 +44,6 @@ export interface PageManagerOptions<
 > {
   /** The element renderers paint into. Provided by the App shell. */
   container: HTMLElement;
-  /** Optional element the breadcrumb mounts into. Single-page apps skip this. */
-  breadcrumbMount?: HTMLElement;
   pages: Page<TPageType>[];
   events: IEventBus;
   /** Opaque app-context bag passed through to every renderer. */
@@ -61,14 +61,6 @@ export interface PageManagerOptions<
    * (e.g. an age-gate page type). Defaults to "no page is a gate".
    */
   isGatePage?: (pageType: TPageType) => boolean;
-  /** Optional crumb separator. Defaults to `'›'`. */
-  breadcrumbSeparator?: string;
-  /**
-   * Resolve a breadcrumb label for a page given the current nav state.
-   * Return null to skip the page entirely (don't add a crumb), undefined
-   * to use the page id as the label fallback, or a string to override.
-   */
-  breadcrumbLabel?: LabelResolver<TPageType>;
   /**
    * Enable hash-based URL routing. When true, navigate() pushes the
    * navState into the URL hash and external hashchange events drive
@@ -86,7 +78,6 @@ export class PageManager<
   private navState: NavigationState;
   private activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
   private activeRendererPageId: PageId | null = null;
-  private breadcrumb: BreadcrumbHandle | null = null;
   private router: IHashRouter | null = null;
   private suppressRouterPush = false;
   private destroyed = false;
@@ -99,19 +90,6 @@ export class PageManager<
 
     if (opts.enableRouter) {
       this.initRouter();
-    }
-
-    if (opts.breadcrumbMount) {
-      this.breadcrumb = mountBreadcrumb<TPageType>({
-        targetEl: opts.breadcrumbMount,
-        pages: opts.pages,
-        activePageId: this.navState.page,
-        navState: this.navState,
-        labelResolver: opts.breadcrumbLabel,
-        separator: opts.breadcrumbSeparator,
-        onNavigate: (pageId) => this.navigate({ page: pageId }),
-        isGatePage: this.isGatePage,
-      });
     }
   }
 
@@ -179,8 +157,6 @@ export class PageManager<
       }
     }
 
-    this.breadcrumb?.update(anchor.id, this.navState);
-
     if (this.router && !this.suppressRouterPush) {
       try {
         this.router.push(this.navState as RouteState);
@@ -239,7 +215,6 @@ export class PageManager<
     this.activeRenderer = renderer;
     this.activeRendererPageId = targetPage.id;
     this.navState = { ...this.navState, page: targetPage.id };
-    this.breadcrumb?.update(targetPage.id, this.navState);
     this.opts.events.emit('navigation:changed', this.navState);
   }
 
@@ -264,10 +239,6 @@ export class PageManager<
       this.activeRenderer.destroy();
       this.activeRenderer = null;
       this.activeRendererPageId = null;
-    }
-    if (this.breadcrumb) {
-      this.breadcrumb.destroy();
-      this.breadcrumb = null;
     }
     if (this.router) {
       this.router.stop();

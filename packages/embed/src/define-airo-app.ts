@@ -56,7 +56,7 @@ export interface LoadConfigResult<TConfig = unknown> {
   cartridgeId: string;
   /** Template id picked for this widget. Defaults to `cartridge.defaultTemplateId`. */
   templateId?: string;
-  /** Style isolation strategy. Default: 'partial'. */
+  /** Style isolation strategy. Default: 'shadow'. */
   styleIsolation?: StyleIsolation;
   /** CDN base URL for runtime + chunk loading (forward-compat for v0.2 chunk loader). */
   runtimeBase?: string;
