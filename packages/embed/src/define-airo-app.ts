@@ -41,6 +41,7 @@ import { logger } from '@airo-js/log';
 
 import type { Cartridge } from '@airo-js/cartridge-kit';
 import type { StyleIsolation } from '@airo-js/core';
+import type { SharedLifecycleHooks } from '@airo-js/runtime';
 
 const log = logger('embed');
 
@@ -79,7 +80,15 @@ export interface LoadConfigResult<TConfig = unknown> {
  */
 export type EmbedPhase = 'load-config' | 'resolve-cartridge' | 'fetch-ssr' | 'mount';
 
-export interface DefineAiroAppOptions {
+/**
+ * `DefineAiroAppOptions` extends `SharedLifecycleHooks` so that every
+ * lifecycle seam `mountCartridge` accepts is automatically surfaced on
+ * the embed facade with identical semantics. Adding a new hook to
+ * `SharedLifecycleHooks` in `@airo-js/runtime` automatically appears
+ * here AND fails the mapped-type forwarding inside `connectedCallback`
+ * until it's wired through — no silent drift.
+ */
+export interface DefineAiroAppOptions extends SharedLifecycleHooks {
   /**
    * Custom element tag name. Default: 'airo-app'. Host apps pick a name
    * that fits their brand: `<dotter-app>`, `<commerce-widget>`, etc. Custom
@@ -258,8 +267,22 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       if (this.disposed) return;
 
       // Phase 7 — mount.
+      //
+      // Type-level forwarding enforcement: `sharedHooks` is typed as a
+      // mapped type with every key in `SharedLifecycleHooks` REQUIRED in
+      // the object literal (Required<>) but values keep the original
+      // optional-or-not type. Adding a new hook to `SharedLifecycleHooks`
+      // fails compilation here until the corresponding `opts.<hook>`
+      // forwarding line is added. Matches the invariant in CLAUDE.md §5
+      // — the embed facade mirrors every lifecycle hook `mountCartridge`
+      // accepts, with identical semantics.
+      const sharedHooks: { [K in keyof Required<SharedLifecycleHooks>]: SharedLifecycleHooks[K] } = {
+        events: opts.events,
+        onShellReady: opts.onShellReady,
+      };
       try {
         const result = await mountCartridge({
+          ...sharedHooks,
           cartridge,
           config: loaded.config,
           template,

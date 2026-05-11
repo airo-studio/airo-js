@@ -73,6 +73,32 @@ export interface ShellHandle {
 export type MountPhase = 'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount';
 
 /**
+ * Lifecycle hooks shared between `mountCartridge` (this package) and the
+ * facade `defineAiroApp` (in `@airo-js/embed`). Anything added here MUST
+ * be wired through `defineAiroApp` — the embed package's mapped-type
+ * forwarding fails to compile when a new key is missing. Keep this
+ * interface to truly shared seams; hook signatures that diverge between
+ * the two facades (e.g. `onError`, whose phase set differs) stay on each
+ * facade's own options interface.
+ */
+export interface SharedLifecycleHooks {
+  /**
+   * Pre-built event bus. When omitted, the runtime constructs a fresh one.
+   * Pass your own to pre-wire listeners (analytics, logging) before mount.
+   */
+  events?: IEventBus;
+  /**
+   * Hook called after the shell is set up (isolation root + style root
+   * created), before gates run. Studios use this to inject their own
+   * styles, attach theme engines, register debug observers. Do NOT use
+   * for content rendering — the runtime mounts page renderers later.
+   *
+   * Sync at v0.1. Async support is additive when a real use case shows up.
+   */
+  onShellReady?: (shell: ShellHandle) => void;
+}
+
+/**
  * Options bag for `mountCartridge`. Only `cartridge`, `config`, `template`,
  * and `host` are required — everything else (router, isolation strategy,
  * pre-fetched data, hooks) is optional. Keep it that way: the inline-script
@@ -83,7 +109,7 @@ export interface MountCartridgeOptions<
   TData,
   TConfig,
   TPageType extends string = string,
-> {
+> extends SharedLifecycleHooks {
   cartridge: Cartridge<TData, TConfig>;
   /**
    * Cartridge config (shape declared by the cartridge's TConfig). NOT the
@@ -140,25 +166,13 @@ export interface MountCartridgeOptions<
   gateScope?: Record<string, string | undefined>;
 
   /**
-   * Pre-built event bus. When omitted, the runtime constructs a fresh one.
-   * Pass your own to pre-wire listeners (analytics, logging) before mount.
-   */
-  events?: IEventBus;
-
-  /**
-   * Hook called after the shell is set up (isolation root + style root
-   * created), before gates run. Studios use this to inject their own
-   * styles, attach theme engines, register debug observers. Do NOT use
-   * for content rendering — the runtime mounts page renderers later.
-   *
-   * Sync at v0.1. Async support is additive when a real use case shows up.
-   */
-  onShellReady?: (shell: ShellHandle) => void;
-  /**
    * Hook called when a phase fails. Studios use this to render
    * studio-specific error UI in the host element. Phase identifies which
    * step threw (see MountPhase). The shell may be null when 'shell'
    * itself failed.
+   *
+   * NOT shared with `defineAiroApp`'s `onError` — embed wraps with its
+   * own phase set (`load-config | resolve-cartridge | fetch-ssr | mount`).
    */
   onError?: (phase: MountPhase, err: unknown, shell: ShellHandle | null) => void;
 }
