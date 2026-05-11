@@ -14,6 +14,7 @@
 export type {
   ShellHandle,
   MountPhase,
+  SharedLifecycleHooks,
   MountCartridgeOptions,
   MountCartridgeResult,
 } from './mount-cartridge.js';

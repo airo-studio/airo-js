@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { EventBus } from '@airo-js/core';
+
 import { defineAiroApp } from '../src/define-airo-app.js';
 import { fakeCartridge, uniqueElementName, waitFor } from './fixtures.js';
 
@@ -223,6 +225,74 @@ describe('defineAiroApp', () => {
     el.remove();
     await waitFor(() => lifecycle.includes('destroy'));
     expect(lifecycle).toContain('destroy');
+  });
+
+  test('onShellReady fires before onMounted with a real ShellHandle', async () => {
+    const elementName = uniqueElementName();
+    const lifecycleOrder: string[] = [];
+    const shellSeen: Array<{ hasRenderRoot: boolean; hasStyleRoot: boolean; hasEvents: boolean; hasRootId: boolean }> = [];
+    const onMounted = vi.fn(() => lifecycleOrder.push('mounted'));
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      onShellReady: (shell) => {
+        lifecycleOrder.push('shell-ready');
+        shellSeen.push({
+          hasRenderRoot: shell.renderRoot instanceof HTMLElement,
+          hasStyleRoot: shell.styleRoot !== undefined,
+          hasEvents: shell.events !== undefined && typeof shell.events.emit === 'function',
+          hasRootId: typeof shell.rootId === 'string' && shell.rootId.length > 0,
+        });
+      },
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_shell' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(lifecycleOrder).toEqual(['shell-ready', 'mounted']);
+    expect(shellSeen).toHaveLength(1);
+    expect(shellSeen[0]).toEqual({
+      hasRenderRoot: true,
+      hasStyleRoot: true,
+      hasEvents: true,
+      hasRootId: true,
+    });
+  });
+
+  test('pre-built `events` bus is threaded into the shell (host-app pre-wire)', async () => {
+    const elementName = uniqueElementName();
+    const onMounted = vi.fn();
+    const sharedBus = new EventBus();
+    let shellBus: unknown = null;
+
+    defineAiroApp({
+      elementName,
+      events: sharedBus,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      onShellReady: (shell) => {
+        shellBus = shell.events;
+      },
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_bus' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(shellBus).toBe(sharedBus);
   });
 
   test('element-name collision → second defineAiroApp call warns + no-ops', () => {
