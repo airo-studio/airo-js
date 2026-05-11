@@ -168,7 +168,7 @@ describe('mountCartridge', () => {
       template: fakeTemplate(),
       host,
       preloadedData: { items: [] },
-      styleIsolation: 'partial',
+      styleIsolation: 'shadow',
     });
 
     if (result.blocked) throw new Error('expected unblocked branch');
@@ -203,7 +203,7 @@ describe('mountCartridge', () => {
       template: fakeTemplate(),
       host,
       preloadedData: { items: [] },
-      styleIsolation: 'partial',
+      styleIsolation: 'shadow',
       mode: 'hydrate',
     });
 

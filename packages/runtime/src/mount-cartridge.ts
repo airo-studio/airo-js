@@ -55,9 +55,9 @@ import { createCartridgeApp } from '@airo-js/cartridge-kit';
  * global styles, and register debug observers against this surface.
  */
 export interface ShellHandle {
-  /** Element renderers paint into. Inside the shadow root for partial/full isolation. */
+  /** Element renderers paint into. Inside the shadow root for 'shadow' isolation. */
   renderRoot: HTMLElement;
-  /** Where stylesheets append. document.head for 'none', the ShadowRoot otherwise. */
+  /** Where stylesheets append. document.head for 'light', the ShadowRoot for 'shadow'. */
   styleRoot: ShadowRoot | HTMLHeadElement;
   /** App-level event bus. Same instance threaded into gates + renderers. */
   events: IEventBus;
@@ -96,7 +96,7 @@ export interface MountCartridgeOptions<
   /** Element the runtime mounts into. */
   host: HTMLElement;
 
-  /** Style isolation strategy. Default: 'partial'. */
+  /** Style isolation strategy. Default: 'shadow'. */
   styleIsolation?: StyleIsolation;
   /** Stable id used for theme namespacing + DOM `id` on the renderRoot. */
   widgetId?: string;
@@ -110,7 +110,7 @@ export interface MountCartridgeOptions<
    *                  host before mount gets overwritten.
    *   - `'hydrate'`: adopt SSR-rendered DOM already in the host. The runtime
    *                  preserves the existing markup (moves it inside the shadow
-   *                  wrapper when isolation is 'partial' / 'full') and the
+   *                  wrapper when isolation is 'shadow') and the
    *                  active page renderer's `hydrate()` runs in place of
    *                  `render()` — wiring listeners without repainting.
    *
@@ -209,21 +209,20 @@ export async function mountCartridge<
 >(
   opts: MountCartridgeOptions<TData, TConfig, TPageType>,
 ): Promise<MountCartridgeResult> {
-  const isolation: StyleIsolation = opts.styleIsolation ?? 'partial';
+  const isolation: StyleIsolation = opts.styleIsolation ?? 'shadow';
   const mode: 'csr' | 'hydrate' = opts.mode ?? 'csr';
   const events: IEventBus = opts.events ?? new EventBus();
 
   // Phase 1 — shell. Pure DOM; can't fail under normal browser conditions
   // but we still wrap so onError fires consistently with the other phases.
   //
-  // Hydrate path: preserve the SSR markup already in `host`. For 'partial'
-  // and 'full' isolation we move it inside the shadow wrapper (matches
-  // `wrapInShadow` in @airo-js/core, inlined here so we keep the full
-  // IsolationRoot handle); for 'none' the SSR markup stays in `host`
-  // untouched.
+  // Hydrate path: preserve the SSR markup already in `host`. For 'shadow'
+  // isolation we move it inside the shadow wrapper (matches `wrapInShadow`
+  // in @airo-js/core, inlined here so we keep the full IsolationRoot
+  // handle); for 'light' the SSR markup stays in `host` untouched.
   let isolationRoot: IsolationRoot;
   try {
-    if (mode === 'hydrate' && isolation !== 'none') {
+    if (mode === 'hydrate' && isolation !== 'light') {
       const ssrHtml = opts.host.innerHTML;
       opts.host.innerHTML = '';
       isolationRoot = setupIsolationRoot(opts.host, isolation);

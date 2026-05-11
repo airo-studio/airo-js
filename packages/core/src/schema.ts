@@ -89,5 +89,5 @@ export interface AppConfig<TPageType extends string = string> {
   appId: string;
   pages: Page<TPageType>[];
   theme?: Record<string, string | number>;
-  styleIsolation?: 'none' | 'partial' | 'full';
+  styleIsolation?: 'light' | 'shadow';
 }
