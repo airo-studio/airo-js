@@ -229,13 +229,29 @@ export async function mountCartridge<
   // Phase 1 — shell. Pure DOM; can't fail under normal browser conditions
   // but we still wrap so onError fires consistently with the other phases.
   //
-  // Hydrate path: preserve the SSR markup already in `host`. For 'shadow'
-  // isolation we move it inside the shadow wrapper (matches `wrapInShadow`
-  // in @airo-js/core, inlined here so we keep the full IsolationRoot
-  // handle); for 'light' the SSR markup stays in `host` untouched.
+  // Three SSR adoption paths, in priority order:
+  //   1. Declarative Shadow DOM (DSD) — `host.shadowRoot` is already
+  //      non-null because the browser parsed `<template shadowrootmode>`
+  //      during initial HTML parse. Zero-FOUC: shadow-scoped styles
+  //      applied at parse time. Just adopt; no innerHTML lift, no
+  //      re-paint. `setupIsolationRoot` handles wrapping if needed.
+  //   2. Light-DOM SSR + mode='hydrate' — server emitted markup as
+  //      light-DOM children. Lift `innerHTML` into the shadow wrapper.
+  //   3. Fresh CSR or 'light' isolation — straight `setupIsolationRoot`.
+  //
+  // DSD detection has higher priority than mode='hydrate' because the
+  // presence of a pre-attached shadow root means the SSR content is
+  // already in place — re-painting from `host.innerHTML` (which is
+  // empty in the DSD case) would wipe it.
+  const hasDeclarativeShadow = isolation !== 'light' && opts.host.shadowRoot !== null;
   let isolationRoot: IsolationRoot;
   try {
-    if (mode === 'hydrate' && isolation !== 'light') {
+    if (hasDeclarativeShadow) {
+      // DSD path: adopt the existing shadow. setupIsolationRoot reuses
+      // the shadow root, auto-wraps existing content into the
+      // `.airo-shadow-root` wrapper if the server didn't emit it.
+      isolationRoot = setupIsolationRoot(opts.host, isolation);
+    } else if (mode === 'hydrate' && isolation !== 'light') {
       const ssrHtml = opts.host.innerHTML;
       opts.host.innerHTML = '';
       isolationRoot = setupIsolationRoot(opts.host, isolation);

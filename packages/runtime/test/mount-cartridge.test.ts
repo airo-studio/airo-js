@@ -213,6 +213,83 @@ describe('mountCartridge', () => {
     expect(result.shell.renderRoot.innerHTML).toContain('server-rendered content');
   });
 
+  test("mode: 'hydrate' with declarative shadow root preserves DSD content (no wipe)", async () => {
+    const lifecycle: string[] = [];
+    const cartridge = fakeCartridge({
+      views: [
+        {
+          id: 'home-view',
+          displayName: 'Home',
+          pageType: 'home',
+          factory: () => recordingRenderer(lifecycle),
+        },
+      ],
+    });
+
+    // Simulate Declarative Shadow DOM: the browser attached a shadow root
+    // during initial HTML parse (`<template shadowrootmode="open">`) and
+    // populated it with SSR-rendered content + the cartridge stylesheet.
+    // host.innerHTML is empty in this case — DSD content lives in the
+    // shadow root, not in light-DOM children.
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML =
+      '<article data-dsd="yes">declarative-shadow-rendered</article>' +
+      '<style>.my-card { color: red }</style>';
+
+    const result = await mountCartridge({
+      cartridge,
+      config: {},
+      template: fakeTemplate(),
+      host,
+      preloadedData: { items: [] },
+      styleIsolation: 'shadow',
+      mode: 'hydrate',
+    });
+
+    if (result.blocked) throw new Error('expected unblocked branch');
+    expect(lifecycle).toContain('hydrate');
+    expect(lifecycle).not.toContain('render');
+    // DSD content survives — runtime adopted the existing shadow root
+    // instead of clearing it via the light-DOM lift path. Content lives
+    // inside the auto-wrapped .airo-shadow-root wrapper.
+    expect(result.shell.renderRoot.innerHTML).toContain('declarative-shadow-rendered');
+    expect(result.shell.renderRoot.innerHTML).toContain('.my-card { color: red }');
+    expect(result.shell.renderRoot.className).toContain('airo-shadow-root');
+  });
+
+  test("mode: 'hydrate' with declarative shadow + pre-existing wrapper class is idempotent", async () => {
+    const lifecycle: string[] = [];
+    const cartridge = fakeCartridge({
+      views: [
+        {
+          id: 'home-view',
+          displayName: 'Home',
+          pageType: 'home',
+          factory: () => recordingRenderer(lifecycle),
+        },
+      ],
+    });
+
+    // Some servers emit the wrapper class explicitly in DSD.
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<div class="airo-shadow-root"><span data-dsd="yes">wrapped</span></div>';
+
+    const result = await mountCartridge({
+      cartridge,
+      config: {},
+      template: fakeTemplate(),
+      host,
+      preloadedData: { items: [] },
+      styleIsolation: 'shadow',
+      mode: 'hydrate',
+    });
+
+    if (result.blocked) throw new Error('expected unblocked branch');
+    // No double-wrap — framework finds the existing wrapper and uses it.
+    expect(shadow.querySelectorAll('.airo-shadow-root').length).toBe(1);
+    expect(result.shell.renderRoot.innerHTML).toContain('wrapped');
+  });
+
   test("default mode 'csr' drives renderer.render() (no hydrate call)", async () => {
     const lifecycle: string[] = [];
     const cartridge = fakeCartridge({
