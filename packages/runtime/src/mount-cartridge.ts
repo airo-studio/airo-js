@@ -37,7 +37,6 @@ import {
 } from '@airo-js/core';
 import type {
   App,
-  AppConfig,
   IEventBus,
   IsolationRoot,
   StyleIsolation,
@@ -48,7 +47,7 @@ import type {
   DataSourceInput,
   Template,
 } from '@airo-js/cartridge-kit';
-import { createCartridgeApp } from '@airo-js/cartridge-kit';
+import { createCartridgeApp, templateToAppConfig } from '@airo-js/cartridge-kit';
 
 /**
  * Handle exposed to `onShellReady`. Studios attach theme engines, inject
@@ -323,7 +322,10 @@ export async function mountCartridge<
   }
 
   // Phase 4 — mount via createCartridgeApp (handles gates, appContext, createApp).
-  const appConfig = buildAppConfig<TConfig, TPageType>(
+  // AppConfig translation lives in @airo-js/cartridge-kit so SSR callers
+  // (renderAppWithPublication, renderAppToHTML) consume the same helper —
+  // single source of truth for the Template → AppConfig shape.
+  const appConfig = templateToAppConfig<TConfig, TPageType>(
     opts.template,
     opts.widgetId ?? `${opts.cartridge.id}-${Date.now()}`,
   );
@@ -393,27 +395,3 @@ function deriveDefaultInput<TConfig>(config: TConfig): DataSourceInput {
   return { kind: 'url', url };
 }
 
-/**
- * Build `AppConfig` from a template's pages. The template's page entries
- * are a subset of `Page<T>` (id / type / enabled / parent only); the
- * runtime fills in an empty layout because cartridge-kit's `Template`
- * type doesn't carry the layout shape — page renderers paint into
- * `RenderContext.targetEl` directly. Cartridges that use the region/slot
- * system populate `Page.layout` on their template entries via a richer
- * downstream type.
- */
-function buildAppConfig<TConfig, TPageType extends string>(
-  template: Template<TConfig>,
-  appId: string,
-): AppConfig<TPageType> {
-  return {
-    appId,
-    pages: template.pages.map((p) => ({
-      id: p.id,
-      type: p.type as TPageType,
-      enabled: p.enabled,
-      parent: p.parent,
-      layout: { regionOrder: [], regions: {} },
-    })),
-  };
-}

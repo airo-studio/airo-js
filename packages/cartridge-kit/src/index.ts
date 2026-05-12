@@ -55,6 +55,7 @@ export type {
 } from './view.js';
 
 export type { Template } from './template.js';
+export { templateToAppConfig } from './template-to-app-config.js';
 
 export type {
   McpToolDefinition,

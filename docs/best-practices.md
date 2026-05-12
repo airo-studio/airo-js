@@ -667,16 +667,24 @@ const views: ViewDefinition<MyData, MyConfig>[] = [{
 - Returns `{ skipped: { pageType, reason: 'csr-only' }, html: inlineScripts, adapterResults }`.
 - **Still runs all `PublicationAdapter`s and inlines JSON-LD** — the SEO partial-win. Crawlers see the structured data; the widget itself mounts client-side as usual via `mountCartridge`.
 
-**Server-side: use `filterServerSafeCartridge` at the SSR entry.** Rather than the dispatch-time gate alone, drop server-unsafe views from the cartridge at the import boundary:
+**Server-side: use `filterServerSafeCartridge` + `templateToAppConfig` at the SSR entry.** Two helpers; `mountCartridge` uses both internally, SSR callers should use the same two so the server- and client-side translations stay in lock-step:
 
 ```ts
 // Server-side entry (Node / Deno / edge function)
 import { filterServerSafeCartridge, renderAppWithPublication } from '@airo-js/ssr';
+import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { myCartridge } from '@my-org/my-cartridge';
 
+// 1. Drop csr-only views — type-narrowed cartridge ready for SSR.
 const serverSafe = filterServerSafeCartridge(myCartridge);
-// → cartridge with csr-only views removed; type-narrowed; ready for renderAppWithPublication
 
+// 2. Build AppConfig from the same Template the client mounts.
+//    `templateToAppConfig` is the canonical translator — `mountCartridge`
+//    uses it too, so the server and client see identical page graphs.
+const template = serverSafe.templates.find((t) => t.id === templateId)!;
+const appConfig = templateToAppConfig(template, widgetId);
+
+// 3. Render.
 const result = await renderAppWithPublication({
   cartridge: serverSafe,
   appConfig,
@@ -684,6 +692,8 @@ const result = await renderAppWithPublication({
   publicationCtx,
 });
 ```
+
+Don't hand-roll the `Template → AppConfig` translation. `mountCartridge` and `templateToAppConfig` ship the same mapping (subset → `AppConfig.pages` with empty layout placeholders); duplicating the logic in your SSR entry is exactly the parallel-list anti-pattern (Section 3.12) one layer up.
 
 Default-excludes `['csr-only']`. Compose additional capability gates via `excludeCapabilities`:
 
