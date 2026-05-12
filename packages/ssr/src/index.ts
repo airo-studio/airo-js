@@ -38,4 +38,7 @@ export type {
 } from './render-with-publication.js';
 export { renderAppWithPublication } from './render-with-publication.js';
 
+export type { FilterServerSafeCartridgeOptions } from './filter-server-safe-cartridge.js';
+export { filterServerSafeCartridge } from './filter-server-safe-cartridge.js';
+
 export const PACKAGE_NAME = '@airo-js/ssr';
