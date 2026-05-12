@@ -267,6 +267,76 @@ describe('defineAiroApp', () => {
     });
   });
 
+  test('airo-ssr="hydrate" + pre-injected innerHTML → fetchSsrHtml skipped, markup preserved', async () => {
+    const elementName = uniqueElementName();
+    const lifecycle: string[] = [];
+    const onMounted = vi.fn();
+    const fetchSsrHtml = vi.fn(async () => '<div data-from="endpoint">should-not-fetch</div>');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        styleIsolation: 'shadow',
+      }),
+      resolveCartridge: async () => fakeCartridge(lifecycle),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    // Pre-inject the SSR HTML AND set airo-ssr="hydrate" before
+    // appendChild triggers connectedCallback. Mirrors the Campaign Page
+    // flow where the host server already rendered the widget into the
+    // element before the page shipped.
+    const el = document.createElement(elementName);
+    el.setAttribute('airo-id', 'wgt_host_ssr');
+    el.setAttribute('airo-ssr', 'hydrate');
+    el.innerHTML = '<div data-from="host">host-server-rendered</div>';
+    host.appendChild(el);
+
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml).not.toHaveBeenCalled();
+    expect(lifecycle).toContain('hydrate');
+    expect(lifecycle).not.toContain('render');
+    // The original host markup survives inside the shadow wrapper.
+    expect(el.shadowRoot?.innerHTML).toContain('host-server-rendered');
+    expect(el.shadowRoot?.innerHTML).toContain('data-from="host"');
+  });
+
+  test('airo-ssr="hydrate" with empty innerHTML → falls back to fetchSsrHtml', async () => {
+    const elementName = uniqueElementName();
+    const onMounted = vi.fn();
+    const fetchSsrHtml = vi.fn(async () => '<div data-from="endpoint">fetched</div>');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    const el = document.createElement(elementName);
+    el.setAttribute('airo-id', 'wgt_empty_hydrate');
+    el.setAttribute('airo-ssr', 'hydrate');
+    // Note: no innerHTML — the attribute alone shouldn't trigger the
+    // host-injected branch; fetchSsrHtml should still run.
+    host.appendChild(el);
+
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml).toHaveBeenCalledTimes(1);
+  });
+
   test('pre-built `events` bus is threaded into the shell (host-app pre-wire)', async () => {
     const elementName = uniqueElementName();
     const onMounted = vi.fn();

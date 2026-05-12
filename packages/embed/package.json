@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/embed",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Airo embed — customer-facing browser bootstrap loader. Registers a custom element, fetches widget config + cartridge via host-app hooks, lazy-loads @airo-js/runtime, and mounts. ~5 KB minified bundle.",
   "keywords": [
     "airo",

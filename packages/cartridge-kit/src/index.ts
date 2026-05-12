@@ -123,5 +123,11 @@ export { defineStyleSurface } from './style-surface.js';
 export type { CssVarFor } from './derive-component-tokens.js';
 export { deriveComponentTokens } from './derive-component-tokens.js';
 
+export type {
+  HydrateCleanup,
+  SSRSafeRendererOptions,
+} from './define-ssr-safe-renderer.js';
+export { defineSSRSafeRenderer } from './define-ssr-safe-renderer.js';
+
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
-export const CONTRACT_VERSION = '0.4.0-rc.0';
+export const CONTRACT_VERSION = '0.4.1';

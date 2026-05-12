@@ -100,4 +100,6 @@ export {
   resolveStyleRoot,
 } from './style.js';
 
+export { parseHtml, parseHtmlFragment } from './parse-html.js';
+
 export const PACKAGE_NAME = '@airo-js/core';

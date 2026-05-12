@@ -57,6 +57,64 @@ function ssrRenderer(label: string): PageRenderer {
   };
 }
 
+describe('renderAppWithPublication — csr-only capability gate', () => {
+  test('skips SSR when entry view declares capabilities: ["csr-only"]; still emits adapter results', async () => {
+    const cartridge: Cartridge<TestData, TestConfig> = {
+      id: 'csr-only-test',
+      industry: 'test',
+      displayName: 'CSR-only Test',
+      description: 'csr-only capability fixture.',
+      version: '0.0.0',
+      schema: {
+        parse: (input) => input as TestData,
+        safeParse: (input) => ({ success: true as const, data: input as TestData }),
+      },
+      dataSources: [],
+      views: [
+        {
+          id: 'map-view',
+          displayName: 'Map',
+          pageType: 'map',
+          factory: () => ({
+            render() {
+              throw new Error('should not be called — view is csr-only');
+            },
+            renderSSR() {
+              throw new Error('should not be called — view is csr-only');
+            },
+            destroy() {},
+          }),
+          capabilities: ['csr-only'],
+        },
+      ],
+      templates: [],
+      defaultConfig: {},
+      defaultTemplateId: 'main',
+    };
+
+    const appConfig: AppConfig<string> = {
+      pages: [{ id: 'map', type: 'map', enabled: true }],
+    };
+    const publicationCtx: PublicationContext<TestConfig> = {
+      config: {},
+      locale: 'en-GB',
+      country: 'GB',
+      currency: 'GBP',
+    };
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot: { marker: 'irrelevant' },
+      publicationCtx,
+    });
+
+    expect(result.skipped).toEqual({ pageType: 'map', reason: 'csr-only' });
+    expect(result.html).toBe(''); // no JSON-LD adapters in this cartridge, no widget HTML
+    expect(result.adapterResults).toEqual([]);
+  });
+});
+
 describe('renderAppWithPublication — default resolver', () => {
   test('chunk-mailbox cartridge (views: []) renders entry page from pushed factory', async () => {
     const mailbox = '__AIRO_TEST_SSR_MAILBOX_A__';

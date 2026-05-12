@@ -36,6 +36,7 @@ import type {
   PublicationContext,
 } from '@airo-js/cartridge-kit';
 import { getDefaultRenderResolver } from '@airo-js/cartridge-kit';
+import { logger } from '@airo-js/log';
 
 import {
   renderAppToHTML,
@@ -46,6 +47,8 @@ import {
   type AdapterRunResult,
   type RunPublicationOptions,
 } from './run-publication.js';
+
+const log = logger('ssr');
 
 export interface RenderWithPublicationOptions<
   TData,
@@ -84,6 +87,14 @@ export interface RenderWithPublicationResult {
   html: string;
   /** Per-adapter run result. Inspect for warnings, failed validation, non-inline outputs. */
   adapterResults: AdapterRunResult[];
+  /**
+   * Set when the entry page's view declared `capabilities: ['csr-only']`
+   * — the SSR runner refuses to render it server-side. Adapter results
+   * still ran normally; `html` contains the JSON-LD inline scripts (or
+   * empty string if no adapters matched). The client bundle will mount
+   * via mountCartridge as usual; this branch is the SEO partial-win.
+   */
+  skipped?: { pageType: string; reason: 'csr-only' };
 }
 
 /**
@@ -105,6 +116,64 @@ export async function renderAppWithPublication<
 >(
   opts: RenderWithPublicationOptions<TData, TConfig, TPageType>,
 ): Promise<RenderWithPublicationResult> {
+  // Default filter: inline JSON-LD only. Host apps that want everything
+  // pass an empty filter or explicit overrides.
+  const filter: RunPublicationOptions = opts.publicationFilter ?? {
+    formats: ['json-ld'],
+    deliveries: ['inline-in-host'],
+  };
+
+  // Run adapters first — surfaces validation errors before we commit to
+  // rendering. Cheaper to abort here than after a full SSR pass. Also
+  // means CSR-only views still get their JSON-LD surfaced to crawlers.
+  const adapterResults = await runPublicationAdapters(
+    opts.cartridge,
+    opts.snapshot,
+    opts.publicationCtx,
+    filter,
+  );
+
+  // Build the inline JSON-LD blocks up front — emitted regardless of
+  // whether the widget renders.
+  const inlineScripts = adapterResults
+    .filter(
+      (r) =>
+        r.included &&
+        r.format === 'json-ld' &&
+        r.delivery === 'inline-in-host',
+    )
+    .map((r) => buildJsonLdScript(r.output))
+    .join('\n');
+
+  // Gap 4 — capability gate. Walk the cartridge's views to find the entry
+  // page's view; if it declared `csr-only`, refuse SSR and return the
+  // JSON-LD blocks alone. Host app's client bundle mounts as usual.
+  // Mailbox-only cartridges (chunk-registered views) skip the check —
+  // capability info isn't available before the chunk loads. Cartridges
+  // that need the gate must ship a static `views[]` entry.
+  //
+  // This check runs BEFORE `getDefaultRenderResolver` so csr-only
+  // cartridges (typically lighter — no resolver registry needed) don't
+  // pay the resolver-construction cost on the SSR-skip path.
+  const isGate = opts.isGatePage ?? (() => false);
+  const entryPage = opts.appConfig.pages.find(
+    (p) => p.enabled && !p.parent && !isGate(p.type),
+  );
+  if (entryPage) {
+    const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
+    if (entryView?.capabilities?.includes('csr-only')) {
+      log.info(
+        `renderAppWithPublication: skipping SSR for csr-only view '${entryView.id}' (pageType: ${entryPage.type}). JSON-LD still inlined.`,
+        { pageType: entryPage.type, viewId: entryView.id, phase: 'capability-gate' },
+      );
+      return {
+        html: inlineScripts,
+        adapterResults,
+        skipped: { pageType: entryPage.type, reason: 'csr-only' },
+      };
+    }
+  }
+
   // Default the renderer resolver via cartridge-kit's getDefaultRenderResolver.
   // Supports both static `views[]` and per-cartridge chunk mailboxes
   // (`cartridge.mailboxName`). Cast: registry returns its heterogeneous
@@ -116,22 +185,6 @@ export async function renderAppWithPublication<
     (getDefaultRenderResolver(opts.cartridge) as (
       pageType: TPageType,
     ) => PageRendererFactory<TPageType, unknown> | undefined);
-
-  // Default filter: inline JSON-LD only. Host apps that want everything
-  // pass an empty filter or explicit overrides.
-  const filter: RunPublicationOptions = opts.publicationFilter ?? {
-    formats: ['json-ld'],
-    deliveries: ['inline-in-host'],
-  };
-
-  // Run adapters first — surfaces validation errors before we commit to
-  // rendering. Cheaper to abort here than after a full SSR pass.
-  const adapterResults = await runPublicationAdapters(
-    opts.cartridge,
-    opts.snapshot,
-    opts.publicationCtx,
-    filter,
-  );
 
   const renderDeps: RenderToHTMLDeps<TPageType, unknown> = {
     document: opts.document,
@@ -145,19 +198,6 @@ export async function renderAppWithPublication<
   };
 
   const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
-
-  // Stitch — JSON-LD blocks (in adapter declaration order) ahead of the
-  // widget markup. Non-inline adapter outputs stay in adapterResults for
-  // the host app to consume out-of-band.
-  const inlineScripts = adapterResults
-    .filter(
-      (r) =>
-        r.included &&
-        r.format === 'json-ld' &&
-        r.delivery === 'inline-in-host',
-    )
-    .map((r) => buildJsonLdScript(r.output))
-    .join('\n');
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
   return { html, adapterResults };
