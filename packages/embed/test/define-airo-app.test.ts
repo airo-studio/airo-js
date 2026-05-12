@@ -379,6 +379,168 @@ describe('defineAiroApp', () => {
     expect(fetchSsrHtml).toHaveBeenCalledTimes(1);
   });
 
+  test('enableRouter hash mode → embed reads window.location.hash, forwards as navHint', async () => {
+    const elementName = uniqueElementName();
+    const fetchSsrHtml = vi.fn(async () => null);
+    const onMounted = vi.fn();
+
+    // Set the hash BEFORE the element mounts. embed.connectedCallback
+    // reads window.location.hash and forwards as navHint.
+    window.history.replaceState(null, '', '/some-page#products/abc');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'hash' },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_hash_nav' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml).toHaveBeenCalledTimes(1);
+    const [id, token, navHint] = fetchSsrHtml.mock.calls[0]!;
+    expect(id).toBe('wgt_hash_nav');
+    expect(token).toBeNull();
+    expect(navHint).toBe('products/abc');
+
+    // Cleanup — leave URL state in a clean spot for downstream tests.
+    window.history.replaceState(null, '', '/');
+  });
+
+  test('enableRouter path mode → embed extracts path tail, forwards as navHint', async () => {
+    const elementName = uniqueElementName();
+    const fetchSsrHtml = vi.fn(async () => null);
+    const onMounted = vi.fn();
+
+    // Pre-fix the URL to the path-mode deeplink shape.
+    window.history.replaceState(null, '', '/campaign/xyz/products/abc');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'path', basePath: '/campaign/xyz' },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_path_nav' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml).toHaveBeenCalledTimes(1);
+    expect(fetchSsrHtml.mock.calls[0]![2]).toBe('products/abc');
+
+    window.history.replaceState(null, '', '/');
+  });
+
+  test('path mode + hash present → path wins; hash NOT forwarded (verification 3)', async () => {
+    const elementName = uniqueElementName();
+    const fetchSsrHtml = vi.fn(async () => null);
+    const onMounted = vi.fn();
+
+    // URL has BOTH a path route AND a trailing hash. Path is the
+    // source of truth in path mode; hash is treated as a normal page
+    // anchor — must NOT be forwarded as the navHint.
+    window.history.replaceState(null, '', '/campaign/xyz/products/abc#some-anchor');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'path', basePath: '/campaign/xyz' },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_path_hash' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    const navHint = fetchSsrHtml.mock.calls[0]![2];
+    expect(navHint).toBe('products/abc');
+    expect(navHint).not.toContain('some-anchor');
+
+    window.history.replaceState(null, '', '/');
+  });
+
+  test('path mode + basePath mismatch → navHint is null (no thrown error)', async () => {
+    const elementName = uniqueElementName();
+    const fetchSsrHtml = vi.fn(async () => null);
+    const onMounted = vi.fn();
+
+    // URL doesn't match basePath at all. extractPathTail returns null;
+    // navHint forwarded as null; embed continues without throwing.
+    window.history.replaceState(null, '', '/totally/different/path');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'path', basePath: '/campaign/xyz' },
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_path_miss' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml.mock.calls[0]![2]).toBeNull();
+
+    window.history.replaceState(null, '', '/');
+  });
+
+  test('no enableRouter → navHint is null (no router, no deeplinks)', async () => {
+    const elementName = uniqueElementName();
+    const fetchSsrHtml = vi.fn(async () => null);
+    const onMounted = vi.fn();
+
+    window.history.replaceState(null, '', '/some-page#products/abc');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        // enableRouter omitted — no router configured
+      }),
+      resolveCartridge: async () => fakeCartridge(),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_no_router' });
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    // Hash is present in URL but no router → no navHint forwarded.
+    expect(fetchSsrHtml.mock.calls[0]![2]).toBeNull();
+
+    window.history.replaceState(null, '', '/');
+  });
+
   test('pre-built `events` bus is threaded into the shell (host-app pre-wire)', async () => {
     const elementName = uniqueElementName();
     const onMounted = vi.fn();

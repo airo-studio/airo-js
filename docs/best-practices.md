@@ -913,6 +913,137 @@ Both produce identical post-mount DOM. Option A is simpler for hand-authored SSR
 
 The framework supports both with no code change — DSD detection is a runtime check on `host.shadowRoot`, not a build-time flag.
 
+### 5.10 Deep-linkable SSR with router modes
+
+Two URL surfaces; two router modes; one shared encoding. Pick based on whether the widget owns its URL space.
+
+| Surface | Router | Picks because |
+|---|---|---|
+| Customer-page embed (`<my-app>` on someone else's HTML) | **Hash** | Widget can claim `#fragment` without colliding with host's path/query routing |
+| Owned domain (Campaign Page — `dotter.me/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
+
+Both share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter — round-trip-compatible across modes.
+
+**`RouterOption` discriminated union:**
+
+```ts
+import type { RouterOption } from '@airo-js/core';
+
+type RouterOption =
+  | false                                                  // memory only (default)
+  | true                                                    // back-compat: HashRouter
+  | { mode: 'hash'; pathContextKey?: string }
+  | { mode: 'path'; basePath: string; pathContextKey?: string };
+```
+
+Pass via `mountCartridge({ enableRouter })`, `createApp({ deps: { enableRouter } })`, or — from the customer-embed flow — `LoadConfigResult.enableRouter` returned by the studio's `loadConfig` callback. The runtime instantiates the matching router on mount.
+
+**Hash mode — customer-page embed.** Embed reads `window.location.hash` before fetching SSR HTML. Forwards as the third arg to `fetchSsrHtml` so the SSR endpoint can render the deeplinked page directly — zero flash.
+
+```ts
+defineAiroApp({
+  elementName: 'my-app',
+  loadConfig: async (id) => ({
+    cartridgeId: 'wtb',
+    config: { /* ... */ },
+    enableRouter: { mode: 'hash' },  // configures the post-mount router
+  }),
+  fetchSsrHtml: async (id, token, navHint) => {
+    // navHint here is `window.location.hash.slice(1)` (or null).
+    // Customer pasted #products/abc → navHint === 'products/abc'.
+    const url = new URL(`/widgets/${id}/load`, ORIGIN);
+    url.searchParams.set('ssr', '1');
+    if (navHint) url.searchParams.set('nav', navHint);
+    return await fetch(url).then((r) => r.text());
+  },
+  resolveCartridge: /* ... */,
+});
+```
+
+Server-side (in the host's `/load` endpoint):
+
+```ts
+import { decodeNavHint, templateToAppConfig } from '@airo-js/core';
+import { renderAppWithPublication } from '@airo-js/ssr';
+
+const navHint = req.query.nav as string | undefined;
+const appConfig = templateToAppConfig(template, widgetId);
+const validPages = appConfig.pages.map((p) => p.id);
+
+const navState = decodeNavHint(navHint, validPages);
+
+const result = await renderAppWithPublication({
+  cartridge,
+  appConfig,
+  snapshot,
+  publicationCtx,
+  entryPageId: navState?.page,  // ← deeplink target, falls back to default entry if undefined
+});
+```
+
+**Path mode — owned-domain Campaign Page.** Widget claims a URL prefix (`basePath`); browser sends the full URL to the server (no hash strip); server reads the route directly from `req.url`.
+
+```ts
+defineAiroApp({
+  elementName: 'campaign-app',
+  loadConfig: async (id) => ({
+    cartridgeId: 'wtb',
+    config: { /* ... */ },
+    enableRouter: { mode: 'path', basePath: `/campaign/${id}` },
+  }),
+  fetchSsrHtml: async (id, token, navHint) => {
+    // navHint here is the path tail under basePath via extractPathTail.
+    // URL '/campaign/xyz/products/abc' + basePath '/campaign/xyz'
+    // → navHint === 'products/abc'.
+    // ...
+  },
+  resolveCartridge: /* ... */,
+});
+```
+
+Server-side route shape — wildcard catch-all:
+
+```ts
+// Express / Hono / SvelteKit / Next.js
+app.get('/campaign/:widgetId/*', async (req, res) => {
+  const widgetId = req.params.widgetId;
+  const routePath = req.params[0] ?? '';  // 'products/abc' or ''
+  const appConfig = templateToAppConfig(template, widgetId);
+  const navState = decodeNavHint(routePath, appConfig.pages.map((p) => p.id));
+
+  const result = await renderAppWithPublication({
+    cartridge,
+    appConfig,
+    snapshot,
+    publicationCtx,
+    entryPageId: navState?.page,
+  });
+  res.send(/* render full page HTML with `result.html` inlined */);
+});
+```
+
+**Path-mode caveats worth knowing:**
+
+- **basePath boundary.** The framework's `extractPathTail` rejects sibling-id collisions — `/campaign/xyzabc/...` doesn't match `basePath: '/campaign/xyz'`. The next char after basePath must be `/` or end-of-string. Verified in tests.
+- **Trailing-slash normalisation.** `/campaign/xyz`, `/campaign/xyz/`, `/campaign/xyz/products/abc` — all three behave identically. First two return null (no tail); third returns `'products/abc'`.
+- **Hash + path coexistence.** In path mode, a trailing `#anchor` on the URL is treated as a normal page anchor — **not** as a route override. The path is the sole source of truth. If you need both routing AND in-page anchors, use path for route + hash for scroll target.
+- **Wildcard route conflicts.** Your server's `/campaign/:widgetId/*` route catches everything under the prefix, including static assets. Order it after asset handlers, or pattern-restrict (`/campaign/:widgetId/(products|categories|...)/*`).
+
+**Don't ship a parallel runtime allowlist for routable pages.** Same anti-pattern as Section 3.12 — derive valid page ids from the cartridge:
+
+```ts
+// ❌ — parallel list, drifts when pages[] changes
+const ROUTABLE_PAGES = ['products', 'product', 'categories', 'store-finder'];
+
+// ✅ — derive from cartridge
+const validPages = appConfig.pages
+  .filter((p) => p.enabled && !p.parent)
+  .map((p) => p.id);
+const navState = decodeNavHint(req.query.nav, validPages);
+```
+
+**Why drop Query mode** (the path-not-taken). An earlier framework rev considered `mode: 'query'` (`?nav=products/abc`) as a third option. Hash + Path covers every named use case (embed vs owned domain); Query mode was the awkward middle — SSR-readable like Path but with messier URLs. No concrete consumer needed it. Drop. If a future case surfaces, the `RouterOption` union is openly extensible — `mode: 'query'` is a single variant add, not a third consumer-side implementation.
+
 ---
 
 ## 6. Update process

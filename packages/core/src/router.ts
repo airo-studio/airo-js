@@ -1,21 +1,23 @@
 /**
- * HashRouter — URL hash ↔ NavigationState bridge.
+ * Router primitives — URL ↔ NavigationState bridges. Two implementations
+ * share the encoding (`stateToFragment` / `fragmentToState` in
+ * `nav-encoding.ts`); they differ only in which URL surface they read
+ * from and write to.
  *
- * Hash format: `#{page}/{contextValue}?key=value&...`
+ *   HashRouter   — `#fragment` (default; embed-friendly, works on any
+ *                  host page)
+ *   PathRouter   — `/basePath/fragment` via History API (when the widget
+ *                  owns the URL space — Campaign Pages, edge-rendered
+ *                  pages, anywhere the host server controls the path)
  *
- * Examples:
- *   #products
- *   #products?filter=Electronics
- *   #product/prod-123
- *   #product/prod-123?filter=Electronics
+ * Both implement the `IRouter` interface. `IHashRouter` is kept as a
+ * deprecated alias for back-compat — pre-0.5.0 callers wrote against
+ * the hash-specific name when there was only one router.
  *
- * The router is shape-agnostic: `RouteState` is a plain key/value bag the
- * caller narrows to its app's nav schema. The first key in the URL path is
- * always `page`; everything else is encoded as query params.
- *
- * Apps narrow `RouteState` to declare which keys they actually use; the
- * `pathContextKey` option lets the host pick which key occupies the
- * second path segment.
+ * `RouterOption` is the discriminated union consumers pass to
+ * `mountCartridge.enableRouter` (or `createApp.deps.enableRouter`).
+ * The runtime branches on the variant and instantiates the matching
+ * router.
  */
 
 export interface RouteState {
@@ -24,18 +26,50 @@ export interface RouteState {
 }
 
 import { logger } from '@airo-js/log';
+import { fragmentToState, stateToFragment } from './nav-encoding.js';
 
 const log = logger('core');
 
 export type RouterOnNavigate = (state: RouteState) => void;
 
-export interface IHashRouter {
+/**
+ * Shape every router implements. Callers (PageManager) drive lifecycle
+ * via this interface — no router-class-specific calls leak out.
+ */
+export interface IRouter {
   start(): void;
   stop(): void;
   push(state: RouteState): void;
   replace(state: RouteState): void;
-  parseCurrentHash(): RouteState | null;
+  /** Read current URL state. Returns null when URL doesn't decode to a valid page. */
+  parseCurrent(): RouteState | null;
 }
+
+/**
+ * @deprecated 0.5.0 — renamed to `IRouter` (multiple router implementations
+ * now exist). Type alias kept for back-compat; will be removed in a future
+ * major version.
+ */
+export type IHashRouter = IRouter;
+
+/**
+ * Discriminated union for `enableRouter`. Three variants:
+ *
+ *   `false`               — no router (default; widget runs in memory only)
+ *   `true`                — back-compat alias for `{ mode: 'hash' }`
+ *   `{ mode: 'hash' }`    — HashRouter (`#fragment`)
+ *   `{ mode: 'path', basePath: string }` — PathRouter (`/basePath/fragment`)
+ *
+ * Picked: `mode: 'hash'` for customer-page embeds (widget can claim
+ * `#fragment` without colliding with host's path/query routing);
+ * `mode: 'path'` when the widget owns the URL space (Campaign Pages
+ * etc. — `basePath` carves out the URL prefix, fragment fills the rest).
+ */
+export type RouterOption =
+  | false
+  | true
+  | { mode: 'hash'; pathContextKey?: string }
+  | { mode: 'path'; basePath: string; pathContextKey?: string };
 
 export interface HashRouterOptions {
   validPages?: ReadonlyArray<string>;
@@ -47,7 +81,7 @@ export interface HashRouterOptions {
   pathContextKey?: string;
 }
 
-export class HashRouter implements IHashRouter {
+export class HashRouter implements IRouter {
   private onNavigate: RouterOnNavigate;
   private boundHandler: () => void;
   private validPages: ReadonlySet<string> | null;
@@ -69,7 +103,7 @@ export class HashRouter implements IHashRouter {
   }
 
   push(state: RouteState): void {
-    const hash = this.stateToHash(state);
+    const hash = '#' + stateToFragment(state, { pathContextKey: this.pathContextKey });
     if (window.location.hash !== hash) {
       window.location.hash = hash;
     }
@@ -81,7 +115,7 @@ export class HashRouter implements IHashRouter {
    * cross-origin-restricted.
    */
   replace(state: RouteState): void {
-    const hash = this.stateToHash(state);
+    const hash = '#' + stateToFragment(state, { pathContextKey: this.pathContextKey });
     try {
       const url = window.location.pathname + window.location.search + hash;
       window.history.replaceState(null, '', url);
@@ -92,54 +126,27 @@ export class HashRouter implements IHashRouter {
     }
   }
 
-  parseCurrentHash(): RouteState | null {
-    return this.hashToState(window.location.hash);
-  }
-
-  private stateToHash(state: RouteState): string {
-    let path = state.page;
-    const ctx = state[this.pathContextKey];
-    if (ctx) {
-      path += '/' + encodeURIComponent(ctx);
-    }
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(state)) {
-      if (key === 'page' || key === this.pathContextKey) continue;
-      if (value !== undefined && value !== '') params.set(key, value);
-    }
-    const queryString = params.toString();
-    return '#' + path + (queryString ? '?' + queryString : '');
-  }
-
-  private hashToState(hash: string): RouteState | null {
+  parseCurrent(): RouteState | null {
+    const hash = window.location.hash;
     if (!hash.startsWith('#')) return null;
-    const hashContent = hash.slice(1);
-    if (!hashContent) return null;
+    return fragmentToState(hash.slice(1), {
+      pathContextKey: this.pathContextKey,
+      validPages: this.validPages,
+    });
+  }
 
-    const [pathPart, queryPart] = hashContent.split('?');
-    if (!pathPart) return null;
-    const pathSegments = pathPart.split('/').filter(Boolean);
-    if (pathSegments.length === 0) return null;
-
-    const page = pathSegments[0];
-    if (!page) return null;
-    if (this.validPages && !this.validPages.has(page)) return null;
-
-    const state: RouteState = { page };
-    if (pathSegments[1]) {
-      state[this.pathContextKey] = decodeURIComponent(pathSegments[1]);
-    }
-
-    const params = new URLSearchParams(queryPart || '');
-    for (const [key, value] of params.entries()) {
-      state[key] = value;
-    }
-    return state;
+  /**
+   * @deprecated 0.5.0 — renamed to `parseCurrent()`. Multiple router
+   * implementations now exist; the generic name reflects the contract.
+   * This alias delegates to `parseCurrent()` for back-compat.
+   */
+  parseCurrentHash(): RouteState | null {
+    return this.parseCurrent();
   }
 
   private handleHashChange(): void {
     try {
-      const state = this.parseCurrentHash();
+      const state = this.parseCurrent();
       if (state) {
         this.onNavigate(state);
       }

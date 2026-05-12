@@ -47,6 +47,17 @@ export interface RenderToHTMLDeps<
   ) => PageRendererFactory<TPageType, TAppContext> | undefined;
   /** Predicate identifying gate pages (e.g. age verification). */
   isGatePage?: (pageType: TPageType) => boolean;
+  /**
+   * Override the entry page selection. When supplied AND the page
+   * exists / is enabled / isn't a gate, the runner renders this page
+   * instead of finding the first enabled non-parent. Pair with
+   * `decodeNavHint` from `@airo-js/core` for deep-link SSR.
+   *
+   * Invalid / unknown / disabled entryPageId falls back to the
+   * default entry selection — keeps SSR safe against tampered or
+   * stale deeplinks.
+   */
+  entryPageId?: string;
   /** Opaque app-context the consumer hands through to the renderer. */
   appContext: TAppContext;
 }
@@ -81,9 +92,17 @@ export function renderAppToHTML<
   }
 
   const isGate = deps.isGatePage ?? (() => false);
-  const entry = config.pages.find(
-    (p) => p.enabled && !p.parent && !isGate(p.type),
-  );
+  // entryPageId override (deeplink target). Validated to be present +
+  // enabled + non-parent + non-gate; falls back to the default entry
+  // on any mismatch so a stale/tampered URL never crashes the runner.
+  const requestedEntry = deps.entryPageId
+    ? config.pages.find(
+        (p) => p.id === deps.entryPageId && p.enabled && !p.parent && !isGate(p.type),
+      )
+    : undefined;
+  const entry =
+    requestedEntry ??
+    config.pages.find((p) => p.enabled && !p.parent && !isGate(p.type));
   if (!entry) {
     return { html: '' };
   }

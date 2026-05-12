@@ -15,6 +15,7 @@ import type {
   NavigationState,
   SubpageActivation,
 } from './page.js';
+import type { RouterOption } from './router.js';
 import { PageManager } from './page-manager.js';
 
 /**
@@ -40,8 +41,15 @@ export interface AppDeps<
   host: HTMLElement;
   /** Optional pre-built event bus; one is created if absent. */
   events?: IEventBus;
-  /** Opt-in URL ↔ NavState routing. */
-  enableRouter?: boolean;
+  /**
+   * URL routing strategy. Discriminated union (see `RouterOption` in
+   * `./router.ts`):
+   *   `false` (default) — no router; widget runs in memory only.
+   *   `true`            — back-compat alias for `{ mode: 'hash' }`.
+   *   `{ mode: 'hash' }`         — HashRouter (embed-friendly).
+   *   `{ mode: 'path', basePath }` — PathRouter (owned-URL widgets).
+   */
+  enableRouter?: RouterOption;
   /**
    * Page-renderer resolver — domain code wires this. Returns undefined
    * when the chunk owning that page type hasn't loaded yet.

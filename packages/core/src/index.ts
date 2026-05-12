@@ -60,10 +60,27 @@ export { RuntimePipelineImpl, createPipeline } from './runtime-pipeline.js';
 export type {
   RouteState,
   RouterOnNavigate,
+  IRouter,
+  /** @deprecated 0.5.0 — alias for `IRouter`. */
   IHashRouter,
+  RouterOption,
   HashRouterOptions,
 } from './router.js';
 export { HashRouter } from './router.js';
+
+export type { PathRouterOptions } from './path-router.js';
+export { PathRouter } from './path-router.js';
+
+export type {
+  NavEncodingOptions,
+  NavDecodeOptions,
+} from './nav-encoding.js';
+export {
+  stateToFragment,
+  fragmentToState,
+  decodeNavHint,
+  extractPathTail,
+} from './nav-encoding.js';
 
 export type {
   Crumb,

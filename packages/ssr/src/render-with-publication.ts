@@ -75,6 +75,25 @@ export interface RenderWithPublicationOptions<
   /** Predicate identifying gate pages (e.g. age verification). */
   isGatePage?: (pageType: TPageType) => boolean;
   /**
+   * Override the entry page selection for SSR. When present, the
+   * runner renders this page instead of finding the first enabled
+   * non-parent. Pair with `decodeNavHint` from `@airo-js/core` to
+   * deep-link directly into the target page without reordering the
+   * persisted `pages[]` array:
+   *
+   *   const navState = decodeNavHint(req.query.nav, validPages);
+   *   const result = await renderAppWithPublication({
+   *     ...,
+   *     entryPageId: navState?.page,  // undefined falls back to default entry
+   *   });
+   *
+   * When the specified page isn't found, isn't enabled, or is a gate
+   * page, the runner falls back to the default entry selection (same
+   * shape as if entryPageId were undefined) — keeps deeplinks safe
+   * against tampered URLs without erroring.
+   */
+  entryPageId?: string;
+  /**
    * Filter which adapters run. Default: all `format: 'json-ld'` +
    * `delivery: 'inline-in-host'` adapters. Pass to override (e.g. include
    * non-inline adapters in the same run for cache warming).
@@ -156,9 +175,20 @@ export async function renderAppWithPublication<
   // cartridges (typically lighter — no resolver registry needed) don't
   // pay the resolver-construction cost on the SSR-skip path.
   const isGate = opts.isGatePage ?? (() => false);
-  const entryPage = opts.appConfig.pages.find(
-    (p) => p.enabled && !p.parent && !isGate(p.type),
-  );
+  // entryPageId override (deeplink target). Validates that the
+  // requested page exists + is enabled + isn't a gate; falls back to
+  // the default entry selection on any mismatch — keeps the SSR path
+  // safe against tampered or stale deeplinks.
+  const requestedEntry = opts.entryPageId
+    ? opts.appConfig.pages.find(
+        (p) => p.id === opts.entryPageId && p.enabled && !p.parent && !isGate(p.type),
+      )
+    : undefined;
+  const entryPage =
+    requestedEntry ??
+    opts.appConfig.pages.find(
+      (p) => p.enabled && !p.parent && !isGate(p.type),
+    );
   if (entryPage) {
     const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
     if (entryView?.capabilities?.includes('csr-only')) {
@@ -190,6 +220,11 @@ export async function renderAppWithPublication<
     document: opts.document,
     resolveRenderer,
     isGatePage: opts.isGatePage,
+    // Forward the resolved entry id so renderAppToHTML's internal
+    // selection agrees with the capability-gate's selection above.
+    // The capability gate may have validated a deeplink target via
+    // `opts.entryPageId`; renderAppToHTML must pick the same page.
+    entryPageId: entryPage?.id,
     appContext: {
       cartridgeId: opts.cartridge.id,
       config: opts.publicationCtx.config,
