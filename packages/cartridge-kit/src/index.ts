@@ -130,4 +130,16 @@ export type {
 export { defineSSRSafeRenderer } from './define-ssr-safe-renderer.js';
 
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
-export const CONTRACT_VERSION = '0.4.1';
+/**
+ * Cartridge contract surface version. Ticks ONLY when the contract
+ * surface changes in a way consumers must adapt to — interface
+ * signatures (Cartridge<TData, TConfig>, PageRenderer, ComponentSchema,
+ * ThemeSchema, PublicationAdapter, etc.), required fields, or
+ * semantics of existing methods. Helper additions (defineSSRSafeRenderer,
+ * deriveComponentTokens, defineStyleSurface, etc.) and internal
+ * refactors do NOT bump this — they help consumers implement the
+ * EXISTING contract more safely without moving the surface. Read
+ * `package.json` for the package version; this constant is the
+ * separate, load-bearing signal that consumers can train on.
+ */
+export const CONTRACT_VERSION = '0.4.0';
