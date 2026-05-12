@@ -437,6 +437,33 @@ The SSR HTML should be the same DOM `renderSSR` produced — nothing more. Don't
 
 Inline only recomputable signals — `config`, `snapshot` (the post-Transformer data) — never derived state. Document the discipline at the inline-script call site so future maintainers don't add a "convenience" state field.
 
+### 3.12 Don't ship parallel runtime allowlists for SSR / CSR / auth
+
+If your cartridge code or host-app code contains a constant like `CSR_ONLY_PAGE_TYPES = ['store-finder', 'live-feed']` parallel to the `capabilities` declarations on `ViewDefinition`, that's a drift trap. The `// keep in sync with views[].capabilities` comment that inevitably gets added IS the smell — the comment is doing the work the type system should do.
+
+The pattern accumulates: a single allowlist becomes two (`AIRO_SSR_SKIP_PAGE_TYPES` and `AIRO_CSR_ONLY_PAGE_TYPES` are the same data with opposite sign), then three when an auth gate ships (`REQUIRES_AUTH_PAGE_TYPES`). Each new capability needs N+1 sync points. The `capabilities` array on `ViewDefinition` was designed to be the one place this information lives.
+
+**The fix:** derive the runtime set from the cartridge at use site.
+
+```ts
+// ❌ — parallel list, drifts silently when capabilities change
+const CSR_ONLY_PAGE_TYPES = new Set(['store-finder', 'live-feed']);
+// keep in sync with views[].capabilities  ← this comment is the smell
+
+// ✅ — server-side filter at the import boundary
+import { filterServerSafeCartridge } from '@airo-js/ssr';
+const serverSafeCartridge = filterServerSafeCartridge(myCartridge);
+
+// ✅ — client-side derivation when you need the page-type set
+const csrOnly = new Set(
+  myCartridge.views
+    .filter((v) => v.capabilities?.includes('csr-only'))
+    .map((v) => v.pageType),
+);
+```
+
+The capability declarations on `views[]` are the source of truth. Parallel constants are technical debt with a sync comment attached. When a new capability ships (`'requires-auth'`, `'requires-feed'`), extending `excludeCapabilities` or the filter predicate is a one-place change; extending three parallel constants is three opportunities to forget.
+
 ---
 
 ## 4. Host app patterns
@@ -634,15 +661,58 @@ const views: ViewDefinition<MyData, MyConfig>[] = [{
 }];
 ```
 
-`@airo-js/ssr`'s `renderAppWithPublication` reads the flag. When the entry page's view is `'csr-only'`, the runner:
+`@airo-js/ssr`'s `renderAppWithPublication` reads the flag at the dispatch boundary. When the entry page's view is `'csr-only'`, the runner:
 
 - Skips the renderer call (no server-side DOM crash).
 - Returns `{ skipped: { pageType, reason: 'csr-only' }, html: inlineScripts, adapterResults }`.
 - **Still runs all `PublicationAdapter`s and inlines JSON-LD** — the SEO partial-win. Crawlers see the structured data; the widget itself mounts client-side as usual via `mountCartridge`.
 
-Cartridge authors don't have to special-case `'csr-only'` views in their code — declare the flag, the framework handles the rest. Don't claim `'ssr-safe'` if your renderer imports `window` or third-party browser-only libs at module scope. The honest declaration is a feature, not a failure.
+**Server-side: use `filterServerSafeCartridge` at the SSR entry.** Rather than the dispatch-time gate alone, drop server-unsafe views from the cartridge at the import boundary:
 
-**Mailbox-only cartridges** (views registered via `pushToMailbox` on chunk load, no static `views[]`) skip the capability check — the flag isn't available before the chunk loads. Cartridges that need the gate must ship a static `views[]` entry.
+```ts
+// Server-side entry (Node / Deno / edge function)
+import { filterServerSafeCartridge, renderAppWithPublication } from '@airo-js/ssr';
+import { myCartridge } from '@my-org/my-cartridge';
+
+const serverSafe = filterServerSafeCartridge(myCartridge);
+// → cartridge with csr-only views removed; type-narrowed; ready for renderAppWithPublication
+
+const result = await renderAppWithPublication({
+  cartridge: serverSafe,
+  appConfig,
+  snapshot,
+  publicationCtx,
+});
+```
+
+Default-excludes `['csr-only']`. Compose additional capability gates via `excludeCapabilities`:
+
+```ts
+const anonymouslySafe = filterServerSafeCartridge(myCartridge, {
+  excludeCapabilities: ['csr-only', 'requires-auth'],
+});
+```
+
+Two reasons to filter at import (not just rely on the dispatch gate):
+
+- **Discoverability.** The helper lives next to `renderAppWithPublication` in `@airo-js/ssr`; the cartridge author finds it on their first import. The dispatch gate is invisible until a server-side crash surfaces it.
+- **Forward-compat by default.** Adding a new server-unsafe capability to the framework's default exclusion set (a future release) extends every caller's filter automatically. Hand-rolled `views.filter(...)` calls don't pick up the new default.
+
+**Client-side: derive the same set from the cartridge.** When client code needs to know which page types are CSR-only (e.g., to skip server hydration for those entries on initial paint), derive from the cartridge — never from a parallel allowlist:
+
+```ts
+const csrOnlyPageTypes = new Set(
+  myCartridge.views
+    .filter((v) => v.capabilities?.includes('csr-only'))
+    .map((v) => v.pageType),
+);
+```
+
+One source of truth (`ViewDefinition.capabilities`) — no drift, no sync comment, no parallel list to maintain. See Anti-pattern 3.12 for why parallel runtime allowlists are a smell.
+
+**Mailbox-only cartridges** (views registered via `pushToMailbox` on chunk load, no static `views[]`) skip the capability check at this layer — the flag isn't available before the chunk loads. Cartridges that need the gate must ship a static `ViewDefinition` placeholder in `views[]` with `capabilities` set; `filterServerSafeCartridge` and the dispatch gate both read from that array.
+
+Don't claim `'ssr-safe'` if your renderer imports `window` or third-party browser-only libs at module scope. The honest declaration is a feature, not a failure.
 
 ### 5.6 Host-server SSR — `airo-ssr="hydrate"`
 
