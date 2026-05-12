@@ -40,7 +40,8 @@
 import { logger } from '@airo-js/log';
 
 import type { Cartridge } from '@airo-js/cartridge-kit';
-import type { StyleIsolation } from '@airo-js/core';
+import type { RouterOption, StyleIsolation } from '@airo-js/core';
+import { extractPathTail } from '@airo-js/core';
 import type { SharedLifecycleHooks } from '@airo-js/runtime';
 
 const log = logger('embed');
@@ -59,6 +60,16 @@ export interface LoadConfigResult<TConfig = unknown> {
   templateId?: string;
   /** Style isolation strategy. Default: 'shadow'. */
   styleIsolation?: StyleIsolation;
+  /**
+   * URL routing strategy. When supplied, embed reads the appropriate
+   * URL surface (hash for `mode: 'hash'`; path tail under `basePath`
+   * for `mode: 'path'`) BEFORE calling `fetchSsrHtml`, and forwards
+   * the extracted fragment as the third argument (`navHint`) so the
+   * SSR endpoint can render the deeplink target directly — no flash.
+   * The runtime uses the same option to instantiate the matching
+   * router after mount. See `RouterOption` in `@airo-js/core`.
+   */
+  enableRouter?: RouterOption;
   /** CDN base URL for runtime + chunk loading (forward-compat for v0.2 chunk loader). */
   runtimeBase?: string;
   /** Pinned runtime version. e.g. '0.1.0' (forward-compat for v0.2 chunk loader). */
@@ -150,8 +161,26 @@ export interface DefineAiroAppOptions extends SharedLifecycleHooks {
    * Optional SSR-hydrate path. When implemented AND `loadConfig` didn't
    * already return `ssrHtml`, embed calls this to fetch the SSR HTML.
    * Errors fall through to CSR — SSR is opportunistic.
+   *
+   * `navHint` (3rd parameter, added in 0.5.0) carries the URL fragment
+   * embed extracted from `window.location` based on the configured
+   * `enableRouter` mode:
+   *   - hash mode → `window.location.hash.slice(1)` (without the `#`)
+   *   - path mode → path tail under `basePath` (e.g. `'products/abc'`)
+   *   - no router → `null`
+   * The host endpoint can pass the hint to
+   * `decodeNavHint(navHint, validPages)` from `@airo-js/core` and
+   * forward as `entryPageId` to `renderAppWithPublication` — server
+   * SSRs the deeplinked target directly, no flash.
+   *
+   * Back-compat: callbacks that take only two parameters keep working
+   * (JS ignores extra args).
    */
-  fetchSsrHtml?: (id: string, token: string | null) => Promise<string | null>;
+  fetchSsrHtml?: (
+    id: string,
+    token: string | null,
+    navHint: string | null,
+  ) => Promise<string | null>;
 
   /**
    * Hook called when mount fails at any phase. Host app supplies the
@@ -254,6 +283,13 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       const hasDeclarativeShadow = this.shadowRoot !== null;
       const ssrMode = this.getAttribute(ssrModeAttribute);
       const hostInjected = ssrMode === 'hydrate' && this.innerHTML.trim() !== '';
+      // navHint — extracted from window.location based on the
+      // configured router mode. Forwarded as 3rd arg to fetchSsrHtml
+      // so the SSR endpoint can deeplink directly to the target page.
+      // Hash precedence rule: in path mode, a trailing `#anchor` is
+      // treated as a normal page anchor, NOT as a route override —
+      // the path is the route source of truth.
+      const navHint = extractNavHint(loaded.enableRouter);
       let ssrHtml: string | null = null;
       if (hasDeclarativeShadow) {
         // DSD present — shadow content already in DOM; nothing to fetch,
@@ -264,7 +300,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         ssrHtml = loaded.ssrHtml ?? null;
         if (!ssrHtml && opts.fetchSsrHtml) {
           try {
-            ssrHtml = await opts.fetchSsrHtml(id, token);
+            ssrHtml = await opts.fetchSsrHtml(id, token, navHint);
           } catch (err) {
             emitError(opts, 'fetch-ssr', err, this);
             // Intentional fall-through — SSR is opportunistic.
@@ -335,6 +371,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           template,
           host: this,
           styleIsolation: loaded.styleIsolation,
+          enableRouter: loaded.enableRouter,
           widgetId: id,
           preloadedData: loaded.preloadedData,
           mode: hydrating ? 'hydrate' : 'csr',
@@ -368,6 +405,50 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
 
   customElements.define(elementName, AiroAppElement);
   REGISTERED_ELEMENTS.add(elementName);
+}
+
+/**
+ * Extract a navigation hint from the current URL based on the
+ * configured router mode. Forwarded as the 3rd arg to `fetchSsrHtml`
+ * so the SSR endpoint can deeplink directly to the target page —
+ * closes the zero-flash deep-link gap for the customer-embed flow.
+ *
+ * Behaviour by router mode:
+ *
+ *   - `false`  / undefined   → null (no router; no deeplinks).
+ *   - `true`                 → back-compat alias for `{ mode: 'hash' }`.
+ *   - `{ mode: 'hash' }`     → window.location.hash without the `#`,
+ *                              or null when the hash is empty/missing.
+ *   - `{ mode: 'path' }`     → path tail under `basePath` via
+ *                              `extractPathTail`, or null when the
+ *                              current URL doesn't belong to basePath
+ *                              (boundary check rejects e.g.
+ *                              `/campaign/xyzabc` when basePath is
+ *                              `/campaign/xyz`).
+ *
+ * Hash-while-path-active: path mode does NOT read the hash. Any
+ * trailing `#anchor` on a path-mode URL is treated as a normal page
+ * anchor; the path is the sole route source of truth. Documented in
+ * best-practices §5.10.
+ */
+function extractNavHint(routerOpt: RouterOption | undefined): string | null {
+  if (!routerOpt) return null;
+  if (routerOpt === true) return readHashFragment();
+  if (routerOpt.mode === 'hash') return readHashFragment();
+  if (routerOpt.mode === 'path') {
+    const tail = extractPathTail(window.location.pathname, routerOpt.basePath);
+    if (tail == null) return null;
+    // Concatenate search so query-string state survives the navHint
+    // round-trip (matches PathRouter's parseCurrent — server-side
+    // decode and client-side router see the same fragment shape).
+    return tail + window.location.search;
+  }
+  return null;
+}
+
+function readHashFragment(): string | null {
+  const h = window.location.hash;
+  return h.length > 1 ? h.slice(1) : null;
 }
 
 /**

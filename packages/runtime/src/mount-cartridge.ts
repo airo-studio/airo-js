@@ -39,6 +39,7 @@ import type {
   App,
   IEventBus,
   IsolationRoot,
+  RouterOption,
   StyleIsolation,
 } from '@airo-js/core';
 import type {
@@ -125,8 +126,17 @@ export interface MountCartridgeOptions<
   styleIsolation?: StyleIsolation;
   /** Stable id used for theme namespacing + DOM `id` on the renderRoot. */
   widgetId?: string;
-  /** Opt-in URL ↔ NavigationState routing. Default: false. */
-  enableRouter?: boolean;
+  /**
+   * URL routing strategy. Discriminated union — see `RouterOption` in
+   * `@airo-js/core`. Default: `false` (memory only).
+   *
+   *   `false`               — no router (default).
+   *   `true`                — back-compat alias for `{ mode: 'hash' }`.
+   *   `{ mode: 'hash' }`    — HashRouter; embed-friendly.
+   *   `{ mode: 'path', basePath }` — PathRouter; owned-URL widgets
+   *                          (Campaign Pages, edge-rendered).
+   */
+  enableRouter?: RouterOption;
 
   /**
    * Mount mode. Default: `'csr'`.

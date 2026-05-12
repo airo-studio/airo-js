@@ -26,8 +26,9 @@ import type {
   SubpageActivation,
 } from './page.js';
 import type { IEventBus } from './events.js';
-import type { IHashRouter, RouteState } from './router.js';
+import type { IRouter, RouteState, RouterOption } from './router.js';
 import { HashRouter } from './router.js';
+import { PathRouter } from './path-router.js';
 
 const log = logger('core');
 
@@ -62,11 +63,16 @@ export interface PageManagerOptions<
    */
   isGatePage?: (pageType: TPageType) => boolean;
   /**
-   * Enable hash-based URL routing. When true, navigate() pushes the
-   * navState into the URL hash and external hashchange events drive
-   * navigate().
+   * URL routing strategy. Three forms:
+   *   `false` (default) — no router; widget runs in memory only.
+   *   `true`            — back-compat alias for `{ mode: 'hash' }`.
+   *   `{ mode: 'hash' }`         — HashRouter (`#fragment`); embed-friendly.
+   *   `{ mode: 'path', basePath: string }` — PathRouter; widgets that own
+   *                                          the URL space (Campaign Pages).
+   *
+   * See `RouterOption` in `./router.ts` for the full discriminated union.
    */
-  enableRouter?: boolean;
+  enableRouter?: RouterOption;
 }
 
 export class PageManager<
@@ -78,7 +84,7 @@ export class PageManager<
   private navState: NavigationState;
   private activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
   private activeRendererPageId: PageId | null = null;
-  private router: IHashRouter | null = null;
+  private router: IRouter | null = null;
   private suppressRouterPush = false;
   private destroyed = false;
 
@@ -265,30 +271,48 @@ export class PageManager<
   }
 
   private initRouter(): void {
+    const opt = this.opts.enableRouter;
+    if (!opt) return;
+
     const validPages = this.opts.pages
       .filter((p) => !p.parent && !this.isGatePage(p.type))
       .map((p) => p.id);
+
+    // Discriminated-union branch on the opt shape. `true` is the
+    // back-compat alias for `{ mode: 'hash' }`.
+    const mode: 'hash' | 'path' = opt === true ? 'hash' : opt.mode;
+    const pathContextKey = opt === true ? undefined : opt.pathContextKey;
+
+    const onRouterNavigate = (state: RouteState): void => {
+      this.suppressRouterPush = true;
+      try {
+        this.navigate(state);
+      } finally {
+        this.suppressRouterPush = false;
+      }
+    };
+
     try {
-      this.router = new HashRouter(
-        (state) => {
-          this.suppressRouterPush = true;
-          try {
-            this.navigate(state);
-          } finally {
-            this.suppressRouterPush = false;
-          }
-        },
-        { validPages },
-      );
+      if (mode === 'hash') {
+        this.router = new HashRouter(onRouterNavigate, { validPages, pathContextKey });
+      } else {
+        // mode === 'path' — TS narrows `opt` to the path variant here.
+        const pathOpt = opt as { mode: 'path'; basePath: string; pathContextKey?: string };
+        this.router = new PathRouter(onRouterNavigate, {
+          basePath: pathOpt.basePath,
+          validPages,
+          pathContextKey,
+        });
+      }
       this.router.start();
-      const initial = this.router.parseCurrentHash();
+      const initial = this.router.parseCurrent();
       if (initial) {
         this.navState = { ...this.navState, ...initial };
       } else {
         this.router.replace(this.navState as RouteState);
       }
     } catch (err) {
-      log.warn('HashRouter init failed; URL routing disabled.', { err, phase: 'router' });
+      log.warn(`Router (${mode}) init failed; URL routing disabled.`, { err, phase: 'router' });
       this.router?.stop();
       this.router = null;
     }
