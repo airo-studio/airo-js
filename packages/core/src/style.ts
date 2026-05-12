@@ -15,6 +15,14 @@
  * Pure DOM. No domain knowledge, no visual policy — the framework owns the
  * shadow-boundary mechanism only; cartridges own every CSS rule that lands
  * inside it.
+ *
+ * Declarative Shadow DOM (DSD) support: when `host.shadowRoot` is already
+ * non-null at setup time (the browser parsed `<template shadowrootmode>`
+ * during initial HTML parse, or a previous mount left a shadow attached),
+ * `setupIsolationRoot` adopts the existing shadow instead of attaching a
+ * new one. Existing shadow content gets auto-wrapped into the
+ * `.airo-shadow-root` wrapper if not already present — moving nodes inside
+ * a shadow root preserves style attribution and shadow scoping.
  */
 
 export type StyleIsolation = 'light' | 'shadow';
@@ -50,14 +58,31 @@ export function setupIsolationRoot(
   }
 
   // attachShadow throws on re-attach — re-use an existing shadow root if
-  // init runs twice on the same host (hot reload, re-init scenarios).
+  // init runs twice on the same host (hot reload, re-init scenarios) or
+  // if the browser already attached one via Declarative Shadow DOM
+  // (`<template shadowrootmode="open">` parsed during initial HTML parse —
+  // the zero-FOUC SSR path).
   const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
 
   let wrapper = shadow.querySelector<HTMLElement>(`.${SHADOW_WRAPPER_CLASS}`);
   if (!wrapper) {
     wrapper = document.createElement('div');
     wrapper.className = SHADOW_WRAPPER_CLASS;
+
+    // If the shadow root already has children (declarative SSR emitted
+    // content directly under <template shadowrootmode> without the
+    // wrapper, or any other DSD shape), move them into the wrapper so
+    // the framework's renderRoot contract (HTMLElement) is satisfied
+    // without forcing cartridge authors to know about the wrapper class.
+    // Moving nodes inside a shadow root preserves shadow scoping — CSS
+    // attribution is by shadow boundary, not by DOM-tree depth. `:host`
+    // selectors continue to match the shadow host regardless of wrapper
+    // position.
+    const existingChildren = Array.from(shadow.childNodes);
     shadow.appendChild(wrapper);
+    for (const child of existingChildren) {
+      wrapper.appendChild(child);
+    }
   }
 
   return {

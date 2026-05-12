@@ -237,18 +237,28 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       }
       if (this.disposed) return;
 
-      // Phase 3 — SSR HTML resolution. Three sources, in priority order:
-      //   1. `airo-ssr="hydrate"` attribute + non-empty innerHTML —
-      //      host-server-rendered Campaign Page flow. Use existing
-      //      markup; no fetchSsrHtml round-trip; no repaint.
-      //   2. `loadConfig` returned `ssrHtml` — studio API embedded it
+      // Phase 3 — SSR HTML resolution. Four sources, in priority order:
+      //   1. Declarative Shadow DOM — `this.shadowRoot` is non-null
+      //      because the browser parsed `<template shadowrootmode>`
+      //      during initial HTML parse. Zero-FOUC: shadow content + CSS
+      //      are already in place. No fetch, no light-DOM lift. The
+      //      runtime detects the same condition and adopts the existing
+      //      shadow at mount time.
+      //   2. `airo-ssr="hydrate"` attribute + non-empty innerHTML —
+      //      host-server-rendered Campaign Page flow with light DOM.
+      //      Use existing markup; no fetchSsrHtml round-trip; no repaint.
+      //   3. `loadConfig` returned `ssrHtml` — studio API embedded it
       //      in the load response.
-      //   3. `fetchSsrHtml` hook — opportunistic out-of-band fetch.
-      // Errors in source 3 fall through to CSR (SSR is opportunistic).
+      //   4. `fetchSsrHtml` hook — opportunistic out-of-band fetch.
+      // Errors in source 4 fall through to CSR (SSR is opportunistic).
+      const hasDeclarativeShadow = this.shadowRoot !== null;
       const ssrMode = this.getAttribute(ssrModeAttribute);
       const hostInjected = ssrMode === 'hydrate' && this.innerHTML.trim() !== '';
       let ssrHtml: string | null = null;
-      if (hostInjected) {
+      if (hasDeclarativeShadow) {
+        // DSD present — shadow content already in DOM; nothing to fetch,
+        // nothing to paint. Runtime adopts the shadow root in hydrate mode.
+      } else if (hostInjected) {
         ssrHtml = this.innerHTML;
       } else {
         ssrHtml = loaded.ssrHtml ?? null;
@@ -283,9 +293,11 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       // hands off to renderer.hydrate() instead of renderer.render().
       // Skip the assignment when the host already injected the markup
       // (re-assigning innerHTML to itself wipes user-attached listeners
-      // and burns a parser round-trip for no gain).
-      const hydrating = Boolean(ssrHtml);
-      if (ssrHtml && !hostInjected) {
+      // and burns a parser round-trip for no gain) or when a declarative
+      // shadow root is already attached (its content lives in the shadow,
+      // not in innerHTML — runtime adopts it directly).
+      const hydrating = hasDeclarativeShadow || Boolean(ssrHtml);
+      if (ssrHtml && !hostInjected && !hasDeclarativeShadow) {
         this.innerHTML = ssrHtml;
       }
 

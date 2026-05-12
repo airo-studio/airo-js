@@ -267,6 +267,48 @@ describe('defineAiroApp', () => {
     });
   });
 
+  test('declarative shadow root present → fetchSsrHtml skipped, DSD content preserved, hydrate mode forced', async () => {
+    const elementName = uniqueElementName();
+    const lifecycle: string[] = [];
+    const onMounted = vi.fn();
+    const fetchSsrHtml = vi.fn(async () => '<div data-from="endpoint">should-not-fetch</div>');
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        styleIsolation: 'shadow',
+      }),
+      resolveCartridge: async () => fakeCartridge(lifecycle),
+      fetchSsrHtml,
+      onMounted,
+    });
+
+    // Simulate Declarative Shadow DOM: attach a shadow root with SSR
+    // content BEFORE appendChild triggers connectedCallback. Mirrors
+    // what the browser does when parsing `<template shadowrootmode>`
+    // — zero-FOUC path because shadow styles applied during initial
+    // parse, not after a JS lift.
+    const el = document.createElement(elementName);
+    el.setAttribute('airo-id', 'wgt_dsd');
+    const shadow = el.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<article data-dsd="yes">declarative-shadow-content</article>';
+    // No airo-ssr attribute — DSD presence alone is the signal.
+    host.appendChild(el);
+
+    await waitFor(() => onMounted.mock.calls.length > 0);
+
+    expect(fetchSsrHtml).not.toHaveBeenCalled();
+    expect(lifecycle).toContain('hydrate');
+    expect(lifecycle).not.toContain('render');
+    // DSD content survives — embed didn't wipe innerHTML, runtime
+    // adopted the existing shadow root.
+    expect(el.shadowRoot?.innerHTML).toContain('declarative-shadow-content');
+  });
+
   test('airo-ssr="hydrate" + pre-injected innerHTML → fetchSsrHtml skipped, markup preserved', async () => {
     const elementName = uniqueElementName();
     const lifecycle: string[] = [];

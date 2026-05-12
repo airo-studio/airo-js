@@ -841,6 +841,78 @@ const withSubpages: PageRendererFactory<'product', AppCtx> = () => {
 
 Either pattern is correct.
 
+### 5.9 Zero-FOUC SSR via Declarative Shadow DOM
+
+The `airo-ssr="hydrate"` pattern (§5.6) ships SSR HTML as light-DOM children of the custom element. embed lifts that markup into a shadow wrapper at mount time. Trade-off: between initial page paint and the embed lift, the browser shows the light-DOM SSR HTML unstyled by any shadow-scoped CSS — a flash of unstyled content (FOUC).
+
+**Declarative Shadow DOM** (DSD — Chrome 111+ / Firefox 123+ / Safari 16.4+) closes that window. The server emits the shadow root *as HTML*, the browser attaches it during initial parse, and shadow-scoped styles apply before the first paint. embed and the runtime adopt the existing shadow root at mount — no lift, no flash.
+
+**The server output shape:**
+
+```html
+<my-app my-id="wgt_abc123">
+  <template shadowrootmode="open">
+    <article class="my-product-card" data-product-id="prod_42">
+      <h2>Title</h2>
+      <p>Description</p>
+      <button class="my-buy-btn">Buy</button>
+    </article>
+    <style>
+      .my-product-card { padding: 16px; border: 1px solid #ddd; }
+      .my-buy-btn { background: #06f; color: white; }
+    </style>
+  </template>
+</my-app>
+```
+
+The browser parses `<template shadowrootmode="open">`, attaches a shadow root on `<my-app>`, and moves the template's content into it. CSS inside the template is shadow-scoped from the first paint. No FOUC.
+
+**What embed does** (`@airo-js/embed@0.4.3+`):
+
+- Detects `this.shadowRoot !== null` at `connectedCallback` time.
+- Skips `fetchSsrHtml` (DSD presence implies the SSR work already happened).
+- Skips the light-DOM-lift `innerHTML` assignment (DSD content lives in the shadow, not in `innerHTML`).
+- Forces `mode: 'hydrate'` so the cartridge renderer adopts the existing DOM.
+
+**What the runtime does** (`@airo-js/runtime@0.4.2+`):
+
+- `mountCartridge` detects `host.shadowRoot !== null` and skips the light-DOM lift block entirely.
+- `setupIsolationRoot` (`@airo-js/core@0.4.3+`) reuses the existing shadow root. If the DSD content isn't wrapped in `.airo-shadow-root`, the framework auto-wraps it (transparent to the cartridge author — the wrapper class is a framework implementation detail).
+- `renderer.hydrate(root, ctx)` runs against the auto-wrapped content. Listeners attach to existing nodes.
+
+**Cartridge author's responsibilities:**
+
+1. Ship a deterministic `template(ctx)` (already required for SSR-safe renderers — see §5.1).
+2. Ensure `hydrate(root, ctx)` works against existing DOM without re-painting (already required — see §5.2).
+3. **Don't** rely on `:host > .my-content` CSS selectors that assume the first child of the shadow root is your content. The framework's auto-wrap places your content inside `.airo-shadow-root` if you didn't ship the wrapper yourself. Scope by class (`.my-content`) instead — shadow boundary already isolates from page CSS.
+
+**Server-side wrapper convention.** Two equivalent emit shapes:
+
+```html
+<!-- Option A: content directly under <template> — framework auto-wraps -->
+<template shadowrootmode="open">
+  <article>…</article>
+  <style>…</style>
+</template>
+
+<!-- Option B: emit the framework wrapper class explicitly — no auto-wrap -->
+<template shadowrootmode="open">
+  <div class="airo-shadow-root">
+    <article>…</article>
+  </div>
+  <style>…</style>
+</template>
+```
+
+Both produce identical post-mount DOM. Option A is simpler for hand-authored SSR; Option B is one DOM op cheaper if your build pipeline already knows about the wrapper.
+
+**When DSD isn't an option.** Older browsers (Chrome <111, Firefox <123, Safari <16.4) parse `<template shadowrootmode>` as a plain `<template>` and ignore the attribute — the SSR content stays inside the template element, invisible to users. Two fallback paths:
+
+- **Server-detect.** If the request's User-Agent is too old, server emits the light-DOM SSR shape (§5.6) instead of DSD. Both paths work simultaneously — embed handles whichever is present.
+- **Polyfill.** `@oddbird/dsd` is a small polyfill that walks the document on load and attaches shadow roots from `<template shadowrootmode>` declarations. Adds ~1 KB; works in every evergreen browser.
+
+The framework supports both with no code change — DSD detection is a runtime check on `host.shadowRoot`, not a build-time flag.
+
 ---
 
 ## 6. Update process
