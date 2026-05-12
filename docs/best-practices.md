@@ -137,7 +137,7 @@ const ageGate: Gate<MyConfig> = {
 
 **Renderers are stateless factories.** `() => new MyRenderer()` returns a fresh instance per navigation. State lives in the renderer instance for the duration of one mount; nothing persists across `destroy()`.
 
-**Capabilities are honest declarations.** `'csr-only'` means the framework's SSR pipeline skips this view server-side. Don't claim `'ssr-safe'` if you import `window` or `document.cookie` at module scope.
+**Capabilities are honest declarations.** `'csr-only'` triggers the SSR runner to skip the view server-side (full mechanics in Section 5.5). `'ssr-safe'` claims your renderer satisfies the SSR-safe discipline (Section 5.1). Don't claim `'ssr-safe'` if you import `window` or `document.cookie` at module scope; don't claim `'hydratable'` unless `hydrate(root, ctx)` adopts existing DOM without re-painting. The honest declaration is load-bearing — the framework dispatches on it.
 
 ### 1.7 `Template<TConfig>`
 
@@ -406,6 +406,37 @@ This bug class is hard to spot in review because the helper *looks* complete fro
 
 Where bugs in helper defaults get fixed: in the helper, not papered over a layer up. Wrapping a broken default in the orchestration layer above creates a precedent — every helper defect becomes runtime's problem, and copy-pasted defaults (the `createCartridgeApp` ↔ `renderAppWithPublication` pair) drift independently.
 
+### 3.10 Don't use `Date.now()` / `Math.random()` / `crypto.randomUUID()` during render
+
+`renderSSR` runs on the server; `render` (CSR fresh-mount) and `hydrate` (SSR-adopt) run in the browser. Time, randomness, and UUIDs diverge between the two environments — hydration mismatch follows. The client paints over the server's HTML, listeners attach to nodes that don't quite match, the page flashes or breaks.
+
+**Pull non-deterministic values up.** If a card needs a stable id, compute it from a stable input (`product.id`, slugified title) — not `crypto.randomUUID()`. If a timestamp is the content, generate it server-side (in `DataSource.fetch` or upstream) and pass it through `ctx.app.data`. The renderer treats it as a string, not a clock read.
+
+```ts
+// ❌
+function template(ctx) {
+  return `<div data-render-id="${crypto.randomUUID()}">…</div>`;
+}
+
+// ✅ — stable identity derived from ctx
+function template(ctx) {
+  return `<div data-product-id="${ctx.app.data.product.id}">…</div>`;
+}
+```
+
+If you genuinely need a per-mount id (focus management, ARIA live regions), generate it inside `hydrate(root, ctx)` and attach it to the DOM there — `hydrate` runs once per mount, not twice; no SSR/CSR divergence.
+
+### 3.11 Don't serialize derived state into the SSR HTML
+
+The SSR HTML should be the same DOM `renderSSR` produced — nothing more. Don't inline a `<script>` block with `{ selectedCategoryIndex: 3, expandedGroup: 'cpg', cartItems: [...] }` and have the client hydrate from it.
+
+**Why it's wrong:**
+- Derived state is recomputable from `(config, snapshot)`. Recomputation is cheap (the same work `renderSSR` did, no DOM).
+- The serialized blob round-trips through the customer's page — an attacker who controls the page can tamper with it. The framework removes this attack surface by never trusting a state blob.
+- Drift sneaks in: when `selectedCategoryIndex` is in two places (server-serialized + client-recomputed), they can disagree. Recomputation is the only source of truth.
+
+Inline only recomputable signals — `config`, `snapshot` (the post-Transformer data) — never derived state. Document the discipline at the inline-script call site so future maintainers don't add a "convenience" state field.
+
 ---
 
 ## 4. Host app patterns
@@ -445,9 +476,294 @@ Single-cartridge studios let `mountCartridge` derive `resolveRenderer` from `car
 
 When you call `defineAiroApp({ elementName: 'my-app', idAttribute: 'my-id' })`, the customer pastes `<my-app my-id="…">`. Pick names that match your studio's identity — but be consistent; don't mix `my-` and `myapp-` prefixes across your bundle.
 
+### 4.5 Host-server SSR — pre-rendering widgets in your page response
+
+Host apps that already render markup server-side (Next.js / Astro / SvelteKit / edge functions / classic templating engines) skip embed's `fetchSsrHtml` round-trip via the `airo-ssr="hydrate"` attribute. Inject the widget HTML directly inside the custom element; embed detects the attribute and hydrates the existing DOM. Full mechanics in Section 5.6.
+
+```html
+<!-- in your host-rendered page response -->
+<my-app my-id="wgt_abc" airo-ssr="hydrate">
+  <!-- host-server-rendered SSR HTML -->
+  <article class="product-card">…</article>
+</my-app>
+```
+
+The cartridge's renderer hydrates against the existing markup — no re-paint, no flash, no extra HTTP round-trip.
+
 ---
 
-## 5. Update process
+## 5. SSR-safe rendering
+
+SSR-safe rendering is the discipline that lets a cartridge produce identical HTML on a server (Node, Deno, edge function — anywhere with a DOM polyfill) and in a browser, then hydrate listeners against that server-painted markup without re-rendering. Three audiences benefit:
+
+- **End users** — page is meaningful immediately; no flash of empty content while the JS bundle loads.
+- **Search engines** — crawlers see real content + structured data, not an empty shell.
+- **AI agents** — language models parsing the page see content + JSON-LD (from `PublicationAdapter`s), not waiting for a JS runtime.
+
+The rendering tree that preceded the cartridge contract taught us the load-bearing rule: the three lifecycle methods (`render` / `renderSSR` / `hydrate`) MUST produce byte-identical DOM. Drift → hydration mismatch → listener loss, repaint flash, or both. The framework's `@airo-js/cartridge-kit` v0.4.1+ ships primitives that make drift impossible by construction. Use them.
+
+### 5.1 The three discipline rules
+
+Every SSR-safe cartridge renderer follows three rules:
+
+1. **`template(ctx)` is pure.** Same `RenderContext` in, same string out. No DOM reads, no global state, no time/random sources during render:
+   - ❌ `Date.now()`, `Math.random()`, `crypto.randomUUID()` in the template (server time/randomness ≠ client time/randomness)
+   - ❌ `window.innerWidth`, `document.cookie`, `localStorage` in the template (server has none of these)
+   - ❌ Reading the existing DOM in the template (server has no existing DOM)
+   - ✅ Anything that's a pure function of `ctx.app`, `ctx.page`, `ctx.navState`
+
+2. **Listener attachment lives in `hydrate(root, ctx)`.** This one handler runs on BOTH the CSR fresh-mount path AND the SSR-hydrate path. Code is shared by construction — drift between "what the CSR path does" and "what the hydrate path does" is structurally impossible.
+
+3. **State is NEVER serialized into the SSR HTML.** The client recomputes from the same `(config, snapshot)` the server saw. Two reasons: (a) recomputation is cheap — the same work `renderSSR` did, no DOM; (b) removes the entire class of tampering bugs from trusting a serialized state blob round-tripped through the customer's page.
+
+Inline payloads (the `<script type="application/json">` that ships data alongside the markup) MUST carry recomputable signals only — `config`, `snapshot` — never derived state like `selectedIndex`, `expandedGroups`, `cartItems`. The client re-derives state from the same inputs the server saw; output matches because the function is pure.
+
+### 5.2 `defineSSRSafeRenderer` — the canonical factory
+
+`@airo-js/cartridge-kit` ships `defineSSRSafeRenderer({ template, hydrate })` to make the three rules structural — you can't accidentally break them. One pure template + one hydrate handler:
+
+```ts
+import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
+import type { RenderContext } from '@airo-js/core';
+
+type AppCtx = { /* whatever your cartridge threads through */ };
+
+// Rule 1: pure render. Same ctx → same string. No DOM, no globals.
+function productCardTemplate(ctx: RenderContext<string, AppCtx>): string {
+  const product = ctx.app.data.product;
+  return `
+    <article class="my-product-card" data-product-id="${escapeHtml(product.id)}">
+      <h2>${escapeHtml(product.title)}</h2>
+      <p>${escapeHtml(product.description)}</p>
+      <button class="my-buy-btn">Buy</button>
+    </article>
+  `;
+}
+
+// Rule 2: listeners only. CSR + SSR-hydrate share this code.
+function attachProductCardListeners(
+  root: HTMLElement,
+  ctx: RenderContext<string, AppCtx>,
+): () => void {
+  const btn = root.querySelector<HTMLButtonElement>('.my-buy-btn');
+  const handler = () => ctx.events.emit('product:buy-click', { productId: ctx.app.data.product.id });
+  btn?.addEventListener('click', handler);
+  return () => btn?.removeEventListener('click', handler);  // cleanup runs on destroy()
+}
+
+export const productCardRenderer = defineSSRSafeRenderer({
+  template: productCardTemplate,
+  hydrate: attachProductCardListeners,
+});
+```
+
+The factory derives:
+- `render(target, ctx)` — paints `template`, then runs `hydrate`.
+- `renderSSR(target, ctx)` — paints `template`, NO `hydrate` (server has no client to hear).
+- `hydrate(target, ctx)` — DOM already painted (SSR HTML or pre-injected light DOM); runs `hydrate` only. No re-paint, no listener loss, no `template` call at all.
+- `destroy()` — invokes the cleanup function returned by `hydrate`.
+
+Drift between the three lifecycle methods is structurally impossible — they all consume the same `template` and `hydrate` inputs. Wire it into a `ViewDefinition`:
+
+```ts
+const views: ViewDefinition<MyData, MyConfig>[] = [{
+  id: 'product-card',
+  displayName: 'Product Card',
+  pageType: 'product',
+  factory: productCardRenderer,
+  capabilities: ['ssr-safe', 'hydratable'],
+  stylesheet: productCardCss,  // cartridge-owned; framework injects no default CSS
+}];
+```
+
+### 5.3 `parseHtml` / `parseHtmlFragment` — env-agnostic seam
+
+When you need to parse HTML into DOM nodes (rather than assign `innerHTML`), use the framework helpers from `@airo-js/core`:
+
+```ts
+import { parseHtml, parseHtmlFragment } from '@airo-js/core';
+
+// Single root
+const node = parseHtml('<div>x</div>', host.ownerDocument);
+host.appendChild(node);
+
+// Multi-root
+const fragment = parseHtmlFragment('<li>a</li><li>b</li>', host.ownerDocument);
+list.appendChild(fragment);
+```
+
+Both helpers:
+- Parse via `<template>` element — no script execution, safer than `innerHTML` on a generic element when input is feed-derived.
+- Resolve `Document` via explicit arg → `globalThis.document` → throw with a useful error (the message names `host.ownerDocument` as the recommended source).
+- Work with any DOM implementation: browser, jsdom, happy-dom, linkedom, deno-dom.
+
+### 5.4 `host.ownerDocument` over `globalThis.document`
+
+Pass `host.ownerDocument` to `parseHtml` when you have a host element. Three reasons:
+
+- **Shadow DOM-safe.** Inside a shadow root, `host.ownerDocument` returns the document that owns the shadow tree. `globalThis.document` may not match if the host element lives in a different frame.
+- **No global state.** Functions that take `host.ownerDocument` explicitly are testable without setting up a global polyfill.
+- **Multi-frame correctness.** A widget mounted into an iframe's host gets the iframe's document, not the parent's.
+
+```ts
+// ✅
+function paint(host: HTMLElement, html: string): void {
+  const node = parseHtml(html, host.ownerDocument);
+  host.appendChild(node);
+}
+
+// ❌ — globally-coupled; breaks in iframe + multi-document setups
+function paint(host: HTMLElement, html: string): void {
+  const node = parseHtml(html);  // falls back to globalThis.document
+  host.appendChild(node);
+}
+```
+
+If you need a `Document` without a host element (a pure utility that emits markup), accept the document as a parameter. Never read `globalThis.document` directly from cartridge code — make the environment the caller's concern.
+
+### 5.5 Capability flags — when a view can't SSR
+
+Some renderers can't run server-side: they depend on `IntersectionObserver`, `requestAnimationFrame`, `window.navigator.geolocation`, third-party libraries that need a real browser (maps, video players, WebGL canvases). Declare the limitation honestly on the `ViewDefinition`:
+
+```ts
+const views: ViewDefinition<MyData, MyConfig>[] = [{
+  id: 'map-view',
+  pageType: 'store-finder',
+  factory: storeFinderRenderer,
+  capabilities: ['csr-only'],  // honest declaration; framework reads this
+}];
+```
+
+`@airo-js/ssr`'s `renderAppWithPublication` reads the flag. When the entry page's view is `'csr-only'`, the runner:
+
+- Skips the renderer call (no server-side DOM crash).
+- Returns `{ skipped: { pageType, reason: 'csr-only' }, html: inlineScripts, adapterResults }`.
+- **Still runs all `PublicationAdapter`s and inlines JSON-LD** — the SEO partial-win. Crawlers see the structured data; the widget itself mounts client-side as usual via `mountCartridge`.
+
+Cartridge authors don't have to special-case `'csr-only'` views in their code — declare the flag, the framework handles the rest. Don't claim `'ssr-safe'` if your renderer imports `window` or third-party browser-only libs at module scope. The honest declaration is a feature, not a failure.
+
+**Mailbox-only cartridges** (views registered via `pushToMailbox` on chunk load, no static `views[]`) skip the capability check — the flag isn't available before the chunk loads. Cartridges that need the gate must ship a static `views[]` entry.
+
+### 5.6 Host-server SSR — `airo-ssr="hydrate"`
+
+For host apps that already render the widget HTML server-side (Campaign Pages, Next.js / Astro / SvelteKit integrations, edge-rendered pages), the embed flow has a fast path. Set the SSR-mode attribute on the custom element and inject the markup directly:
+
+```html
+<my-app my-id="wgt_abc123" airo-ssr="hydrate">
+  <!-- host-server-rendered SSR HTML for this widget -->
+  <article class="my-product-card">…</article>
+</my-app>
+```
+
+When `@airo-js/embed` (v0.4.2+) sees the attribute AND non-empty `innerHTML` at `connectedCallback` time, it:
+
+- **Skips `fetchSsrHtml`** — no extra round-trip; the host server already paid the cost.
+- **Preserves `innerHTML`** — no re-paint that would wipe user-attached listeners or burn parser work.
+- Mounts in hydrate mode — the cartridge renderer's `hydrate(root, ctx)` runs against existing DOM.
+
+Without the attribute, embed treats existing `innerHTML` as a loading skeleton (the v0.4.1 behaviour) and overwrites it on mount. Empty `innerHTML` plus the attribute falls back to `fetchSsrHtml`. Both patterns are supported; the opt-in attribute disambiguates.
+
+Configure the attribute name per host-app brand:
+
+```ts
+defineAiroApp({
+  elementName: 'my-app',
+  idAttribute: 'my-id',
+  ssrModeAttribute: 'my-ssr',  // default: 'airo-ssr'
+  // ...
+});
+```
+
+Customers then paste `<my-app my-id="…" my-ssr="hydrate">…SSR HTML…</my-app>`. Consistent with your existing `elementName` / `idAttribute` branding.
+
+### 5.7 Testing the byte-identical-HTML invariant
+
+The hydration-correctness rule: `template(ctx)` produces the same string given the same `ctx`, in any environment. When the template is a pure function, testing reduces to string equality:
+
+```ts
+import { describe, expect, test } from 'vitest';
+import { productCardTemplate } from './product-card-template.js';
+import { renderAppToHTML } from '@airo-js/ssr';
+import { Window } from 'happy-dom';
+
+test('template is pure — same ctx produces same output', () => {
+  const ctx = buildCtx({ /* deterministic inputs */ });
+  expect(productCardTemplate(ctx)).toBe(productCardTemplate(ctx));
+});
+
+test('SSR HTML contains the template output verbatim', () => {
+  const window = new Window();
+  globalThis.document = window.document;
+  const { html } = renderAppToHTML(appConfig, deps);
+  // template output is a substring of the full SSR HTML
+  expect(html).toContain('<article class="my-product-card"');
+});
+```
+
+No DOM round-trip needed for the purity check — the template is the unit. The cross-environment parity test (jsdom vs happy-dom vs linkedom vs deno-dom) collapses to "did `template(ctx)` return the same string under each runtime" — which is trivially true if `template` is pure. **This is why purity matters operationally**, not just philosophically.
+
+### 5.8 When to drop to raw `PageRenderer`
+
+`defineSSRSafeRenderer` covers the common case — pure template + hydrate handler. Some renderers need more:
+
+- **Subpages** (`activateSubpage`) — modals, drawers, overlays that ride on a parent page (see Section 2.4).
+- **`applyPageStyles` / `applyComponentStyles`** — live style edits from a studio overlay editor.
+
+For those, implement `PageRenderer` directly:
+
+```ts
+import type { PageRenderer, PageRendererFactory } from '@airo-js/core';
+
+const productRenderer: PageRendererFactory<'product', AppCtx> = () => {
+  let quickViewModal: QuickViewModal | null = null;
+  let detachListeners: () => void = () => undefined;
+
+  return {
+    render(target, ctx) {
+      target.innerHTML = productTemplate(ctx);
+      detachListeners = wireProductListeners(target, ctx);
+    },
+    renderSSR(target, ctx) {
+      // Same template — drift caught at code-review time, not at runtime
+      target.innerHTML = productTemplate(ctx);
+    },
+    hydrate(target, ctx) {
+      // Same listener wiring as render path
+      detachListeners = wireProductListeners(target, ctx);
+    },
+    activateSubpage(subpage) {
+      if (subpage.type === 'quickview') {
+        quickViewModal = new QuickViewModal(/* … */);
+      }
+    },
+    destroy() {
+      quickViewModal?.destroy();
+      detachListeners();
+    },
+  };
+};
+```
+
+The same discipline applies — `render` and `renderSSR` call the same `productTemplate`; `hydrate` runs the same `wireProductListeners` as the CSR path. Hand-write the three methods, but keep the inputs pure. The factory is sugar, not a contract: any `PageRenderer` that follows the discipline is correct.
+
+You can also wrap `defineSSRSafeRenderer` for the lifecycle base and override only the methods you need:
+
+```ts
+const base = defineSSRSafeRenderer({ template, hydrate });
+const withSubpages: PageRendererFactory<'product', AppCtx> = () => {
+  const inner = base();
+  return {
+    ...inner,
+    activateSubpage(subpage) { /* … */ },
+  };
+};
+```
+
+Either pattern is correct.
+
+---
+
+## 6. Update process
 
 This guide grows when:
 
@@ -465,7 +781,7 @@ This guide grows when:
 
 ---
 
-## 6. Quick reference — cartridge primer
+## 7. Quick reference — cartridge primer
 
 If you're authoring your first cartridge, the minimum-viable shape:
 
