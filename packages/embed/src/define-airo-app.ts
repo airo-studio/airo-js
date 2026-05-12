@@ -107,6 +107,23 @@ export interface DefineAiroAppOptions extends SharedLifecycleHooks {
   tokenAttribute?: string;
 
   /**
+   * Attribute name carrying the SSR mode signal. Default: 'airo-ssr'.
+   *
+   * When the attribute value is `'hydrate'` AND the element has
+   * non-empty `innerHTML` at connectedCallback time, embed treats the
+   * existing markup as host-server-rendered SSR HTML — skips
+   * `fetchSsrHtml` (no round-trip), preserves the innerHTML, and
+   * mounts in hydrate mode. This is the Campaign Page flow: the
+   * customer's server already rendered the widget into the element
+   * before the page shipped.
+   *
+   * Without `airo-ssr="hydrate"`, embed ignores existing innerHTML
+   * (preserving the v0.4.1 behaviour where a loading skeleton inside
+   * the element gets overwritten on mount).
+   */
+  ssrModeAttribute?: string;
+
+  /**
    * Fetch widget config from the host app's studio backend. Called once
    * per element mount with the id + (optional) token attribute values.
    * Host app handles auth headers, allowed-domain checks, LoadResponse
@@ -176,6 +193,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
   const elementName = opts.elementName ?? 'airo-app';
   const idAttribute = opts.idAttribute ?? 'airo-id';
   const tokenAttribute = opts.tokenAttribute ?? 'airo-token';
+  const ssrModeAttribute = opts.ssrModeAttribute ?? 'airo-ssr';
 
   if (typeof customElements === 'undefined') return;
 
@@ -219,16 +237,30 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       }
       if (this.disposed) return;
 
-      // Phase 3 — opportunistic SSR HTML fetch. Errors fall through to CSR.
-      let ssrHtml: string | null = loaded.ssrHtml ?? null;
-      if (!ssrHtml && opts.fetchSsrHtml) {
-        try {
-          ssrHtml = await opts.fetchSsrHtml(id, token);
-        } catch (err) {
-          emitError(opts, 'fetch-ssr', err, this);
-          // Intentional fall-through — SSR is opportunistic.
+      // Phase 3 — SSR HTML resolution. Three sources, in priority order:
+      //   1. `airo-ssr="hydrate"` attribute + non-empty innerHTML —
+      //      host-server-rendered Campaign Page flow. Use existing
+      //      markup; no fetchSsrHtml round-trip; no repaint.
+      //   2. `loadConfig` returned `ssrHtml` — studio API embedded it
+      //      in the load response.
+      //   3. `fetchSsrHtml` hook — opportunistic out-of-band fetch.
+      // Errors in source 3 fall through to CSR (SSR is opportunistic).
+      const ssrMode = this.getAttribute(ssrModeAttribute);
+      const hostInjected = ssrMode === 'hydrate' && this.innerHTML.trim() !== '';
+      let ssrHtml: string | null = null;
+      if (hostInjected) {
+        ssrHtml = this.innerHTML;
+      } else {
+        ssrHtml = loaded.ssrHtml ?? null;
+        if (!ssrHtml && opts.fetchSsrHtml) {
+          try {
+            ssrHtml = await opts.fetchSsrHtml(id, token);
+          } catch (err) {
+            emitError(opts, 'fetch-ssr', err, this);
+            // Intentional fall-through — SSR is opportunistic.
+          }
+          if (this.disposed) return;
         }
-        if (this.disposed) return;
       }
 
       // Phase 4 — pick template.
@@ -249,8 +281,11 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       // Phase 5 — paint SSR HTML into the host before mount. The runtime
       // (mode: 'hydrate' below) preserves it inside the shadow wrapper and
       // hands off to renderer.hydrate() instead of renderer.render().
+      // Skip the assignment when the host already injected the markup
+      // (re-assigning innerHTML to itself wipes user-attached listeners
+      // and burns a parser round-trip for no gain).
       const hydrating = Boolean(ssrHtml);
-      if (ssrHtml) {
+      if (ssrHtml && !hostInjected) {
         this.innerHTML = ssrHtml;
       }
 
