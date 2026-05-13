@@ -32,7 +32,7 @@ import type {
 } from '@airo-js/core';
 import { createApp } from '@airo-js/core';
 
-import type { Cartridge } from './cartridge.js';
+import type { Cartridge, CartridgeRegistry } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';
 import { runGates } from './run-gates.js';
 import { getDefaultRenderResolver } from './cartridge-registry.js';
@@ -47,6 +47,20 @@ export interface CartridgeAppDeps<TPageType extends string = string>
     TPageType,
     CartridgeAppContext<unknown, unknown>
   >['resolveRenderer'];
+  /**
+   * Optional long-lived `CartridgeRegistry`. When provided, the resolver
+   * is derived via `registry.resolverFor(cartridge.id)` — useful for
+   * multi-cartridge studios that maintain a shared registry across
+   * widget instances. The caller is responsible for registering the
+   * cartridge before mount (`registry.register(cartridge)`); if the
+   * registry doesn't know the cartridge, `resolverFor` returns a
+   * resolver that hands back `undefined` for every page type and the
+   * framework treats it as "chunk not loaded yet."
+   *
+   * Precedence at resolution time: explicit `resolveRenderer` > `registry`
+   * > lazy WeakMap-memoised default built from the cartridge alone.
+   */
+  registry?: CartridgeRegistry;
   /**
    * Host-app-supplied scope passed through to gate `precheck` / `mount`
    * via `GateContext.scope`. Host apps with tenancy or auth use this to
@@ -117,17 +131,24 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
     data: snapshot,
   };
 
-  // Default resolver supports both static `views[]` and the per-cartridge
-  // chunk mailbox (drained + live-proxy-installed by getDefaultRenderResolver
-  // ↪ createCartridgeRegistry). Cast: the registry returns its
-  // heterogeneous-typed `ChunkFactory`; this call site narrows to the
-  // caller-provided TPageType, which is sound because every factory the
-  // registry returns originated from `cartridge.views[]` or
+  // Renderer resolution precedence:
+  //   1. Explicit `deps.resolveRenderer` (caller knows exactly what they
+  //      want — wins over everything).
+  //   2. `deps.registry.resolverFor(cartridge.id)` (caller passed a
+  //      shared long-lived registry — derive the per-cartridge resolver).
+  //   3. Default — `getDefaultRenderResolver(cartridge)` builds a lazy
+  //      WeakMap-memoised single-cartridge registry under the hood.
+  //
+  // Cast in all three paths: the registry returns its heterogeneous
+  // `ChunkFactory` typed against `string`; the call site narrows to the
+  // caller-provided `TPageType`. Sound because every factory in the
+  // registry originated from `cartridge.views[]` or
   // `pushToMailbox(cartridge.mailboxName, ...)` — both authored against
   // the cartridge's own page-type union.
   const resolveRenderer =
     deps.resolveRenderer ??
-    (getDefaultRenderResolver(cartridge) as AppDeps<
+    ((deps.registry?.resolverFor(cartridge.id) ??
+      getDefaultRenderResolver(cartridge)) as AppDeps<
       TPageType,
       CartridgeAppContext<unknown, unknown>
     >['resolveRenderer']);

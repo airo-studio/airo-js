@@ -31,7 +31,33 @@ export interface SubpageActivation<TPageType extends string = string> {
   type: TPageType;
   id: PageId;
   parent: PageId;
-  [key: string]: string | undefined;
+  /**
+   * Full `Page<T>` for the subpage. PageManager populates this when
+   * dispatching a subpage activation, so subpage renderers can apply
+   * page-config styles + componentSettings without having to look up
+   * the page in `AppConfig.pages[]` themselves. Optional so older
+   * consumers that built `SubpageActivation` objects by hand still
+   * typecheck.
+   *
+   * Resolves "Finding 3" from the commerce consumer mapping (CLAUDE.md §3):
+   * subpages were previously type-thin, holding only `{ type, id,
+   * parent, ...navState }`, which meant renderers had no path to the
+   * Page's `componentSettings` / `styles` bag.
+   */
+  page?: Page<TPageType>;
+  /**
+   * Free-form context narrowed by the consumer app — spread from the
+   * parent navigation state minus the `page` key (selected ids,
+   * locale, country, etc.).
+   *
+   * The value type widens to `Page<TPageType>` to accommodate the typed
+   * `page` field above without dropping the spread-of-context pattern
+   * PageManager uses. Consumers indexing by a navContext-shaped string
+   * key receive `string | undefined | Page<TPageType>` and should
+   * narrow via `typeof v === 'string'` when the consuming code only
+   * understands strings (the common case).
+   */
+  [key: string]: string | undefined | Page<TPageType>;
 }
 
 /**

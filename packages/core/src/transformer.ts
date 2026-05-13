@@ -12,9 +12,12 @@
  * source of truth.
  *
  * Notes for cartridge authors:
- *   - **Sync only at v0.** Async support deferred to a future minor; an
- *     async transformer would block render. Pre-compute async work in
- *     DataSource (which returns `Promise<TData>`) when possible.
+ *   - **Sync OR async (0.7+).** `transform` may return `TData` directly
+ *     or `Promise<TData>`. The pipeline runner awaits uniformly, so sync
+ *     transformers keep working unchanged and async ones (e.g.,
+ *     auth-token verification, lazy enrichment) compose naturally. The
+ *     pipeline as a whole is now async — callers must `await
+ *     pipeline.runTransformers(...)`.
  *   - **Shape-preserving only.** `transform: TData → TData`. Reshape
  *     upstream in `DataSource.fetch` instead of pivoting mid-pipeline.
  */
@@ -33,8 +36,15 @@ export interface Transformer<TData, TConfig = unknown> {
   /** Stable identifier — used in dev tooling traces. */
   name: string;
   isEnabled(config: TConfig): boolean;
-  /** Pure: data → data. No side effects. */
-  transform(data: TData, ctx: TransformerContext<TConfig>): TData;
+  /**
+   * Pure: data → data. No side effects.
+   *
+   * May return `TData` synchronously or `Promise<TData>` (0.7+). The
+   * pipeline awaits all returns uniformly. Sync transformers keep
+   * working unchanged; async ones (token verification, lazy enrichment,
+   * IO-bound transforms) are now first-class.
+   */
+  transform(data: TData, ctx: TransformerContext<TConfig>): TData | Promise<TData>;
 
   /**
    * What the orchestrator does when `transform` throws.
@@ -77,8 +87,12 @@ export interface PostProcessor<TData, TConfig = unknown> {
  *   3. Dev tooling (chain trace) is buildable framework-side.
  */
 export interface RuntimePipeline<TData, TConfig> {
-  /** Transformer chain run on every render. */
-  runTransformers(input: TData, ctx: TransformerContext<TConfig>): TData;
+  /**
+   * Transformer chain run on every render. Returns `Promise<TData>` so
+   * async transformers (0.7+) compose naturally; sync transformers
+   * resolve immediately through the same code path.
+   */
+  runTransformers(input: TData, ctx: TransformerContext<TConfig>): Promise<TData>;
 
   /**
    * PostProcessor chain run after view mount. Each post-processor's

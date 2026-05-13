@@ -22,6 +22,22 @@ export interface TestData {
 export interface TestConfig {
   feed?: { url?: string };
   locale?: string;
+  /**
+   * Nested object with mixed hot-swap / remount semantics — the canonical
+   * shape that motivated dot-path `hotSwapKeys`. Tests assert that a
+   * cartridge can declare e.g. `['display.showPrices']` and have a
+   * `display.categoryFilter` change correctly trigger remount.
+   */
+  display?: {
+    showPrices?: boolean;
+    showRatings?: boolean;
+    categoryFilter?: string;
+  };
+  /** Top-level nested object — exercises the "top-level key covers all children" rule. */
+  theme?: {
+    primary?: string;
+    secondary?: string;
+  };
 }
 
 const passthroughSchema = {
@@ -55,6 +71,27 @@ export function recordingRenderer(record: string[]): PageRenderer {
     },
     destroy() {
       record.push('destroy');
+    },
+  };
+}
+
+/**
+ * Renderer that captures subpage activations for asserting the
+ * `SubpageActivation<T>` shape — including the new `page` field
+ * landed in 0.7.0 (Finding 3).
+ */
+export function subpageCapturingRenderer(
+  activations: unknown[],
+): PageRenderer {
+  return {
+    render() {
+      // no-op
+    },
+    destroy() {
+      // no-op
+    },
+    activateSubpage(subpage) {
+      activations.push(subpage);
     },
   };
 }
