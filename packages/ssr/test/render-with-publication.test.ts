@@ -48,8 +48,15 @@ function ssrRenderer(label: string): PageRenderer {
     render() {
       // no-op — SSR uses renderSSR
     },
-    renderSSR(container) {
-      container.innerHTML = `<div data-marker="${label}">${label}</div>`;
+    renderSSR(container, ctx) {
+      // Emit navState context fields too so tests can assert
+      // initialNavState flowed through, not just the resolved page id.
+      const navContext = Object.entries(ctx.navState ?? {})
+        .filter(([k]) => k !== 'page')
+        .map(([k, v]) => `data-nav-${k}="${v}"`)
+        .join(' ');
+      container.innerHTML =
+        `<div data-marker="${label}" data-page="${ctx.page.id}"${navContext ? ' ' + navContext : ''}>${label}</div>`;
     },
     destroy() {
       // no-op
@@ -115,7 +122,7 @@ describe('renderAppWithPublication — csr-only capability gate', () => {
   });
 });
 
-describe('renderAppWithPublication — entryPageId override', () => {
+describe('renderAppWithPublication — initialNavState (deep-link seed)', () => {
   // Build a cartridge with static views[] (no mailbox global state)
   // so each test gets a fresh, isolated render path. The existing
   // mailbox-based buildCartridge above is shared across tests via
@@ -155,7 +162,16 @@ describe('renderAppWithPublication — entryPageId override', () => {
     };
   }
 
-  test('entryPageId selects the deeplinked page instead of the default entry', async () => {
+  function publicationCtx(): PublicationContext<TestConfig> {
+    return {
+      config: { locale: 'en-GB' },
+      locale: 'en-GB',
+      country: 'GB',
+      currency: 'GBP',
+    };
+  }
+
+  test('initialNavState.page selects the deeplinked page instead of the default entry', async () => {
     const cartridge = multiPageCartridge();
     const appConfig: AppConfig<string> = {
       pages: [
@@ -163,26 +179,20 @@ describe('renderAppWithPublication — entryPageId override', () => {
         { id: 'product', type: 'product', enabled: true },
       ],
     };
-    const publicationCtx: PublicationContext<TestConfig> = {
-      config: { locale: 'en-GB' },
-      locale: 'en-GB',
-      country: 'GB',
-      currency: 'GBP',
-    };
 
     const result = await renderAppWithPublication({
       cartridge,
       appConfig,
       snapshot: { marker: 'x' },
-      publicationCtx,
-      entryPageId: 'product',
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'product' },
     });
 
     expect(result.html).toContain('data-marker="product"');
     expect(result.html).not.toContain('data-marker="home"');
   });
 
-  test('unknown entryPageId falls back to the default entry (safe deeplink decode)', async () => {
+  test('initialNavState passes context fields (productId, category) into ctx.navState — the v3 bug fix', async () => {
     const cartridge = multiPageCartridge();
     const appConfig: AppConfig<string> = {
       pages: [
@@ -190,26 +200,74 @@ describe('renderAppWithPublication — entryPageId override', () => {
         { id: 'product', type: 'product', enabled: true },
       ],
     };
-    const publicationCtx: PublicationContext<TestConfig> = {
-      config: {},
-      locale: 'en-GB',
-      country: 'GB',
-      currency: 'GBP',
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot: { marker: 'x' },
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'product', productId: 'abc', category: 'Cereal' },
+    });
+
+    expect(result.html).toContain('data-marker="product"');
+    // The renderer saw the full navState, not just .page — context
+    // fields make it to ctx.navState verbatim. This is the regression
+    // the v3 contract closes. (DOM attribute names normalise to
+    // lowercase on serialisation; the value is preserved verbatim.)
+    expect(result.html).toContain('data-nav-productid="abc"');
+    expect(result.html).toContain('data-nav-category="Cereal"');
+  });
+
+  test('framework-validated entry id wins over a disagreeing initialNavState.page', async () => {
+    // Spread-order guard: when initialNavState.page resolves cleanly,
+    // ctx.page.id and ctx.navState.page must be identical even if the
+    // host accidentally passes a different .page in initialNavState.
+    // Today both come from the same resolved entry, so this test just
+    // documents the invariant; if a future change splits the two paths
+    // and they disagree, this test catches it.
+    const cartridge = multiPageCartridge();
+    const appConfig: AppConfig<string> = {
+      pages: [
+        { id: 'home', type: 'home', enabled: true },
+        { id: 'product', type: 'product', enabled: true },
+      ],
     };
 
     const result = await renderAppWithPublication({
       cartridge,
       appConfig,
       snapshot: { marker: 'x' },
-      publicationCtx,
-      entryPageId: 'does-not-exist',  // tampered / stale deeplink
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'product', productId: 'abc' },
+    });
+
+    // ctx.page.id and the data-marker label are the same id.
+    expect(result.html).toContain('data-page="product"');
+    expect(result.html).toContain('data-marker="product"');
+  });
+
+  test('unknown initialNavState.page falls back to the default entry (safe deeplink decode)', async () => {
+    const cartridge = multiPageCartridge();
+    const appConfig: AppConfig<string> = {
+      pages: [
+        { id: 'home', type: 'home', enabled: true },
+        { id: 'product', type: 'product', enabled: true },
+      ],
+    };
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot: { marker: 'x' },
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'does-not-exist' },  // tampered / stale deeplink
     });
 
     // Falls back to first enabled non-parent — home.
     expect(result.html).toContain('data-marker="home"');
   });
 
-  test('disabled entryPageId falls back to default (silent rescue)', async () => {
+  test('disabled target page falls back to default (silent rescue)', async () => {
     const cartridge = multiPageCartridge();
     const appConfig: AppConfig<string> = {
       pages: [
@@ -217,21 +275,65 @@ describe('renderAppWithPublication — entryPageId override', () => {
         { id: 'product', type: 'product', enabled: false },  // disabled
       ],
     };
-    const publicationCtx: PublicationContext<TestConfig> = {
-      config: {},
-      locale: 'en-GB',
-      country: 'GB',
-      currency: 'GBP',
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot: { marker: 'x' },
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'product' },
+    });
+
+    expect(result.html).toContain('data-marker="home"');
+  });
+
+  test('subpage target page is rejected — falls back to default (subpage URLs not supported)', async () => {
+    // Documents the contract: navState.page targeting a subpage
+    // (p.parent set) is rejected by resolveEntryPage, falls back to
+    // the default top-level entry. No one should infer subpage-URL
+    // support from this surface — if it becomes needed, file a
+    // separate ticket.
+    const cartridge = multiPageCartridge();
+    const appConfig: AppConfig<string> = {
+      pages: [
+        { id: 'home', type: 'home', enabled: true },
+        { id: 'product', type: 'product', enabled: true },
+        // A subpage variant of product (e.g. quick-shop) — parent set.
+        { id: 'product-quick', type: 'product', enabled: true, parent: 'product' },
+      ],
     };
 
     const result = await renderAppWithPublication({
       cartridge,
       appConfig,
       snapshot: { marker: 'x' },
-      publicationCtx,
-      entryPageId: 'product',
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'product-quick' },  // subpage — rejected
     });
 
+    expect(result.html).toContain('data-marker="home"');
+  });
+
+  test('gate target page is rejected — falls back to non-gate default', async () => {
+    const cartridge = multiPageCartridge();
+    const appConfig: AppConfig<string> = {
+      pages: [
+        { id: 'gate', type: 'gate', enabled: true },
+        { id: 'home', type: 'home', enabled: true },
+        { id: 'product', type: 'product', enabled: true },
+      ],
+    };
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot: { marker: 'x' },
+      publicationCtx: publicationCtx(),
+      initialNavState: { page: 'gate' },  // tampered URL pointing to gate
+      isGatePage: (type) => type === 'gate',
+    });
+
+    // Gate is filtered; falls back to first non-gate non-parent — home.
     expect(result.html).toContain('data-marker="home"');
   });
 });

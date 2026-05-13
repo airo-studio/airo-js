@@ -40,7 +40,11 @@
 import { logger } from '@airo-js/log';
 
 import type { Cartridge } from '@airo-js/cartridge-kit';
-import type { RouterOption, StyleIsolation } from '@airo-js/core';
+import type {
+  NavigationState,
+  RouterOption,
+  StyleIsolation,
+} from '@airo-js/core';
 import { extractPathTail } from '@airo-js/core';
 import type { SharedLifecycleHooks } from '@airo-js/runtime';
 
@@ -82,6 +86,31 @@ export interface LoadConfigResult<TConfig = unknown> {
   ssrHtml?: string;
   /** Optional preloaded data — skips `dataSource.fetch` in mountCartridge. */
   preloadedData?: unknown;
+  /**
+   * Mount-time navigation state. Threaded through to `mountCartridge` →
+   * `createApp` → `PageManager` so the active page + ctx.navState resolve
+   * from URL-decoded or host-supplied state at construction time.
+   *
+   * When `enableRouter` is set, the framework's HashRouter / PathRouter
+   * auto-derives navigation state from `window.location` synchronously
+   * during PageManager construction — `initialNavState` is the explicit
+   * hand-off for host-page programmatic state (e.g. customer-page WTB
+   * popup that pre-selects a product:
+   *
+   *   loadConfig: async (id) => ({
+   *     cartridgeId: 'wtb',
+   *     config: { ... },
+   *     initialNavState: { page: 'product', productId: chosenProduct },
+   *   })
+   *
+   * Server-side SSR pairing (`renderAppWithPublication`) uses the same
+   * type — host endpoint decodes URL or its own session state into
+   * `initialNavState`, framework respects it identically on both sides.
+   *
+   * Contract: derivable on BOTH server and client from the same inputs.
+   * Never serialised into SSR HTML.
+   */
+  initialNavState?: Partial<NavigationState>;
 }
 
 /**
@@ -374,6 +403,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           enableRouter: loaded.enableRouter,
           widgetId: id,
           preloadedData: loaded.preloadedData,
+          initialNavState: loaded.initialNavState,
           mode: hydrating ? 'hydrate' : 'csr',
         });
         if (this.disposed) {

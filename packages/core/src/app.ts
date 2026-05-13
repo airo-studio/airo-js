@@ -69,6 +69,14 @@ export interface AppDeps<
    * received SSR HTML and hands off to the live runtime.
    */
   hydrate?: boolean;
+  /**
+   * Mount-time navigation state. Threaded into `PageManager`'s
+   * constructor so `mountInitial` resolves the entry page from
+   * `initialNavState.page` (URL-decoded or host-supplied) before
+   * falling back to the default entry. See `PageManagerOptions` for
+   * the precedence + contract.
+   */
+  initialNavState?: Partial<NavigationState>;
 }
 
 /**
@@ -107,16 +115,16 @@ export function createApp<
     resolveRenderer: deps.resolveRenderer,
     isGatePage: deps.isGatePage,
     enableRouter: deps.enableRouter,
+    initialNavState: deps.initialNavState,
   });
 
-  const entry = config.pages.find((p) => p.enabled && !p.parent);
-  if (entry) {
+  // PageManager owns initial entry resolution from this point — reads
+  // `navState.page` (URL > initialNavState > default), validates against
+  // the page graph + gate predicate, and either hydrates SSR DOM or
+  // renders fresh.
+  if (config.pages.some((p) => p.enabled && !p.parent)) {
     lifecycle = 'rendering';
-    if (deps.hydrate) {
-      pageManager.hydrateEntry(entry.id);
-    } else {
-      pageManager.navigate({ page: entry.id });
-    }
+    pageManager.mountInitial({ hydrate: !!deps.hydrate });
     lifecycle = 'mounted';
   } else {
     lifecycle = 'ready';

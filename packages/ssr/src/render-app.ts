@@ -20,7 +20,9 @@
 
 import {
   EventBus,
+  resolveEntryPage,
   type AppConfig,
+  type NavigationState,
   type PageRendererFactory,
   type RenderContext,
 } from '@airo-js/core';
@@ -48,16 +50,27 @@ export interface RenderToHTMLDeps<
   /** Predicate identifying gate pages (e.g. age verification). */
   isGatePage?: (pageType: TPageType) => boolean;
   /**
-   * Override the entry page selection. When supplied AND the page
-   * exists / is enabled / isn't a gate, the runner renders this page
-   * instead of finding the first enabled non-parent. Pair with
-   * `decodeNavHint` from `@airo-js/core` for deep-link SSR.
+   * Mount-time navigation state. The runner derives the entry page
+   * from `initialNavState.page` (validated: must exist, be enabled,
+   * not be a subpage, not be a gate page; otherwise falls back to
+   * the default entry). All other fields flow into `ctx.navState`
+   * verbatim so the renderer reads context-specific keys.
    *
-   * Invalid / unknown / disabled entryPageId falls back to the
-   * default entry selection — keeps SSR safe against tampered or
-   * stale deeplinks.
+   * Typical pairing with `decodeNavHint`:
+   *
+   *   const initialNavState = decodeNavHint(req.query.nav, validPages);
+   *   await renderAppToHTML(config, {
+   *     ...,
+   *     initialNavState,
+   *   });
+   *
+   * Contract: state must be derivable on both server and client from
+   * the same inputs (URL fragment, host-page config). Never a server-
+   * preload bag — state is never serialised into the SSR HTML; the
+   * client recomputes from the same `(config, snapshot, initialNavState)`
+   * the server saw.
    */
-  entryPageId?: string;
+  initialNavState?: Partial<NavigationState>;
   /** Opaque app-context the consumer hands through to the renderer. */
   appContext: TAppContext;
 }
@@ -92,17 +105,16 @@ export function renderAppToHTML<
   }
 
   const isGate = deps.isGatePage ?? (() => false);
-  // entryPageId override (deeplink target). Validated to be present +
-  // enabled + non-parent + non-gate; falls back to the default entry
-  // on any mismatch so a stale/tampered URL never crashes the runner.
-  const requestedEntry = deps.entryPageId
-    ? config.pages.find(
-        (p) => p.id === deps.entryPageId && p.enabled && !p.parent && !isGate(p.type),
-      )
-    : undefined;
-  const entry =
-    requestedEntry ??
-    config.pages.find((p) => p.enabled && !p.parent && !isGate(p.type));
+  // Entry resolution via the shared core helper — same gate-aware logic
+  // PageManager uses, so SSR and CSR pick the same page for any given
+  // `initialNavState.page`. Invalid / unknown / disabled / gate /
+  // subpage ids fall back to the default entry — keeps SSR safe against
+  // tampered or stale deeplinks.
+  const entry = resolveEntryPage(
+    config.pages,
+    isGate,
+    deps.initialNavState?.page,
+  );
   if (!entry) {
     return { html: '' };
   }
@@ -124,7 +136,11 @@ export function renderAppToHTML<
     page: entry,
     app: deps.appContext,
     events,
-    navState: { page: entry.id },
+    // Spread order: initialNavState first (context fields like productId,
+    // category, query params), then `page: entry.id` last so the
+    // framework-validated entry id always wins against a tampered or
+    // disagreeing `initialNavState.page`.
+    navState: { ...(deps.initialNavState ?? {}), page: entry.id },
     navigate: () => undefined, // no-op server-side
   };
 

@@ -27,9 +27,11 @@
  * get the structured data and the widget markup as one blob.
  */
 
-import type {
-  AppConfig,
-  PageRendererFactory,
+import {
+  resolveEntryPage,
+  type AppConfig,
+  type NavigationState,
+  type PageRendererFactory,
 } from '@airo-js/core';
 import type {
   Cartridge,
@@ -75,24 +77,30 @@ export interface RenderWithPublicationOptions<
   /** Predicate identifying gate pages (e.g. age verification). */
   isGatePage?: (pageType: TPageType) => boolean;
   /**
-   * Override the entry page selection for SSR. When present, the
-   * runner renders this page instead of finding the first enabled
-   * non-parent. Pair with `decodeNavHint` from `@airo-js/core` to
-   * deep-link directly into the target page without reordering the
-   * persisted `pages[]` array:
+   * Mount-time navigation state. The runner derives the entry page
+   * from `initialNavState.page` (validated: must exist, be enabled,
+   * not be a subpage, not be a gate page; otherwise falls back to
+   * the default entry). All other fields seed `ctx.navState` so the
+   * renderer reads context-specific keys (productId, category, query
+   * params).
    *
-   *   const navState = decodeNavHint(req.query.nav, validPages);
+   * Typical pairing with `decodeNavHint`:
+   *
+   *   const initialNavState = decodeNavHint(req.query.nav, validPages);
    *   const result = await renderAppWithPublication({
    *     ...,
-   *     entryPageId: navState?.page,  // undefined falls back to default entry
+   *     initialNavState,  // undefined falls back to default entry
    *   });
    *
    * When the specified page isn't found, isn't enabled, or is a gate
-   * page, the runner falls back to the default entry selection (same
-   * shape as if entryPageId were undefined) — keeps deeplinks safe
-   * against tampered URLs without erroring.
+   * page, the runner falls back to the default entry selection — keeps
+   * deeplinks safe against tampered URLs without erroring.
+   *
+   * Contract: state must be derivable on both server and client from
+   * the same inputs. Never serialised into SSR HTML — the client
+   * recomputes from the same inputs the server saw.
    */
-  entryPageId?: string;
+  initialNavState?: Partial<NavigationState>;
   /**
    * Filter which adapters run. Default: all `format: 'json-ld'` +
    * `delivery: 'inline-in-host'` adapters. Pass to override (e.g. include
@@ -175,20 +183,16 @@ export async function renderAppWithPublication<
   // cartridges (typically lighter — no resolver registry needed) don't
   // pay the resolver-construction cost on the SSR-skip path.
   const isGate = opts.isGatePage ?? (() => false);
-  // entryPageId override (deeplink target). Validates that the
-  // requested page exists + is enabled + isn't a gate; falls back to
-  // the default entry selection on any mismatch — keeps the SSR path
-  // safe against tampered or stale deeplinks.
-  const requestedEntry = opts.entryPageId
-    ? opts.appConfig.pages.find(
-        (p) => p.id === opts.entryPageId && p.enabled && !p.parent && !isGate(p.type),
-      )
-    : undefined;
-  const entryPage =
-    requestedEntry ??
-    opts.appConfig.pages.find(
-      (p) => p.enabled && !p.parent && !isGate(p.type),
-    );
+  // Entry resolution via the shared core helper. Same logic
+  // PageManager.mountInitial uses on the client, so SSR and CSR pick
+  // the same page for any given `initialNavState.page`. Invalid /
+  // unknown / disabled / gate / subpage ids fall back to the default
+  // entry — keeps the SSR path safe against tampered or stale deeplinks.
+  const entryPage = resolveEntryPage(
+    opts.appConfig.pages,
+    isGate,
+    opts.initialNavState?.page,
+  );
   if (entryPage) {
     const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
     if (entryView?.capabilities?.includes('csr-only')) {
@@ -220,11 +224,12 @@ export async function renderAppWithPublication<
     document: opts.document,
     resolveRenderer,
     isGatePage: opts.isGatePage,
-    // Forward the resolved entry id so renderAppToHTML's internal
-    // selection agrees with the capability-gate's selection above.
-    // The capability gate may have validated a deeplink target via
-    // `opts.entryPageId`; renderAppToHTML must pick the same page.
-    entryPageId: entryPage?.id,
+    // Forward the full initialNavState so renderAppToHTML resolves the
+    // same entry page AND seeds the same ctx.navState the capability-
+    // gate branch saw. Both branches now agree on the page AND the
+    // context fields (productId, category, query params) the renderer
+    // reads.
+    initialNavState: opts.initialNavState,
     appContext: {
       cartridgeId: opts.cartridge.id,
       config: opts.publicationCtx.config,
