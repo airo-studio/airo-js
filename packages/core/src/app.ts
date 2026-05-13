@@ -87,6 +87,14 @@ export interface App {
   navigate(state: Partial<NavigationState>): void;
   showSubpage(subpage: SubpageActivation): void;
   getNavigationState(): NavigationState;
+  /**
+   * Replace the opaque appContext bag and re-render the active page.
+   * Type-erased on the public App handle because TAppContext is opaque
+   * here; callers that constructed the App with a typed context cast on
+   * the way in (the cartridge runtime in `@airo-js/runtime` does this
+   * when delivering `MountCartridgeResult.update()`).
+   */
+  replaceAppContext(newAppContext: unknown): void;
   destroy(): void;
   readonly state: AppLifecycleState;
   readonly events: IEventBus;
@@ -141,6 +149,10 @@ export function createApp<
     },
     getNavigationState() {
       return pageManager.getNavigationState();
+    },
+    replaceAppContext(newAppContext) {
+      if (lifecycle === 'destroyed') return;
+      pageManager.replaceAppContext(newAppContext as TAppContext);
     },
     destroy() {
       if (lifecycle === 'destroyed') return;

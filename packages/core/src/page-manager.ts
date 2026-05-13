@@ -123,6 +123,7 @@ export class PageManager<
   private readonly opts: PageManagerOptions<TPageType, TAppContext>;
   private readonly isGatePage: (pageType: TPageType) => boolean;
   private navState: NavigationState;
+  private appContext: TAppContext;
   private activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
   private activeRendererPageId: PageId | null = null;
   private router: IRouter | null = null;
@@ -131,6 +132,7 @@ export class PageManager<
 
   constructor(opts: PageManagerOptions<TPageType, TAppContext>) {
     this.opts = opts;
+    this.appContext = opts.appContext;
     this.isGatePage = opts.isGatePage ?? (() => false);
     const entry = findEntryPage(opts.pages, this.isGatePage);
     // Seed precedence: default entry → host-supplied initialNavState →
@@ -187,6 +189,7 @@ export class PageManager<
         type: targetPage.type,
         id: targetPage.id,
         parent: parent.id,
+        page: targetPage,
         ...this.contextOnly(next),
       };
       this.activeRenderer?.activateSubpage?.(subpage);
@@ -277,7 +280,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      app: this.opts.appContext,
+      app: this.appContext,
       events: this.opts.events,
       navState: this.navState,
       navigate: (s) => this.navigate(s),
@@ -412,7 +415,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      app: this.opts.appContext,
+      app: this.appContext,
       events: this.opts.events,
       navState: this.navState,
       navigate: (s) => this.navigate(s),
@@ -421,5 +424,29 @@ export class PageManager<
 
     this.activeRenderer = renderer;
     this.activeRendererPageId = targetPage.id;
+  }
+
+  /**
+   * Replace the opaque appContext bag and re-render the active page with
+   * a fresh RenderContext. Used for live config / data updates that don't
+   * require a full app remount.
+   *
+   * Destroys and re-instantiates the active page renderer with the new
+   * appContext threaded through `ctx.app`. NavigationState is preserved
+   * (no URL push, no `navigation:changed` emission — this is a config
+   * delta, not a navigation event).
+   *
+   * No-op when destroyed, no active page mounted, or the active page id
+   * no longer resolves in the page graph. Subpages re-activate naturally
+   * on the next navigate() — the active page's renderer is the only one
+   * with state to refresh.
+   */
+  replaceAppContext(newAppContext: TAppContext): void {
+    if (this.destroyed) return;
+    this.appContext = newAppContext;
+    if (!this.activeRendererPageId) return;
+    const activePage = this.opts.pages.find((p) => p.id === this.activeRendererPageId);
+    if (!activePage) return;
+    this.swapRenderer(activePage);
   }
 }

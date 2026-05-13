@@ -6,6 +6,72 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/runtime` 0.7.0 — 2026-05-13
+
+Live config deltas + the cartridge test-harness. Closes the framework gap on the dotter-studio team's tech-debt punch list (their D4 / D5 / D12 unblock with this rev).
+
+### Added
+- `MountCartridgeResult.update(delta: Partial<TConfig>): Promise<UpdateResult>` — live config delta dispatcher. Reads `cartridge.hotSwapKeys` (dot-path aware) to classify each path: covered paths hot-swap in place (existing snapshot reused, active page renderer torn down + re-rendered with fresh `ctx.app`), uncovered paths trigger a full remount with `NavigationState` preserved across the destroy/recreate. Studio chrome uses this to retire its own structural-fields lifecycle policy.
+- `UpdateResult` — `{ mode: 'hot-swap' | 'remount'; navState: NavigationState }`. Lets studios decide whether to re-emit telemetry / scroll / refire preview-side effects per dispatch path.
+- `@airo-js/runtime/test-harness` submodule — `mountCartridgeInMemory({ cartridge, config, fixtureFeed })` returns `{ dom, pipelineSnapshot, cleanup }`. Re-exports ONLY the harness types + function; the structural M13 boundary is the export surface, not magic. Cartridge authors write `cartridge.test.ts` that imports from `@airo-js/runtime/test-harness` + their own cartridge module and cannot transitively pull in studio shell types.
+- `MountCartridgeOptions.registry?: CartridgeRegistry` — opt-in shared registry for multi-cartridge studios. When provided, renderer resolution goes through `registry.resolverFor(cartridge.id)`. When absent, the lazy WeakMap-memoised single-cartridge default runs unchanged.
+- `MountCartridgeOptions.onPipelineComplete?: (snapshot) => void` — fires after the pipeline phase succeeds. Primarily test-harness facing; documented as harmless to use elsewhere.
+
+### Changed
+- `MountCartridgeResult` is now generic over `TConfig` (`MountCartridgeResult<TConfig = unknown>`). The default keeps existing call sites typing unchanged; consumers that pass `TConfig` get `Partial<TConfig>` typing on `update(delta)`.
+- `MountCartridgeResult.app` is now a getter — always reflects the live `App` instance, including after a remount path runs inside `update()`. Destructuring (`const { app } = result`) still captures the value at destructure time and IS subject to the staleness footgun; documented on the type.
+- Pipeline phase awaits transformer chain (transformers may return `Promise<TData>` — see `@airo-js/core` 0.7.0 + `@airo-js/cartridge-kit` 0.7.0).
+
+### Notes
+- Remount re-runs transformers — declared as the v0 cost on hot-swap-vs-remount classification. `// TODO 0.8` annotation in `mount-cartridge.ts` marks the optimization site (skip transformer re-run when only post-pipeline config fields changed).
+- Test-harness defaults to `styleIsolation: 'light'` so `result.dom` is observable directly without shadow-root traversal. Pass `'shadow'` to test shadow-DOM-specific behaviour.
+
+## `@airo-js/cartridge-kit` 0.7.0 — 2026-05-13
+
+Cartridges declare hot-swap surface via `hotSwapKeys`; transformers may now be async.
+
+### Added
+- `Cartridge.hotSwapKeys?: Array<keyof TConfig | (string & {})>` — config paths that can hot-swap (re-render the active page in place without remount) when delivered via `MountCartridgeResult.update()`. Supports both top-level keys and dot-paths into nested config (`['theme', 'display.showPrices']`). Prefix-match semantics: a top-level key like `'display'` covers all of `display.*`; a dot-path like `'display.showPrices'` matches only that exact leaf. Cosmetic flags belong here; anything that affects what transformers produce should be omitted so the runtime triggers a remount + transformer re-run.
+- `CartridgeAppDeps.registry?: CartridgeRegistry` — long-lived shared registry. When provided, `createCartridgeApp` derives the resolver via `registry.resolverFor(cartridge.id)`. Caller is responsible for `registry.register(cartridge)` before mount. Renderer resolution precedence: explicit `resolveRenderer` > `registry` > lazy WeakMap-memoised default.
+
+### Changed
+- `Transformer.transform` return type widened from `TData` to `TData | Promise<TData>`. Sync transformers keep working unchanged; async transformers (auth-token verification, lazy enrichment, IO-bound transforms) are now first-class. The pipeline awaits uniformly.
+- `RuntimePipeline.runTransformers` return type widened to `Promise<TData>` (was `TData`). All callers must `await`. One in-tree caller (`@airo-js/runtime`'s `mountCartridge`) updated in this rev.
+
+### Notes
+- The `(string & {})` intersection on `hotSwapKeys` preserves keyof-autocomplete on top-level `TConfig` keys while leaving the type open for dot-path strings. A future `Paths<TConfig>` template-literal type can tighten compile-time path validation without breaking the surface.
+- Removed the long-standing "Sync only at v0; async deferred to v0.3" note from the `Transformer` JSDoc.
+
+## `@airo-js/core` 0.7.0 — 2026-05-13
+
+App-level live appContext swap + the `SubpageActivation.page` type extension.
+
+### Added
+- `App.replaceAppContext(newAppContext: unknown): void` on the public `App` interface — replaces the opaque appContext bag and re-renders the active page with a fresh `RenderContext`. Type-erased on the public handle (TAppContext is opaque there); the cartridge runtime casts on the way in when delivering `MountCartridgeResult.update()`'s hot-swap path.
+- `PageManager.replaceAppContext(newAppContext: TAppContext): void` — backing implementation. Destroys + re-instantiates the active page renderer with a fresh `RenderContext`. NavigationState preserved (no URL push, no `navigation:changed` emission — this is a config delta, not a navigation event). No-op when destroyed, no active page mounted, or the active page id no longer resolves.
+- `SubpageActivation<TPageType>.page?: Page<TPageType>` — full `Page<T>` for the subpage. PageManager populates this when dispatching a subpage activation so parent renderers can apply page-config styles + componentSettings without re-walking the page graph. Resolves "Finding 3" from CLAUDE.md §3.
+
+### Changed
+- `SubpageActivation`'s index signature value type widens to `string | undefined | Page<TPageType>` to accommodate the new typed `page` field while preserving the legacy spread-of-navContext pattern. Consumers indexing by a navContext-shaped string key receive the union and should narrow via `typeof v === 'string'`.
+- `Transformer.transform` return type widened to `TData | Promise<TData>`. Pipeline impl (`RuntimePipelineImpl.runTransformers`) is now async and awaits each transformer's result; both the fast-path and traced-path branches updated. Applies identically to sync throws and rejected promises under `errorPolicy: 'skip'`.
+
+## `@airo-js/embed` 0.7.0 — 2026-05-13
+
+Custom-element imperative `update(delta)` for live config deltas.
+
+### Added
+- `AiroAppElement.update(delta): Promise<{ mode; navState } | null>` — forwards to the runtime's `MountCartridgeResult.update()` when the element is mounted and not gate-blocked. Resolves with `null` when called against a never-mounted, gate-blocked, or already-disconnected element. Symmetric with the runtime's "no update on blocked" contract; callers can branch on null without try/catch.
+
+### Notes
+- The `MountHandle` interface (internal mirror of the destroy-only subset of `MountCartridgeResult`) widened to include `update?` so the custom-element path can forward. Type-erased at the embed boundary because attribute-driven mounts can't express `TConfig` at compile time; the runtime's `update(delta: Partial<TConfig>)` remains correctly typed for direct `mountCartridge` callers.
+
+## `@airo-js/ssr` 0.7.0 — 2026-05-13
+
+Sync-only rev — no API changes. Bumped so the `workspace:^` peerDeps on `@airo-js/core` + `@airo-js/cartridge-kit` resolve to `^0.7.0` in published tarballs and consumers can install the 0.7.0 line coherently.
+
+### Notes
+- The `RuntimePipeline.runTransformers` return-type change in `@airo-js/core` 0.7.0 is API-widening only (no current ssr caller); the SSR adapter pipeline path is unaffected.
+
 ## `@airo-js/embed` 0.1.0 — 2026-05-09
 
 First public release. Replaces the v0.0.0 placeholder.

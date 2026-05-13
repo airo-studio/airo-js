@@ -48,7 +48,7 @@ interface MyConfig {
 
 ### 1.3 `Transformer<TData, TConfig>`
 
-**Sync only at v0.** Async transformers would block render. Pre-compute async work in `DataSource` (see 1.2) when navigation context allows.
+**Sync or async (0.7+).** `transform` may return `TData` directly or `Promise<TData>`. The pipeline awaits uniformly, so sync transformers keep working unchanged and async ones (auth-token verification, lazy enrichment, IO-bound transforms) compose naturally. The pipeline as a whole is async — host apps must `await pipeline.runTransformers(...)`. Prefer DataSource (see 1.2) for upstream async work; reserve async transformers for IO that genuinely depends on the post-fetch data shape.
 
 **Shape-preserving (`TData → TData`).** Don't pivot the schema mid-pipeline. Filter, sort, group, annotate — yes. Reshape — no.
 

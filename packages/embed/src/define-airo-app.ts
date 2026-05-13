@@ -227,12 +227,17 @@ export interface DefineAiroAppOptions extends SharedLifecycleHooks {
 
 /**
  * Mount handle the custom element keeps internally so disconnect can
- * trigger teardown. Mirrors the destroy-only subset of MountCartridgeResult
- * so we don't take a structural dep on the runtime types at compile time
- * (the runtime is dynamic-imported).
+ * trigger teardown and `el.update(delta)` can forward to the runtime.
+ * Mirrors the `destroy` + `update` subset of MountCartridgeResult's
+ * unblocked branch so we don't take a structural dep on the runtime
+ * types at compile time (the runtime is dynamic-imported).
+ *
+ * `update` is optional because the runtime returns a `blocked` branch
+ * without it when a pre-render gate intercepts the mount.
  */
 interface MountHandle {
   destroy: () => void;
+  update?: (delta: unknown) => Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown }>;
 }
 
 const REGISTERED_ELEMENTS = new Set<string>();
@@ -411,7 +416,12 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           result.destroy();
           return;
         }
-        this.mount = result;
+        // Structural cast: at the embed boundary TConfig is type-erased.
+        // The runtime's `update(delta: Partial<TConfig>)` is correctly typed
+        // for direct mountCartridge callers; the custom-element forwarding
+        // path widens to `unknown` because attribute-driven mounts can't
+        // express TConfig at compile time.
+        this.mount = result as unknown as MountHandle;
         if (!result.blocked) {
           opts.onMounted?.(id, this);
         }
@@ -430,6 +440,26 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         }
         this.mount = null;
       }
+    }
+
+    /**
+     * Live config delta — forwards to the runtime's
+     * `MountCartridgeResult.update()` when the element is mounted and
+     * not gate-blocked. Resolves with `{ mode, navState }` reporting
+     * whether the runtime hot-swapped in place or triggered a full
+     * remount. Resolves with `null` when called against a never-mounted,
+     * gate-blocked, or already-disconnected element — symmetric with
+     * the runtime's "no update on blocked" contract; callers can branch
+     * on the null without try/catch.
+     *
+     * Throws (propagated from the runtime) when a remount triggered by
+     * the delta hits a gate that returns `'block'`.
+     */
+    async update(
+      delta: unknown,
+    ): Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown } | null> {
+      if (this.disposed || !this.mount || !this.mount.update) return null;
+      return this.mount.update(delta);
     }
   }
 

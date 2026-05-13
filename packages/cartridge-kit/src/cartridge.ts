@@ -160,6 +160,40 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
    * author keeps a single source of truth.
    */
   themeSchema?: ThemeSchema;
+
+  /**
+   * Config paths that can hot-swap (re-render the active page in place
+   * without remount) when delivered via `MountCartridgeResult.update()`
+   * in `@airo-js/runtime`. Paths NOT in this list trigger a remount,
+   * with NavigationState preserved. Defaults to `[]` — everything
+   * remounts.
+   *
+   * **Decision criterion — when to declare a path here vs omit it:**
+   * declare paths where the value can change WITHOUT invalidating the
+   * post-Transformer snapshot — the renderer reads the new value
+   * directly and the existing derived data is still correct. Cosmetic
+   * flags (`showPrices`, theme tokens, copy overrides) belong here.
+   * Anything that affects what transformers produce (filters, grouping
+   * keys, anything that changes derived data shape) should be OMITTED
+   * so the runtime triggers a remount + transformer re-run.
+   *
+   * Supports both top-level keys and dot-paths into nested config:
+   *
+   * ```ts
+   * hotSwapKeys: ['theme', 'display.showPrices', 'display.showRatings']
+   * ```
+   *
+   * Prefix-match semantics:
+   *   - `'theme'`              — matches any change under `theme.*`
+   *   - `'display.showPrices'` — matches only that exact leaf
+   *
+   * The `(string & {})` intersection on the type preserves
+   * keyof-autocomplete on the top-level `TConfig` keys while leaving
+   * the type open for dot-path strings. Compile-time path validation
+   * (a future `Paths<TConfig>` template-literal type) can tighten this
+   * without breaking the surface.
+   */
+  hotSwapKeys?: Array<keyof TConfig | (string & {})>;
 }
 
 /**

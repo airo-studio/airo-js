@@ -47,7 +47,7 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
     this.traceHandler = opts.traceHandler;
   }
 
-  runTransformers(input: TData, ctx: TransformerContext<TConfig>): TData {
+  async runTransformers(input: TData, ctx: TransformerContext<TConfig>): Promise<TData> {
     let data = input;
     for (const t of this.transformers) {
       if (!t.isEnabled(ctx.config)) continue;
@@ -58,21 +58,25 @@ export class RuntimePipelineImpl<TData, TConfig> implements RuntimePipeline<TDat
 
       if (!trace && policy === 'fail-render') {
         // Fast path: production default — propagate errors, no measurement.
-        data = t.transform(data, ctx);
+        // `await` accepts both sync values (returned as-is, microtask-tick
+        // overhead only) and `Promise<TData>` from async transformers.
+        data = await t.transform(data, ctx);
         continue;
       }
 
       const inSize = trace ? this.measure(data) : 0;
       const t0 = trace ? performance.now() : 0;
       try {
-        data = t.transform(data, ctx);
+        data = await t.transform(data, ctx);
       } catch (err) {
         if (policy === 'fail-render') {
           // Re-throw — caller (PageManager) catches and shows an error UI.
           throw err;
         }
         // 'skip' — log and pass input through untouched. Don't widen
-        // visibility silently if a config/data shape changes.
+        // visibility silently if a config/data shape changes. Applies
+        // identically to sync throws and rejected promises (both surface
+        // as exceptions through `await`).
         log.error(
           `Transformer "${t.name}" threw with errorPolicy='skip'; passing input through.`,
           err,
