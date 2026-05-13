@@ -89,7 +89,7 @@ export type {
 export { buildCrumbs } from './breadcrumb.js';
 
 export type { PageManagerOptions } from './page-manager.js';
-export { PageManager } from './page-manager.js';
+export { PageManager, findEntryPage, resolveEntryPage } from './page-manager.js';
 
 export type {
   AppLifecycleState,

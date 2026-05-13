@@ -32,11 +32,36 @@ import { PathRouter } from './path-router.js';
 
 const log = logger('core');
 
-function findEntryPage<TPageType extends string>(
+/**
+ * Default entry-page selection. First enabled, non-gate, non-subpage page
+ * in the configured order. Shared by PageManager + SSR runner so both
+ * agree on what "default entry" means.
+ */
+export function findEntryPage<TPageType extends string>(
   pages: ReadonlyArray<Page<TPageType>>,
   isGate: (type: TPageType) => boolean,
 ): Page<TPageType> | undefined {
   return pages.find((p) => p.enabled && !isGate(p.type) && !p.parent);
+}
+
+/**
+ * Resolve the entry page given an optional preferred id. Used by
+ * `PageManager.mountInitial` and the SSR runner. The preferred id wins
+ * only when it points to an enabled, non-subpage, non-gate page in the
+ * config; otherwise falls back to `findEntryPage` so tampered or stale
+ * deeplinks never crash the runtime.
+ */
+export function resolveEntryPage<TPageType extends string>(
+  pages: ReadonlyArray<Page<TPageType>>,
+  isGate: (type: TPageType) => boolean,
+  preferredId?: string,
+): Page<TPageType> | undefined {
+  const requested = preferredId
+    ? pages.find(
+        (p) => p.id === preferredId && p.enabled && !p.parent && !isGate(p.type),
+      )
+    : undefined;
+  return requested ?? findEntryPage(pages, isGate);
 }
 
 export interface PageManagerOptions<
@@ -73,6 +98,22 @@ export interface PageManagerOptions<
    * See `RouterOption` in `./router.ts` for the full discriminated union.
    */
   enableRouter?: RouterOption;
+  /**
+   * Mount-time navigation state. The host (or `decodeNavHint`) supplies
+   * this; PageManager seeds `navState` with it BEFORE the router parses
+   * the URL. Precedence ladder: URL > `initialNavState` > default entry.
+   *
+   * Three legitimate sources:
+   *   - URL-derived (`decodeNavHint(hint, validPages)` on the server-side
+   *     SSR path, the existing PathRouter/HashRouter on the client).
+   *   - Host-page programmatic (popup picker, product-page commerce button).
+   *   - Future (postMessage from parent frame, storage rehydration).
+   *
+   * Contract: derivable on BOTH server and client from the same inputs.
+   * Never a "server preload bag" — state is recomputed client-side, never
+   * serialised into SSR HTML.
+   */
+  initialNavState?: Partial<NavigationState>;
 }
 
 export class PageManager<
@@ -92,7 +133,13 @@ export class PageManager<
     this.opts = opts;
     this.isGatePage = opts.isGatePage ?? (() => false);
     const entry = findEntryPage(opts.pages, this.isGatePage);
-    this.navState = { page: entry?.id ?? '' };
+    // Seed precedence: default entry → host-supplied initialNavState →
+    // (initRouter below) URL state. Last write wins, so URL beats host
+    // config beats default — matches the v3 contract.
+    this.navState = {
+      page: entry?.id ?? '',
+      ...(opts.initialNavState ?? {}),
+    };
 
     if (opts.enableRouter) {
       this.initRouter();
@@ -180,10 +227,38 @@ export class PageManager<
   }
 
   /**
-   * Adopt SSR-rendered DOM for a specific page. Called by `createApp`
-   * with `{ hydrate: true }` instead of the normal `navigate()` path,
-   * so the renderer wires events against the existing tree rather than
-   * blowing it away and re-rendering.
+   * Mount the initial page based on current `navState` + page config.
+   *
+   * This is the single entry-resolution site for the App. Reads from
+   * `this.navState.page` (URL-decoded, host-supplied, or default-seeded
+   * at construction), validates that the page is enabled and not a
+   * subpage / gate, and either hydrates SSR DOM (`hydrate: true`) or
+   * renders fresh (`hydrate: false`). Falls back to the default entry
+   * via `findEntryPage` on any validation miss.
+   *
+   * Replaces the pre-v3 `createApp` entry-resolution block that didn't
+   * consult `navState`, leaving URL-deeplinked pages stranded.
+   */
+  mountInitial(opts: { hydrate: boolean }): void {
+    if (this.destroyed) return;
+    const entry = resolveEntryPage(
+      this.opts.pages,
+      this.isGatePage,
+      this.navState.page,
+    );
+    if (!entry) return;
+    if (opts.hydrate) {
+      this.hydrateEntry(entry.id);
+    } else {
+      this.navigate({ page: entry.id });
+    }
+  }
+
+  /**
+   * Adopt SSR-rendered DOM for a specific page. Called by
+   * `mountInitial({ hydrate: true })`. The renderer wires events
+   * against the existing tree rather than blowing it away and
+   * re-rendering.
    */
   hydrateEntry(pageId: PageId): void {
     if (this.destroyed) return;

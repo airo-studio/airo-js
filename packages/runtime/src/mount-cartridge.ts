@@ -39,6 +39,7 @@ import type {
   App,
   IEventBus,
   IsolationRoot,
+  NavigationState,
   RouterOption,
   StyleIsolation,
 } from '@airo-js/core';
@@ -155,6 +156,28 @@ export interface MountCartridgeOptions<
    * view that's allowed to be the entry page.
    */
   mode?: 'csr' | 'hydrate';
+
+  /**
+   * Mount-time navigation state. Threaded into `createApp` →
+   * `PageManager` so the active page + ctx.navState resolve from
+   * URL-decoded or host-supplied state, not just the default entry.
+   *
+   * Three legitimate sources:
+   *   - URL-derived — pair with `decodeNavHint` server-side, or rely
+   *     on `enableRouter` to populate from `window.location` client-
+   *     side (router does this synchronously in PageManager's
+   *     constructor; `initialNavState` is the explicit hand-off when
+   *     decoding happens outside the framework).
+   *   - Host-page programmatic — popup picker, product-locator button
+   *     opening a widget with a specific product pre-selected.
+   *   - Future — postMessage from parent frame, browser-storage
+   *     rehydration.
+   *
+   * Contract: derivable on BOTH server and client from the same
+   * inputs. Never a "server preload bag" — state is recomputed
+   * client-side, never serialised into SSR HTML.
+   */
+  initialNavState?: Partial<NavigationState>;
 
   /**
    * Skip `dataSource.fetch` and use this data directly. Use when the host
@@ -368,6 +391,7 @@ export async function mountCartridge<
         enableRouter: opts.enableRouter,
         gateScope: opts.gateScope,
         hydrate: mode === 'hydrate',
+        initialNavState: opts.initialNavState,
       },
     );
   } catch (err) {
