@@ -24,6 +24,7 @@ import type {
   PageRendererFactory,
   RenderContext,
   SubpageActivation,
+  UpdateResult,
 } from './page.js';
 import type { IEventBus } from './events.js';
 import type { IRouter, RouteState, RouterOption } from './router.js';
@@ -114,6 +115,20 @@ export interface PageManagerOptions<
    * serialised into SSR HTML.
    */
   initialNavState?: Partial<NavigationState>;
+  /**
+   * Host-supplied live config-delta dispatcher (forwarded from
+   * `AppDeps.hostUpdate`). When set, every `RenderContext` built by
+   * `swapRenderer` / `hydrateEntry` includes `ctx.update` wired to
+   * this function. Renderers fire delta updates from listeners
+   * without holding the host's mount handle.
+   *
+   * Type-loose by design — `RenderContext` is generic over
+   * `TAppContext` but not over the cartridge's `TConfig`, so the
+   * delta shape stays `Record<string, unknown>` at this layer.
+   * Cartridge consumers narrow via `CartridgeRenderContext` from
+   * `@airo-js/cartridge-kit`.
+   */
+  hostUpdate?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
 }
 
 export class PageManager<
@@ -284,6 +299,7 @@ export class PageManager<
       events: this.opts.events,
       navState: this.navState,
       navigate: (s) => this.navigate(s),
+      update: this.opts.hostUpdate,
     };
 
     if (typeof renderer.hydrate === 'function') {
@@ -419,6 +435,7 @@ export class PageManager<
       events: this.opts.events,
       navState: this.navState,
       navigate: (s) => this.navigate(s),
+      update: this.opts.hostUpdate,
     };
     renderer.render(this.opts.container, ctx);
 

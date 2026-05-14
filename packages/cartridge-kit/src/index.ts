@@ -130,6 +130,9 @@ export type {
 } from './define-ssr-safe-renderer.js';
 export { defineSSRSafeRenderer } from './define-ssr-safe-renderer.js';
 
+export type { DeepPartial } from './deep-partial.js';
+export type { CartridgeRenderContext } from './render-context.js';
+
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
 /**
  * Cartridge contract surface version. Ticks ONLY when the contract

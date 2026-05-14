@@ -50,6 +50,7 @@ import type {
   NavigationState,
   RouterOption,
   StyleIsolation,
+  UpdateResult,
 } from '@airo-js/core';
 import type {
   Cartridge,
@@ -57,6 +58,7 @@ import type {
   CartridgeAppResult,
   CartridgeRegistry,
   DataSourceInput,
+  DeepPartial,
   Template,
 } from '@airo-js/cartridge-kit';
 import { createCartridgeApp, templateToAppConfig } from '@airo-js/cartridge-kit';
@@ -251,17 +253,12 @@ export interface MountCartridgeOptions<
   onPipelineComplete?: (snapshot: TData) => void;
 }
 
-/**
- * Result of `MountCartridgeResult.update(delta)`. Reports which path the
- * dispatcher took (hot-swap vs remount) and the NavigationState as of
- * the update — preserved across remount, snapshot-of-current for
- * hot-swap. Studios use `mode` to decide whether to re-emit telemetry,
- * scroll-to-top, or refire preview-side effects.
- */
-export interface UpdateResult {
-  mode: 'hot-swap' | 'remount';
-  navState: NavigationState;
-}
+// `UpdateResult` moved to `@airo-js/core/page.ts` in 0.7.1 so it can be
+// referenced from `RenderContext.update`'s return type without core taking
+// a circular dep on runtime. Re-exported here for backward compatibility:
+// 0.7.0 consumers importing `UpdateResult` from `@airo-js/runtime` keep
+// working unchanged.
+export type { UpdateResult };
 
 /**
  * Discriminated result of a mount. The `blocked` branch fires when a
@@ -269,9 +266,10 @@ export interface UpdateResult {
  * element and the framework paints nothing else.
  *
  * Generic over `TConfig` so the `update(delta)` method on the unblocked
- * branch can accept `Partial<TConfig>`. The `TConfig = unknown` default
- * preserves backward compatibility for callers that don't propagate the
- * type parameter.
+ * branch can accept `DeepPartial<TConfig>` (0.7.1 widening — runtime
+ * always walked nested deltas; type now matches). The `TConfig = unknown`
+ * default preserves backward compatibility for callers that don't
+ * propagate the type parameter.
  */
 export type MountCartridgeResult<TConfig = unknown> =
   | {
@@ -295,7 +293,7 @@ export type MountCartridgeResult<TConfig = unknown> =
        * Throws when a remount triggered by `update` runs into a gate
        * that returns `'block'` — same surface as initial mount blocking.
        */
-      update: (delta: Partial<TConfig>) => Promise<UpdateResult>;
+      update: (delta: DeepPartial<TConfig>) => Promise<UpdateResult>;
     }
   | {
       app: null;
@@ -394,6 +392,86 @@ export async function mountCartridge<
   };
   opts.onShellReady?.(shell);
 
+  // === Mutable state across remounts (`update`) ===
+  // The result handle the caller holds remains stable; we swap the
+  // underlying App + snapshot here when a remount path runs.
+  //
+  // Declared up front (before `doMountInner` is defined) so the `update`
+  // closure below can be wired through to renderers as `ctx.update` BEFORE
+  // the initial mount completes — `createCartridgeApp` builds the App's
+  // PageManager during the initial mount, and PageManager constructs
+  // RenderContexts that close over `hostUpdate`. The state vars are null
+  // / undefined during the initial mount window; renderers never call
+  // `ctx.update` during their first render anyway (it fires from listener
+  // handlers triggered post-mount), so the defensive guard in `update`
+  // below is purely a safety net.
+  let currentApp: App | null = null;
+  let currentSnapshot: TData | undefined = undefined;
+  let currentConfig: TConfig = opts.config;
+
+  // === Live update dispatcher (defined before doMountInner so the
+  // `hostUpdate` wrapper below can reference it forward-of-call) ===
+  const update = async (delta: DeepPartial<TConfig>): Promise<UpdateResult> => {
+    if (!currentApp || currentSnapshot === undefined) {
+      throw new Error(
+        '[@airo-js/runtime] update() called before mount completed or after destroy(). Wait for `await mountCartridge(...)` to resolve before invoking, and stop calling update from renderers post-destroy.',
+      );
+    }
+    const paths = leafPaths(delta);
+    const hotSwap = (opts.cartridge.hotSwapKeys ?? []).map(String);
+    const needsRemount = paths.some((p) => !isCovered(p, hotSwap));
+    const navState = currentApp.getNavigationState();
+    const newConfig = deepMerge(currentConfig, delta);
+
+    if (needsRemount) {
+      // Tear down the old app but leave `currentApp` pointing at the
+      // destroyed handle until the new app is ready — this preserves
+      // the `result.app.state` getter contract during the async gap
+      // and avoids null-handling at access sites.
+      currentApp.destroy();
+      if (isolationRoot.isolated) {
+        renderRoot.innerHTML = '';
+      }
+      const next = await doMountInner(newConfig, navState);
+      if (next.result.blocked) {
+        // Remount-during-update tripped a gate. Surface as throw — the
+        // caller can decide whether to remount with different config or
+        // tear down. `currentApp` remains the (destroyed) prior handle,
+        // matching post-destroy semantics so subsequent destroy() calls
+        // are idempotent.
+        throw new Error(
+          `[@airo-js/runtime] update() remount was blocked by gate "${next.result.blockedBy}". Resolve the gate or revert the offending config delta.`,
+        );
+      }
+      currentApp = next.result.app;
+      currentSnapshot = next.snapshot;
+      currentConfig = newConfig;
+      return { mode: 'remount', navState };
+    }
+
+    // Hot-swap path. Existing snapshot is still valid (the cartridge
+    // declared these paths as not affecting derived data); replace the
+    // appContext + re-render the active page in place.
+    const newAppContext: CartridgeAppContext<TData, TConfig> = {
+      cartridgeId: opts.cartridge.id,
+      config: newConfig,
+      data: currentSnapshot,
+    };
+    currentApp.replaceAppContext(newAppContext);
+    currentConfig = newConfig;
+    return { mode: 'hot-swap', navState };
+  };
+
+  // Type-erased wrapper passed to PageManager as `hostUpdate`. Cast is
+  // safe at runtime — `update()` walks the delta via `leafPaths` regardless
+  // of the static type, and cartridge-side callers wrap in
+  // `CartridgeRenderContext` for the typed `DeepPartial<TConfig>` at the
+  // call site. Without the cast, `RenderContext.update` would have to
+  // thread `TConfig` through the generic surface of core's RenderContext,
+  // which is a breaking type change.
+  const hostUpdate = (delta: Record<string, unknown>): Promise<UpdateResult> =>
+    update(delta as DeepPartial<TConfig>);
+
   // Inner mount sequence (phases 2-4). Factored as a closure because
   // `update()` calls it again on remount paths — same fetch / pipeline /
   // createCartridgeApp work, threaded with the new config + preserved
@@ -482,6 +560,10 @@ export async function mountCartridge<
           hydrate: mode === 'hydrate',
           initialNavState: navState,
           registry: opts.registry,
+          // 0.7.1 — forward `hostUpdate` through to `RenderContext.update`
+          // so renderers can fire config delta updates from inside listener
+          // handlers without holding a separate handle to this result.
+          hostUpdate,
         },
       );
     } catch (err) {
@@ -497,12 +579,9 @@ export async function mountCartridge<
     opts.initialNavState,
   );
 
-  // === Mutable state across remounts (`update`) ===
-  // The result handle the caller holds remains stable; we swap the
-  // underlying App + snapshot here when a remount path runs.
-  let currentApp: App | null = initialResult.blocked ? null : initialResult.app;
-  let currentSnapshot: TData = initialSnapshot;
-  let currentConfig: TConfig = opts.config;
+  // Sync state vars with the initial mount results.
+  if (!initialResult.blocked) currentApp = initialResult.app;
+  currentSnapshot = initialSnapshot;
 
   // Unified teardown. Caller gets one destroy() regardless of which branch
   // they're on; the framework knows what to clean up either way. The
@@ -535,58 +614,6 @@ export async function mountCartridge<
       destroy,
     };
   }
-
-  // === Live update dispatcher ===
-  const update = async (delta: Partial<TConfig>): Promise<UpdateResult> => {
-    if (!currentApp) {
-      throw new Error(
-        '[@airo-js/runtime] update() called after the mount was destroyed. Re-mount via mountCartridge() if you need to recover.',
-      );
-    }
-    const paths = leafPaths(delta);
-    const hotSwap = (opts.cartridge.hotSwapKeys ?? []).map(String);
-    const needsRemount = paths.some((p) => !isCovered(p, hotSwap));
-    const navState = currentApp.getNavigationState();
-    const newConfig = deepMerge(currentConfig, delta);
-
-    if (needsRemount) {
-      // Tear down the old app but leave `currentApp` pointing at the
-      // destroyed handle until the new app is ready — this preserves
-      // the `result.app.state` getter contract during the async gap
-      // and avoids null-handling at access sites.
-      currentApp.destroy();
-      if (isolationRoot.isolated) {
-        renderRoot.innerHTML = '';
-      }
-      const next = await doMountInner(newConfig, navState);
-      if (next.result.blocked) {
-        // Remount-during-update tripped a gate. Surface as throw — the
-        // caller can decide whether to remount with different config or
-        // tear down. `currentApp` remains the (destroyed) prior handle,
-        // matching post-destroy semantics so subsequent destroy() calls
-        // are idempotent.
-        throw new Error(
-          `[@airo-js/runtime] update() remount was blocked by gate "${next.result.blockedBy}". Resolve the gate or revert the offending config delta.`,
-        );
-      }
-      currentApp = next.result.app;
-      currentSnapshot = next.snapshot;
-      currentConfig = newConfig;
-      return { mode: 'remount', navState };
-    }
-
-    // Hot-swap path. Existing snapshot is still valid (the cartridge
-    // declared these paths as not affecting derived data); replace the
-    // appContext + re-render the active page in place.
-    const newAppContext: CartridgeAppContext<TData, TConfig> = {
-      cartridgeId: opts.cartridge.id,
-      config: newConfig,
-      data: currentSnapshot,
-    };
-    currentApp.replaceAppContext(newAppContext);
-    currentConfig = newConfig;
-    return { mode: 'hot-swap', navState };
-  };
 
   // `app` is exposed as a getter so it always reflects the live App
   // instance — after a `remount` path runs inside `update()`, the

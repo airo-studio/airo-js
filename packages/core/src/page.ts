@@ -61,6 +61,20 @@ export interface SubpageActivation<TPageType extends string = string> {
 }
 
 /**
+ * Result of a host-driven config delta dispatch (the `update()` flow
+ * implemented by `@airo-js/runtime`'s `MountCartridgeResult`). Reports
+ * which path the dispatcher took (hot-swap reuses snapshot + re-renders
+ * the active page; remount tears the App down and rebuilds with the new
+ * config). Lives in core because `RenderContext.update` returns it —
+ * core can't depend on runtime, so the type lives here and runtime
+ * re-exports it.
+ */
+export interface UpdateResult {
+  mode: 'hot-swap' | 'remount';
+  navState: NavigationState;
+}
+
+/**
  * Render-time bag handed to a PageRenderer. The PageManager builds this
  * fresh on every navigate; renderers don't cache it.
  *
@@ -78,6 +92,35 @@ export interface RenderContext<
   events: IEventBus;
   navState: NavigationState;
   navigate: (state: Partial<NavigationState>) => void;
+  /**
+   * Forward into the host's live config-delta dispatcher
+   * (`MountCartridgeResult.update()` from `@airo-js/runtime`). When the
+   * App is mounted via `mountCartridge`, the framework wires this so
+   * renderers can fire delta updates from inside listeners without
+   * holding a separate handle to the mount result.
+   *
+   * Optional because not every mount path provides it — raw
+   * `createApp` callers without a cartridge runtime, SSR rendering,
+   * and test-harness in non-update mode all leave it `undefined`.
+   * Renderers must `?.()` defensively or wrap with a cartridge-typed
+   * helper (see `CartridgeRenderContext` in `@airo-js/cartridge-kit`).
+   *
+   * Delta type is `Record<string, unknown>` at the core layer because
+   * `RenderContext` is generic over `TAppContext` but not over the
+   * cartridge's `TConfig`. Cartridge consumers wrap in a typed helper
+   * that narrows to their `DeepPartial<TConfig>`. Runtime always walks
+   * the delta via `leafPaths` regardless of the static type — the
+   * dispatch contract is the same.
+   *
+   * Typical usage from a cartridge renderer's `hydrate`:
+   *
+   * ```ts
+   * variantSelector.on('select', (variant) => {
+   *   ctx.update?.({ display: { selectedGroupIndex: variant.idx } });
+   * });
+   * ```
+   */
+  update?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
 }
 
 /**
