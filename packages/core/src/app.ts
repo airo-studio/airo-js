@@ -14,6 +14,7 @@ import type {
   PageRendererFactory,
   NavigationState,
   SubpageActivation,
+  UpdateResult,
 } from './page.js';
 import type { RouterOption } from './router.js';
 import { PageManager } from './page-manager.js';
@@ -77,6 +78,18 @@ export interface AppDeps<
    * the precedence + contract.
    */
   initialNavState?: Partial<NavigationState>;
+  /**
+   * Host-supplied live config-delta dispatcher. When provided,
+   * `PageManager` threads it into every `RenderContext` as
+   * `ctx.update`, letting renderers fire delta updates from inside
+   * listener handlers without holding a separate handle. The
+   * cartridge runtime (`mountCartridge` in `@airo-js/runtime`) wires
+   * this to its `MountCartridgeResult.update()` closure on every
+   * mount. Raw `createApp` callers without a cartridge runtime can
+   * leave it `undefined`; `ctx.update` will be `undefined` and
+   * renderers fall through their `?.()` guard.
+   */
+  hostUpdate?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
 }
 
 /**
@@ -124,6 +137,7 @@ export function createApp<
     isGatePage: deps.isGatePage,
     enableRouter: deps.enableRouter,
     initialNavState: deps.initialNavState,
+    hostUpdate: deps.hostUpdate,
   });
 
   // PageManager owns initial entry resolution from this point — reads

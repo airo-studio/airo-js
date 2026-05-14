@@ -6,6 +6,53 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/core` 0.7.1 — 2026-05-14
+
+Renderer-callable update seam. `RenderContext` exposes `update`, so renderers can fire `MountCartridgeResult.update()` deltas from inside listener handlers without holding the host's mount handle. Closes [msg_mp58z77m_65d9ed](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's D5 planning).
+
+### Added
+- `RenderContext.update?: (delta: Record<string, unknown>) => Promise<UpdateResult>` — optional field on every `RenderContext`. When the App is mounted via `mountCartridge` from `@airo-js/runtime`, the framework wires this to the host's `MountCartridgeResult.update()` closure on every mount. Raw `createApp` callers without a cartridge runtime can leave it `undefined` and renderers fall through their `?.()` guard.
+- `UpdateResult` type — moved from `@airo-js/runtime` into core so `RenderContext.update`'s return type can be expressed without core depending on runtime. Re-exported from `@airo-js/runtime` for back-compat; existing imports unchanged.
+- `AppDeps.hostUpdate?: ...` — wires the dispatcher through `createApp` → `PageManager` → `RenderContext`. Cartridge runtimes pass it; non-cartridge `createApp` callers omit.
+
+### Notes
+- Delta type at the core layer is `Record<string, unknown>` because `RenderContext` is generic over `TAppContext` but not over the cartridge's `TConfig`. Cartridge authors narrow via `CartridgeRenderContext` from `@airo-js/cartridge-kit` (see below).
+- Existing renderers that don't reference `ctx.update` continue to work — the field is optional and additive.
+
+## `@airo-js/cartridge-kit` 0.7.1 — 2026-05-14
+
+Two type-utilities to make `update(delta)` ergonomic for cartridge authors.
+
+### Added
+- `DeepPartial<T>` — recursive partial type. Used as the delta type for `MountCartridgeResult.update()` and the typed `CartridgeRenderContext.update`, matching the runtime contract that already walked nested deltas via `leafPaths()`. Closes [msg_mp4hrxlk_954a8b](https://github.com/airo-studio/airo-js).
+- `CartridgeRenderContext<TPageType, TData, TConfig>` — strongly-typed `RenderContext` for cartridge renderers. Extends `RenderContext<TPageType, CartridgeAppContext<TData, TConfig>>` with two narrowings: `app` is the typed cartridge envelope, and `update` accepts `DeepPartial<TConfig>` instead of `Record<string, unknown>`. Use this type in your renderer factories to get compile-time delta-shape checking on `ctx.update?.()` calls.
+
+### Notes
+- The core `RenderContext` stays generic. `CartridgeRenderContext` is an ergonomic extension cartridge-kit ships; both reference the same runtime function — no behavioral difference between them.
+
+## `@airo-js/runtime` 0.7.1 — 2026-05-14
+
+Widens `update(delta)` to `DeepPartial<TConfig>` (was shallow `Partial<TConfig>`), aligning the static type with the runtime contract. Wires `hostUpdate` through to `createCartridgeApp` so renderers receive `ctx.update`.
+
+### Changed
+- `MountCartridgeResult<TConfig>.update(delta)` parameter type: `Partial<TConfig>` → `DeepPartial<TConfig>` (from `@airo-js/cartridge-kit`). Backward-compatible — every shallow partial is a deep partial. Removes the cast that dotter-studio's Wave 0 smoke had to use.
+- `UpdateResult` is now re-exported from `@airo-js/core` (the canonical home). Existing `import { UpdateResult } from '@airo-js/runtime'` keeps working unchanged.
+- `mountCartridge` restructured to define the `update` closure before `doMountInner` runs, so `hostUpdate` (a type-erased wrapper around `update`) can be passed through `createCartridgeApp` → `createApp` → `PageManager`. State vars (`currentApp`, `currentSnapshot`, `currentConfig`) declared up-front; defensive guard in `update` throws if called before initial mount completes (impossible from a renderer in practice — renderers run after mount).
+
+### Notes
+- The `hostUpdate` wrapper casts `Record<string, unknown>` → `DeepPartial<TConfig>` at the boundary. Runtime walks the delta via `leafPaths` regardless of static type, so the cast is sound; cartridge-side type safety lives on `CartridgeRenderContext`.
+
+## `@airo-js/embed` 0.7.1 — 2026-05-14
+
+No public API changes. Sync rev for `workspace:^` peerDep coherence with the 0.7.1 line.
+
+### Notes
+- `el.update(delta: unknown)` stays type-erased at the embed boundary because attribute-driven mounts can't express `TConfig` at compile time. The 0.7.1 `DeepPartial<TConfig>` widening on the runtime side flows through structurally.
+
+## `@airo-js/ssr` 0.7.1 — 2026-05-14
+
+No API changes. Sync rev for `workspace:^` peerDep coherence with the 0.7.1 line.
+
 ## `@airo-js/runtime` 0.7.0 — 2026-05-13
 
 Live config deltas + the cartridge test-harness. Closes the framework gap on the dotter-studio team's tech-debt punch list (their D4 / D5 / D12 unblock with this rev).

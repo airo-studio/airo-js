@@ -41,6 +41,7 @@ export type {
   RenderContext,
   PageRenderer,
   PageRendererFactory,
+  UpdateResult,
 } from './page.js';
 
 export type {
