@@ -54,7 +54,7 @@ export type {
   CartridgeAppContext,
 } from './view.js';
 
-export type { Template } from './template.js';
+export type { Template, TemplatePage } from './template.js';
 export { templateToAppConfig } from './template-to-app-config.js';
 
 export type {
@@ -132,6 +132,11 @@ export { defineSSRSafeRenderer } from './define-ssr-safe-renderer.js';
 
 export type { DeepPartial } from './deep-partial.js';
 export type { CartridgeRenderContext } from './render-context.js';
+
+export {
+  resolveComponentProp,
+  resolveComponentVisibility,
+} from './resolve-component.js';
 
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
 /**

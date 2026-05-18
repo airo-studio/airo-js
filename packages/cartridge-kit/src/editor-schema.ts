@@ -21,9 +21,25 @@
 
 /**
  * Built-in field kinds the framework documents. Cartridges MAY declare
- * cartridge-specific kinds (e.g., `'attribute'`, `'reference'`, `'image'`)
- * as first-class extensions — host studios fall through to a textarea
- * control and SHOULD `console.warn` so authors notice during development.
+ * cartridge-specific kinds as first-class extensions — host studios
+ * fall through to a textarea control and SHOULD `console.warn` so
+ * authors notice during development.
+ *
+ * Common extension kinds seen in cartridge-side declarations:
+ *
+ *   - `'attribute'` — pick a key from the cartridge's typed feed
+ *     (e.g., a product attribute name). Cartridges expose the
+ *     available keys via cartridge-local helpers; studios render a
+ *     `<Select>` populated from those.
+ *   - `'reference'` — pointer to another entity in the cartridge's
+ *     data graph (related product, recommended category).
+ *   - `'image'` — image URL with preview + upload affordance.
+ *
+ * These stay extensions (not promoted to the core union) so the
+ * framework doesn't pretend every host studio supports them out of
+ * the box. Promoting `'attribute'` to core would commit every
+ * downstream studio to rendering a feed-attribute picker; that's a
+ * data-source semantics decision, not a UI-input-type decision.
  *
  * The intersection with `(string & {})` on consumers preserves IDE
  * autocomplete on the core set while leaving the type open for extensions.
@@ -90,7 +106,18 @@ export interface PropSchema {
   changeScope: ChangeScope;
   /**
    * Inspector section grouping. Open string — studios decide rendering.
-   * Common values: `'behaviour'`, `'layout'`, `'style'`, `'advanced'`.
+   *
+   * Common values:
+   *   - `'behaviour'` — runtime behavior toggles (showPrices, autoplay)
+   *   - `'layout'` — positional / sizing controls
+   *   - `'style'` — visual treatment (colors, typography)
+   *   - `'advanced'` — power-user surface
+   *   - `'data-binding'` — feed-attribute picker / data-source mapping
+   *
+   * Open by design — studios are free to add their own buckets, and
+   * the framework does not bless any one studio's tab vocabulary as
+   * canonical. Listed values are examples to help authors converge on
+   * common conventions, not a closed enum.
    */
   category?: string;
 }

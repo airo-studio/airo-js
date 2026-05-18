@@ -6,6 +6,51 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/embed` 0.7.3 — 2026-05-18
+
+Per-widget page graph override + reconnect-bug fix.
+
+### Added
+- `LoadConfigResult.templatePages?: ReadonlyArray<TemplatePage>` — host-supplied page graph override that replaces the cartridge template's static pages for this mount only. Closes [msg_mpbhrhex_f07dda](https://github.com/airo-studio/airo-js — bridge thread). Use case: hosts that let customers customize the page graph (add / remove / reorder / enable / disable pages) persist those edits per-widget. Without this hook, SSR painted against the actual graph (server-side override) and client hydrate ran against the cartridge default — DOM mismatch → dead clicks.
+
+### Changed
+- Field name is `templatePages`, NOT `pages` (per Codex review: avoids collision with `loaded.config.pages` which lives at the cartridge-config layer).
+- `TemplatePage` shape is re-exported from `@airo-js/cartridge-kit` rather than duplicated inline in embed — prevents silent cross-package drift when the template page shape grows.
+- Page entries are deep-cloned when building the effective template (`{ ...p }` per entry). Host mutation of the array entries after `loadConfig` resolves cannot corrupt the runtime's view of the template, which closes over `opts.template` for remount paths.
+- **Host validation responsibility** is documented on the JSDoc: no duplicate ids, no orphan subpages, at least one enabled non-subpage page, types matching registered `ViewDefinition.pageType`. The framework only catches missing-entry-page; everything else surfaces as navigation bugs at click time. Embed deliberately does not re-walk the graph the host just composed.
+
+### Fixed
+- `connectedCallback` now resets `this.disposed = false` at the top, allowing an element to be removed from DOM and reinserted (browser re-connection scenarios). Without the reset, the prior `disconnectedCallback()` latch left disposed=true forever and every post-async-phase check short-circuited silently — the element appeared mounted in DOM but no renderer was wired. Bonus fix surfaced during the Codex review of the 0.7.3 diff.
+
+## `@airo-js/cartridge-kit` 0.7.3 — 2026-05-18
+
+Shared component-resolution helpers + `TemplatePage` named export + JSDoc examples for category/FieldType extensions.
+
+### Added
+- `TemplatePage` interface — named export of the shape that `Template.pages` carries. Used by `@airo-js/embed`'s `LoadConfigResult.templatePages` to keep cross-package wire shape consistent without inline duplication.
+- `resolveComponentProp(page, componentId, propKey, schema?)` — joins the three component-state layers (`page.componentSettings.props`, `Slot.props`, `ComponentSchema.props[k].default`) per the canonical precedence rule, returns the effective value. Pure; no DOM, no async, no consumer-specific logic.
+- `resolveComponentVisibility(page, componentId)` — joins `page.componentSettings.visible`, `Slot.visible`, default `true` per the same precedence rule. Pure.
+
+### Changed
+- `Template.pages` is now typed as `TemplatePage[]` (was inline literal). Backward-compatible — structural shape is identical.
+- `PropSchema.category` JSDoc adds `'data-binding'` as an example value alongside the existing `'behaviour' / 'layout' / 'style' / 'advanced'`. Explicitly NOT a blessed canonical enum — open string by design; studios are free to bucket however they want. Closes [msg_mpbhshsx_aacb20](https://github.com/airo-studio/airo-js Q1 question on the bridge).
+- `FieldType` JSDoc expanded: `'attribute'`, `'reference'`, `'image'` documented as common cartridge-side extensions, NOT promoted to the core union. Per Codex review: promoting `'attribute'` to core would commit every downstream studio to rendering feed-attribute UI; that's a data-source semantics decision, not a UI-input-type decision. Cartridges keep using the `(string & {})` extension path. Closes Q2.
+
+### Notes
+- The component resolvers are scoped to **framework-defined precedence on framework-owned schema** (`Slot`, `Page.componentSettings`, `ComponentSchema`). Cartridge-specific computed logic (e.g., "show this prop only if the parent flag is on") stays in consumer code that wraps the resolved value. The helpers prevent two-place drift between the runtime renderer and the studio panel — both can now call the same precedence rule rather than each implementing it.
+
+## `@airo-js/core` 0.7.3 — 2026-05-18
+
+Sync rev for the 0.7.3 line. No API changes. The `Slot` / `Page.componentSettings` / `ComponentSchema` schema layers consumed by `@airo-js/cartridge-kit`'s new resolvers are unchanged from 0.7.2.
+
+## `@airo-js/runtime` 0.7.3 — 2026-05-18
+
+Sync rev for the 0.7.3 line. No API changes.
+
+## `@airo-js/ssr` 0.7.3 — 2026-05-18
+
+Sync rev for the 0.7.3 line. No API changes.
+
 ## `@airo-js/core` 0.7.2 — 2026-05-18
 
 `RenderContext.pages` — renderer-readable page graph. Closes [msg_mpbfwheu_350d52](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's commerce breadcrumb-component work).

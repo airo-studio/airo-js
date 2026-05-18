@@ -13,23 +13,37 @@
  * parent.
  */
 
+/**
+ * One entry in a template's page graph. Matches the subset of
+ * `@airo-js/core`'s `Page<T>` that templates encode — `id` / `type` /
+ * `enabled` / optional `parent`. The richer per-page fields
+ * (`layout`, `styles`, `props`, `componentSettings`) get filled by the
+ * cartridge's `defaultConfig` at mount time via `templateToAppConfig`.
+ *
+ * Exported as a named type so consumers (notably
+ * `@airo-js/embed`'s `LoadConfigResult.templatePages` per-widget
+ * override) can reference the same shape without inlining a duplicate
+ * literal that silently freezes when this type grows.
+ */
+export interface TemplatePage {
+  id: string;
+  /** Matches a ViewDefinition.pageType. */
+  type: string;
+  enabled: boolean;
+  /** For subpages (e.g. quickview under products). */
+  parent?: string;
+}
+
 export interface Template<TConfig> {
   id: string;
   displayName: string;
   description: string;
 
   /**
-   * Pages this template instantiates. Shape matches `@airo-js/core`'s `Page<T>`
-   * (subset — full layout/styles get filled by the cartridge's defaultConfig).
+   * Pages this template instantiates. See `TemplatePage` for the entry
+   * shape.
    */
-  pages: Array<{
-    id: string;
-    /** Matches a ViewDefinition.pageType. */
-    type: string;
-    enabled: boolean;
-    /** For subpages (e.g. quickview under products). */
-    parent?: string;
-  }>;
+  pages: TemplatePage[];
 
   defaultConfig: TConfig;
 }

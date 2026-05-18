@@ -39,7 +39,7 @@
 
 import { logger } from '@airo-js/log';
 
-import type { Cartridge } from '@airo-js/cartridge-kit';
+import type { Cartridge, TemplatePage } from '@airo-js/cartridge-kit';
 import type {
   NavigationState,
   RouterOption,
@@ -111,6 +111,41 @@ export interface LoadConfigResult<TConfig = unknown> {
    * Never serialised into SSR HTML.
    */
   initialNavState?: Partial<NavigationState>;
+  /**
+   * Per-widget page graph override (0.7.3+). When supplied, replaces
+   * `cartridge.templates[templateId].pages` for this mount only.
+   *
+   * Use case: host applications that let customers customize the page
+   * graph (add / remove / reorder / enable / disable pages) persist
+   * those edits per-widget. Without this hook the customer's edits are
+   * invisible to the framework — the cartridge's static default wins,
+   * and customer-edit-then-hydrate diverges from SSR HTML painted
+   * against the actual graph (dead clicks because the renderer queries
+   * the wrong DOM).
+   *
+   * **Named field, not `pages`** — `pages` collides with
+   * `loaded.config.pages` (cartridge config layer). `templatePages`
+   * is the template layer, distinct from config.
+   *
+   * **Shared `TemplatePage` type** — re-exported from
+   * `@airo-js/cartridge-kit` so the wire shape matches `Template.pages`
+   * exactly. When that type grows, both sides update in lockstep.
+   *
+   * **Host validation responsibility** — the host MUST validate the
+   * graph before returning it: no duplicate ids, no orphan subpages
+   * (every `parent` must resolve to a non-subpage page), at least one
+   * enabled non-subpage page (else mount errors late at `findEntryPage`),
+   * `type` values that match a registered `ViewDefinition.pageType`.
+   * The framework only catches missing-entry-page; everything else
+   * surfaces as navigation bugs at click time. This is non-feature by
+   * design — embed shouldn't re-walk a graph the host just composed.
+   *
+   * **No mid-mount swap** — `templatePages` is read once on mount.
+   * `el.update(delta)` cannot change the page graph after mount (delta
+   * is `Partial<TConfig>`, not template). Re-mount via removing and
+   * re-inserting the element if the graph changes for a live widget.
+   */
+  templatePages?: ReadonlyArray<TemplatePage>;
 }
 
 /**
@@ -270,6 +305,12 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
     private disposed = false;
 
     async connectedCallback(): Promise<void> {
+      // Reset `disposed` so reconnections (element removed and reinserted)
+      // can complete a fresh mount. Without this, the prior
+      // `disconnectedCallback()` latch leaves disposed=true forever and
+      // every post-async-phase check below short-circuits silently — the
+      // element appears mounted in DOM but no renderer is wired.
+      this.disposed = false;
       const id = this.getAttribute(idAttribute);
       if (!id) {
         log.error(`<${elementName}> is missing required attribute '${idAttribute}'.`, undefined, {
@@ -345,8 +386,8 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
 
       // Phase 4 — pick template.
       const templateId = loaded.templateId ?? cartridge.defaultTemplateId;
-      const template = cartridge.templates.find((t) => t.id === templateId);
-      if (!template) {
+      const baseTemplate = cartridge.templates.find((t) => t.id === templateId);
+      if (!baseTemplate) {
         emitError(
           opts,
           'mount',
@@ -357,6 +398,20 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         );
         return;
       }
+      // Per-widget page graph override (0.7.3). When the host supplies
+      // `templatePages` in `loadConfig`, replace the cartridge template's
+      // static pages with the customer's customized graph. Deep-clone the
+      // entries (not just the array) so host-side mutation after
+      // `loadConfig` resolves cannot corrupt the runtime's view of the
+      // template — runtime closes over `opts.template` for remount paths
+      // and reading mutated objects would silently drift on the next
+      // `update(delta)` that triggers a remount.
+      const template = loaded.templatePages
+        ? {
+            ...baseTemplate,
+            pages: loaded.templatePages.map((p) => ({ ...p })),
+          }
+        : baseTemplate;
 
       // Phase 5 — paint SSR HTML into the host before mount. The runtime
       // (mode: 'hydrate' below) preserves it inside the shadow wrapper and
