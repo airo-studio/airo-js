@@ -295,6 +295,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
+      pages: this.opts.pages,
       app: this.appContext,
       events: this.opts.events,
       navState: this.navState,
@@ -431,6 +432,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
+      pages: this.opts.pages,
       app: this.appContext,
       events: this.opts.events,
       navState: this.navState,

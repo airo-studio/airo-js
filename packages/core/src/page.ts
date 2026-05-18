@@ -88,6 +88,30 @@ export interface RenderContext<
   TAppContext = unknown,
 > {
   page: Page<TPageType>;
+  /**
+   * The full page graph for the active widget — the same
+   * `Page<TPageType>[]` PageManager was constructed with (originally
+   * from `AppConfig.pages`). Includes disabled pages and subpages; the
+   * cartridge decides what to filter for its own rendering.
+   *
+   * Lets renderers reach the page graph without re-deriving it from
+   * `template.pages` via host-side wiring (the
+   * `WeakMap<IEventBus, ReadonlyArray<Page>>` workaround pattern). Use
+   * with framework helpers like [`buildCrumbs`](./breadcrumb.js):
+   *
+   * ```ts
+   * const crumbs = buildCrumbs(ctx.pages, ctx.page.id, ctx.navState);
+   * ```
+   *
+   * Pages are immutable across hot-swap (snapshot reuse path) — the
+   * framework rebuilds `RenderContext` per render but the underlying
+   * pages array reference stays stable. A remount path can carry a
+   * different `pages` array if the host passed a new template, though
+   * cartridges typically don't swap templates inside `update()`.
+   *
+   * Added in 0.7.2.
+   */
+  pages: ReadonlyArray<Page<TPageType>>;
   app: TAppContext;
   events: IEventBus;
   navState: NavigationState;

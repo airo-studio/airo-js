@@ -6,6 +6,39 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/core` 0.7.2 — 2026-05-18
+
+`RenderContext.pages` — renderer-readable page graph. Closes [msg_mpbfwheu_350d52](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's commerce breadcrumb-component work).
+
+### Added
+- `RenderContext.pages: ReadonlyArray<Page<TPageType>>` — required field on every `RenderContext`. PageManager populates from its `opts.pages` (originally `AppConfig.pages`). Renderers reach the full page graph without re-deriving from `template.pages` via host-side `WeakMap`-on-event-bus workaround patterns. Use with the existing `buildCrumbs(pages, activePageId, navState)` helper.
+
+### Changed
+- `RenderContext` type widens by one required field. Existing renderers that don't reference `ctx.pages` keep working — they just have one more field available. Code outside the framework that constructs `RenderContext` manually (uncommon — only PageManager and the SSR renderer do this in-tree) needs to add `pages: appConfig.pages` to the literal.
+
+### Notes
+- Pages array reference is stable across hot-swap (PageManager's `opts.pages` doesn't change inside `update()`). A remount path technically carries the same reference too — `mountCartridge` doesn't swap templates inside `update()`. Tested in `packages/runtime/test/render-context-pages.test.ts`.
+- Layering: this is framework state, not cartridge data — so it lives on bare `RenderContext`, not on `CartridgeAppContext`. Consistent with `ctx.page` (active page) and `ctx.navState` (current nav).
+
+## `@airo-js/cartridge-kit` 0.7.2 — 2026-05-18
+
+Sync rev for `workspace:^` peerDep coherence. No API changes — cartridge-kit re-exports `Page` from core, and `CartridgeRenderContext` inherits the new `pages` field via its `Omit<RenderContext, 'update'>` base.
+
+## `@airo-js/runtime` 0.7.2 — 2026-05-18
+
+Sync rev for the 0.7.2 line. No runtime change — `RenderContext.pages` is populated by `@airo-js/core`'s `PageManager` which runtime already delegates to via `createCartridgeApp`.
+
+## `@airo-js/embed` 0.7.2 — 2026-05-18
+
+Sync rev for `workspace:^` peerDep coherence with the 0.7.2 line. No API change.
+
+## `@airo-js/ssr` 0.7.2 — 2026-05-18
+
+Sync rev for the 0.7.2 line. `renderAppToHTML` now populates `RenderContext.pages` from `appConfig.pages` so SSR-rendered cartridges have access to the same page graph as client-side mounts.
+
+### Changed
+- `packages/ssr/src/render-app.ts` — adds `pages: config.pages` to the RenderContext literal at the renderer.renderSSR() / renderer.render() call site. Required to typecheck against the 0.7.2 `RenderContext` shape.
+
 ## `@airo-js/core` 0.7.1 — 2026-05-14
 
 Renderer-callable update seam. `RenderContext` exposes `update`, so renderers can fire `MountCartridgeResult.update()` deltas from inside listener handlers without holding the host's mount handle. Closes [msg_mp58z77m_65d9ed](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's D5 planning).

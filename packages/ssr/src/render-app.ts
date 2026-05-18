@@ -134,6 +134,7 @@ export function renderAppToHTML<
 
   const ctx: RenderContext<TPageType, TAppContext> = {
     page: entry,
+    pages: config.pages,
     app: deps.appContext,
     events,
     // Spread order: initialNavState first (context fields like productId,
