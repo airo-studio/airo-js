@@ -6,6 +6,69 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/cartridge-kit` 0.8.0 — 2026-05-18
+
+Rich `TemplatePage` round-trip + `cartridge.pageHotSwapKeys` for live page-graph deltas. Closes the contract gap reported on the bridge: pre-0.8 `templateToAppConfig` dropped `componentSettings` / `styles` / `props` / `layout` on the floor, so `resolveComponentProp` had no path to honour per-page overrides — half-built feature.
+
+### Added
+- `TemplatePage` widened with optional `layout` / `props` / `styles` / `componentSettings` carriers. The four structural fields (`id` / `type` / `enabled` / `parent`) are still required; the new fields round-trip through `templateToAppConfig` onto `AppConfig.pages[]` when present. Hosts driving a Component-panel editor (per-page prop / visibility / style overrides) now thread the overrides through `template.pages[i].componentSettings` and the runtime sees them on `ctx.page`.
+- `TemplatePage<TPageType extends string = string>` is now generic so cartridges that narrow page types keep the narrowing through `template.pages[]` → `AppConfig.pages[]`. Defaults to `string` — existing references continue to resolve.
+- `Template<TConfig, TPageType extends string = string>` widens its second generic parameter for the same reason. `Template<TConfig>` continues to resolve.
+- `Cartridge.pageHotSwapKeys?: Array<'componentSettings' | 'styles' | 'props' | 'layout' | (string & {})>` — per-page hot-swap allowlist. Same prefix-match semantics as the existing `hotSwapKeys` (which is scoped to cartridge config). `MountCartridgeResult.updatePages()` from `@airo-js/runtime` classifies the per-page diff against this list; covered diffs hot-swap, uncovered diffs (and any structural page-graph change) remount with NavigationState preserved.
+
+### Changed
+- `templateToAppConfig` round-trips all rich fields; `layout` falls back to `{ regionOrder: [], regions: {} }` when omitted, matching pre-0.8 behaviour for cartridges that paint via `RenderContext.targetEl` directly.
+- `CONTRACT_VERSION` bumped to `0.5.0` — consumers can train on the constant; helper additions and internal refactors don't bump it, but this widens the cartridge envelope (new `pageHotSwapKeys`) and TemplatePage shape.
+
+### Notes
+- Backward-compatible: cartridges that only set the four structural `TemplatePage` fields still produce the same empty-layout `AppConfig.pages[]` they did pre-0.8. Add the rich fields opportunistically when you want per-page state to reach `ctx.page`.
+
+## `@airo-js/core` 0.8.0 — 2026-05-18
+
+`App.replacePages` / `PageManager.replacePages` — page-graph hot-swap primitive.
+
+### Added
+- `App.replacePages(newPages: unknown[]): void` — replaces the active page graph and re-renders the active page in place. Type-erased at the App surface (TPageType is generic at the PageManager layer); the cartridge runtime narrows on the way in when delivering `MountCartridgeResult.updatePages()`.
+- `PageManager.replacePages(newPages: Page<TPageType>[]): void` — drives the hot-swap. Replaces (does not merge), looks up the active page by id, destroys + re-instantiates the active renderer with a fresh `RenderContext` reflecting the new `page` + `pages`. NavigationState preserved; no `navigation:changed` emission and no router push (cosmetic delta, not a navigation event).
+
+### Changed
+- `PageManager` introduces a private `pages` field initialised from `opts.pages`. `replacePages` reassigns this; every read site that previously walked `this.opts.pages` now reads `this.pages` so `ctx.pages` follows the swap.
+- `RenderContext.pages` JSDoc updated: the reference is stable across `update(delta)` hot-swap (snapshot reuse path) but DOES change after a successful `updatePages()` call. Renderers that cache `ctx.pages` across renders won't see post-`updatePages` graphs — read on each render.
+
+### Notes
+- Sync rev for `workspace:^` peerDep coherence across the 0.8.0 line.
+
+## `@airo-js/runtime` 0.8.0 — 2026-05-18
+
+`MountCartridgeResult.updatePages()` — live page-graph dispatcher.
+
+### Added
+- `updatePages(nextPages: ReadonlyArray<TemplatePage<TPageType>>): Promise<UpdateResult>` on the unblocked `MountCartridgeResult` branch. Replaces `AppConfig.pages` with `nextPages` and classifies the per-page diff against `cartridge.pageHotSwapKeys`. Covered diff → hot-swap (re-render the active page in place with new `ctx.page` / `ctx.pages`, snapshot reused). Uncovered diff OR any structural change (added / removed / reordered pages, changed `id` / `type` / `enabled` / `parent`) → remount with NavigationState preserved.
+- `pagesDiffIsCoveredByHotSwap(current, next, allowed)` + `diffLeafPaths(a, b, prefix?, skipKeys?)` exported for tests. Module-internal otherwise.
+
+### Changed
+- `MountCartridgeResult<TConfig, TPageType extends string = string>` is now generic over `TPageType` so `updatePages` can carry the narrowed type. Existing `MountCartridgeResult<TConfig>` references resolve unchanged via the default.
+- `widgetId` is captured once at the top of `mountCartridge` and reused on every `doMountInner` call — eliminates the latent footgun where a no-`widgetId` mount would generate a fresh `Date.now()` appId on every remount.
+- `currentPages` mirrors the live page graph; `doMountInner` builds `AppConfig` from it on remount paths, so an `updatePages()` remount carries the new graph and the entry-page resolution uses it.
+
+### Notes
+- `update(delta)` and `updatePages(nextPages)` are independent channels — cartridge config delta vs page-graph delta. Studios that change BOTH should call both methods.
+- Backward-compatible: existing `update(delta)` callers continue to work unchanged.
+
+## `@airo-js/ssr` 0.8.0 — 2026-05-18
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.0 line. No source change — `renderAppWithPublication` and `renderAppToHTML` already consume `templateToAppConfig` from `@airo-js/cartridge-kit`, so the rich-field round-trip on the SSR path comes free.
+
+## `@airo-js/embed` 0.8.0 — 2026-05-18
+
+`el.updatePages(nextPages)` — page-graph delta forwarded to the runtime.
+
+### Added
+- `updatePages(nextPages: ReadonlyArray<TemplatePage>)` method on the `<airo-app>` element class. Forwards to the runtime's `MountCartridgeResult.updatePages()` when the element is mounted and not gate-blocked. Resolves with `{ mode, navState }` reporting whether the runtime hot-swapped or remounted; resolves with `null` for never-mounted / gate-blocked / disconnected elements (symmetric with `el.update()`).
+
+### Changed
+- `LoadConfigResult.templatePages` JSDoc updated: post-mount page-graph changes now go through `el.updatePages()`, which hot-swaps when the diff is covered by `cartridge.pageHotSwapKeys`. The two delta channels (`update` for cartridge config, `updatePages` for page graph) are independent.
+
 ## `@airo-js/embed` 0.7.3 — 2026-05-18
 
 Per-widget page graph override + reconnect-bug fix.

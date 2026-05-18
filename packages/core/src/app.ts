@@ -7,7 +7,7 @@
  * inspect appContext.
  */
 
-import type { AppConfig } from './schema.js';
+import type { AppConfig, Page } from './schema.js';
 import type { IEventBus } from './events.js';
 import { EventBus } from './events.js';
 import type {
@@ -108,6 +108,14 @@ export interface App {
    * when delivering `MountCartridgeResult.update()`).
    */
   replaceAppContext(newAppContext: unknown): void;
+  /**
+   * Replace the active page graph and re-render the active page in
+   * place. Type-erased on the public App handle (TPageType is generic at
+   * the PageManager layer); the cartridge runtime narrows on the way in
+   * when delivering `MountCartridgeResult.updatePages()`. See
+   * `PageManager.replacePages` for the contract.
+   */
+  replacePages(newPages: unknown[]): void;
   destroy(): void;
   readonly state: AppLifecycleState;
   readonly events: IEventBus;
@@ -167,6 +175,10 @@ export function createApp<
     replaceAppContext(newAppContext) {
       if (lifecycle === 'destroyed') return;
       pageManager.replaceAppContext(newAppContext as TAppContext);
+    },
+    replacePages(newPages) {
+      if (lifecycle === 'destroyed') return;
+      pageManager.replacePages(newPages as Page<TPageType>[]);
     },
     destroy() {
       if (lifecycle === 'destroyed') return;

@@ -122,4 +122,100 @@ describe('templateToAppConfig', () => {
     const t: ShopPageType = appConfig.pages[0]!.type;
     expect(t).toBe('home');
   });
+
+  // ---------------------------------------------------------------------
+  // 0.8.0 — rich-field round-trip
+  // ---------------------------------------------------------------------
+
+  test('rich fields — componentSettings round-trip onto appConfig.pages', () => {
+    const template: Template<TestConfig> = {
+      id: 'rich',
+      displayName: 'Rich',
+      description: 'Carries per-page componentSettings.',
+      defaultConfig: {},
+      pages: [
+        {
+          id: 'home',
+          type: 'home',
+          enabled: true,
+          componentSettings: {
+            productRating: { props: { showStars: false } },
+            breadcrumb: { visible: false },
+          },
+        },
+      ],
+    };
+    const appConfig = templateToAppConfig(template, 'wgt_rich');
+    const home = appConfig.pages[0]!;
+    expect(home.componentSettings).toEqual({
+      productRating: { props: { showStars: false } },
+      breadcrumb: { visible: false },
+    });
+  });
+
+  test('rich fields — styles and props round-trip', () => {
+    const template: Template<TestConfig> = {
+      id: 'rich2',
+      displayName: 'Rich2',
+      description: 'Per-page styles + props.',
+      defaultConfig: {},
+      pages: [
+        {
+          id: 'home',
+          type: 'home',
+          enabled: true,
+          styles: { '--accent': '#f00', padding: 16 },
+          props: { layoutVariant: 'wide' },
+        },
+      ],
+    };
+    const appConfig = templateToAppConfig(template, 'wgt_styles');
+    const home = appConfig.pages[0]!;
+    expect(home.styles).toEqual({ '--accent': '#f00', padding: 16 });
+    expect(home.props).toEqual({ layoutVariant: 'wide' });
+  });
+
+  test('rich fields — populated layout replaces the empty-layout placeholder', () => {
+    const template: Template<TestConfig> = {
+      id: 'layout',
+      displayName: 'Layout',
+      description: 'Populated regions.',
+      defaultConfig: {},
+      pages: [
+        {
+          id: 'home',
+          type: 'home',
+          enabled: true,
+          layout: {
+            regionOrder: ['header', 'main'],
+            regions: {
+              header: { id: 'header', components: [] },
+              main: {
+                id: 'main',
+                components: [
+                  { id: 's1', order: 0, componentId: 'productGrid', visible: true },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    };
+    const appConfig = templateToAppConfig(template, 'wgt_layout');
+    const home = appConfig.pages[0]!;
+    expect(home.layout.regionOrder).toEqual(['header', 'main']);
+    expect(home.layout.regions.main?.components[0]?.componentId).toBe('productGrid');
+  });
+
+  test('rich fields — omitted fields stay undefined (no empty-object pollution)', () => {
+    const template = buildTemplate();
+    const appConfig = templateToAppConfig(template, 'wgt_plain');
+    for (const page of appConfig.pages) {
+      expect(page.componentSettings).toBeUndefined();
+      expect(page.props).toBeUndefined();
+      expect(page.styles).toBeUndefined();
+      // Layout still falls back to the empty placeholder, by spec.
+      expect(page.layout).toEqual({ regionOrder: [], regions: {} });
+    }
+  });
 });

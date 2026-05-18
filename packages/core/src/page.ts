@@ -103,11 +103,14 @@ export interface RenderContext<
    * const crumbs = buildCrumbs(ctx.pages, ctx.page.id, ctx.navState);
    * ```
    *
-   * Pages are immutable across hot-swap (snapshot reuse path) — the
-   * framework rebuilds `RenderContext` per render but the underlying
-   * pages array reference stays stable. A remount path can carry a
-   * different `pages` array if the host passed a new template, though
-   * cartridges typically don't swap templates inside `update()`.
+   * Pages stay stable across `update(delta)` hot-swap (snapshot reuse
+   * path) — the framework rebuilds `RenderContext` per render but the
+   * underlying pages array reference stays stable. The reference DOES
+   * change after a successful `updatePages()` call (0.8.0+) — that's
+   * the whole point — and renderers must always read `ctx.pages` rather
+   * than caching the array across renders if they want to see post-
+   * updatePages graphs (breadcrumbs that crumb from `ctx.pages` already
+   * get this for free).
    *
    * Added in 0.7.2.
    */

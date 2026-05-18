@@ -140,10 +140,13 @@ export interface LoadConfigResult<TConfig = unknown> {
    * surfaces as navigation bugs at click time. This is non-feature by
    * design — embed shouldn't re-walk a graph the host just composed.
    *
-   * **No mid-mount swap** — `templatePages` is read once on mount.
-   * `el.update(delta)` cannot change the page graph after mount (delta
-   * is `Partial<TConfig>`, not template). Re-mount via removing and
-   * re-inserting the element if the graph changes for a live widget.
+   * **Mount-time only** — `templatePages` is read once on mount.
+   * Post-mount page-graph changes go through `el.updatePages(nextPages)`
+   * (0.8.0+), which hot-swaps when the diff is covered by
+   * `cartridge.pageHotSwapKeys` and otherwise remounts with
+   * NavigationState preserved. `el.update(delta)` remains scoped to
+   * cartridge config (`Partial<TConfig>`) — the two delta channels are
+   * independent.
    */
   templatePages?: ReadonlyArray<TemplatePage>;
 }
@@ -273,6 +276,9 @@ export interface DefineAiroAppOptions extends SharedLifecycleHooks {
 interface MountHandle {
   destroy: () => void;
   update?: (delta: unknown) => Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown }>;
+  updatePages?: (
+    nextPages: ReadonlyArray<TemplatePage>,
+  ) => Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown }>;
 }
 
 const REGISTERED_ELEMENTS = new Set<string>();
@@ -515,6 +521,24 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
     ): Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown } | null> {
       if (this.disposed || !this.mount || !this.mount.update) return null;
       return this.mount.update(delta);
+    }
+
+    /**
+     * Live page-graph delta (0.8.0) — forwards to the runtime's
+     * `MountCartridgeResult.updatePages()`. Replaces `AppConfig.pages`
+     * with `nextPages` and hot-swaps (re-render the active page in
+     * place) when the diff is covered by `cartridge.pageHotSwapKeys`,
+     * otherwise remounts with NavigationState preserved. Resolves with
+     * `null` under the same conditions as `update()` (never-mounted,
+     * gate-blocked, disconnected).
+     */
+    async updatePages(
+      nextPages: ReadonlyArray<unknown>,
+    ): Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown } | null> {
+      if (this.disposed || !this.mount || !this.mount.updatePages) return null;
+      return this.mount.updatePages(
+        nextPages as ReadonlyArray<TemplatePage>,
+      );
     }
   }
 

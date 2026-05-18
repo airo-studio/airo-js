@@ -194,6 +194,45 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
    * without breaking the surface.
    */
   hotSwapKeys?: Array<keyof TConfig | (string & {})>;
+
+  /**
+   * Per-page field paths that can hot-swap (re-render the active page in
+   * place without remount) when delivered via
+   * `MountCartridgeResult.updatePages()` in `@airo-js/runtime`. Paths NOT
+   * in this list — or any structural page-graph change (added or removed
+   * pages, changed `id` / `type` / `enabled` / `parent`) — trigger a
+   * remount with NavigationState preserved. Defaults to `[]` —
+   * everything remounts.
+   *
+   * Mirror of `hotSwapKeys` but scoped to per-page state on the
+   * framework's `Page<T>` shape rather than cartridge config:
+   *
+   * ```ts
+   * pageHotSwapKeys: ['componentSettings', 'styles', 'layout.regions']
+   * ```
+   *
+   * **Decision criterion** — declare paths where the value can change
+   * WITHOUT invalidating the post-Transformer snapshot. Per-component
+   * prop overrides, per-page styles, and slot visibility / prop changes
+   * are cosmetic from the snapshot's point of view and belong here.
+   * Page-graph structure changes (a new template page, a page type
+   * flip) are always remounts regardless of this list.
+   *
+   * Prefix-match semantics — same as `hotSwapKeys`:
+   *   - `'componentSettings'`                        — covers any `componentSettings.*` change
+   *   - `'componentSettings.productRating.props'`    — covers only that exact subtree
+   *   - `'layout.regions'`                           — covers slot props + visibility (slot reordering
+   *                                                    via `layout.regionOrder` is also covered if
+   *                                                    you include `'layout.regionOrder'` or `'layout'`)
+   *
+   * The framework-curated literals (`'componentSettings'`, `'styles'`,
+   * `'props'`, `'layout'`) give autocomplete; arbitrary dot-paths are
+   * accepted via the `(string & {})` widening, same pattern as
+   * `hotSwapKeys`.
+   */
+  pageHotSwapKeys?: Array<
+    'componentSettings' | 'styles' | 'props' | 'layout' | (string & {})
+  >;
 }
 
 /**

@@ -151,4 +151,4 @@ export const PACKAGE_NAME = '@airo-js/cartridge-kit';
  * `package.json` for the package version; this constant is the
  * separate, load-bearing signal that consumers can train on.
  */
-export const CONTRACT_VERSION = '0.4.0';
+export const CONTRACT_VERSION = '0.5.0';

@@ -137,6 +137,14 @@ export class PageManager<
 > {
   private readonly opts: PageManagerOptions<TPageType, TAppContext>;
   private readonly isGatePage: (pageType: TPageType) => boolean;
+  /**
+   * The active page graph. Mirrors `opts.pages` at construction time so
+   * `replacePages` can swap the reference without forcing every read site
+   * back through `opts`. The runtime's `MountCartridgeResult.updatePages()`
+   * drives this — hot-swapping per-page state (componentSettings / styles /
+   * slot props) without a full mount cycle.
+   */
+  private pages: Page<TPageType>[];
   private navState: NavigationState;
   private appContext: TAppContext;
   private activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
@@ -147,9 +155,10 @@ export class PageManager<
 
   constructor(opts: PageManagerOptions<TPageType, TAppContext>) {
     this.opts = opts;
+    this.pages = opts.pages;
     this.appContext = opts.appContext;
     this.isGatePage = opts.isGatePage ?? (() => false);
-    const entry = findEntryPage(opts.pages, this.isGatePage);
+    const entry = findEntryPage(this.pages, this.isGatePage);
     // Seed precedence: default entry → host-supplied initialNavState →
     // (initRouter below) URL state. Last write wins, so URL beats host
     // config beats default — matches the v3 contract.
@@ -182,18 +191,18 @@ export class PageManager<
 
     const next: NavigationState = { ...this.navState, ...state };
     let targetPage = next.page
-      ? this.opts.pages.find((p) => p.id === next.page)
+      ? this.pages.find((p) => p.id === next.page)
       : undefined;
 
     if (!targetPage || !targetPage.enabled || this.isGatePage(targetPage.type)) {
-      const entry = findEntryPage(this.opts.pages, this.isGatePage);
+      const entry = findEntryPage(this.pages, this.isGatePage);
       if (!entry) return;
       targetPage = entry;
       next.page = entry.id;
     }
 
     if (targetPage.parent) {
-      const parent = this.opts.pages.find((p) => p.id === targetPage!.parent);
+      const parent = this.pages.find((p) => p.id === targetPage!.parent);
       if (!parent) return;
       if (parent.id !== this.activeRendererPageId) {
         this.navigate({ ...next, page: parent.id });
@@ -260,7 +269,7 @@ export class PageManager<
   mountInitial(opts: { hydrate: boolean }): void {
     if (this.destroyed) return;
     const entry = resolveEntryPage(
-      this.opts.pages,
+      this.pages,
       this.isGatePage,
       this.navState.page,
     );
@@ -280,7 +289,7 @@ export class PageManager<
    */
   hydrateEntry(pageId: PageId): void {
     if (this.destroyed) return;
-    const targetPage = this.opts.pages.find((p) => p.id === pageId);
+    const targetPage = this.pages.find((p) => p.id === pageId);
     if (!targetPage || !targetPage.enabled || this.isGatePage(targetPage.type)) return;
 
     const factory = this.opts.resolveRenderer(targetPage.type);
@@ -295,7 +304,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      pages: this.opts.pages,
+      pages: this.pages,
       app: this.appContext,
       events: this.opts.events,
       navState: this.navState,
@@ -369,7 +378,7 @@ export class PageManager<
     const opt = this.opts.enableRouter;
     if (!opt) return;
 
-    const validPages = this.opts.pages
+    const validPages = this.pages
       .filter((p) => !p.parent && !this.isGatePage(p.type))
       .map((p) => p.id);
 
@@ -432,7 +441,7 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      pages: this.opts.pages,
+      pages: this.pages,
       app: this.appContext,
       events: this.opts.events,
       navState: this.navState,
@@ -464,8 +473,45 @@ export class PageManager<
     if (this.destroyed) return;
     this.appContext = newAppContext;
     if (!this.activeRendererPageId) return;
-    const activePage = this.opts.pages.find((p) => p.id === this.activeRendererPageId);
+    const activePage = this.pages.find((p) => p.id === this.activeRendererPageId);
     if (!activePage) return;
+    this.swapRenderer(activePage);
+  }
+
+  /**
+   * Replace the active page graph and re-render the active page in place
+   * with the new `Page<T>` reference. The runtime calls this from
+   * `MountCartridgeResult.updatePages()` when the diff is fully covered
+   * by `cartridge.pageHotSwapKeys` — page-graph structure stays the same
+   * but per-page state (componentSettings / styles / slot props) changes.
+   *
+   * Contract:
+   * - Replaces, does not merge — caller owns the canonical array.
+   * - Looks up the active page in the new array by `id`. Active page id
+   *   must still exist; if it doesn't, the runtime should have classified
+   *   the diff as structural and routed to remount instead.
+   * - Destroys + re-instantiates the active renderer with a fresh
+   *   `RenderContext` whose `page` and `pages` reflect the new graph.
+   * - NavigationState preserved; no `navigation:changed` emission and no
+   *   router push (this is a cosmetic delta, not a navigation event).
+   *
+   * No-op when destroyed, when no active page is mounted, or when the
+   * active page id no longer resolves in the new graph (defensive — the
+   * runtime classifier prevents this case under correct use).
+   */
+  replacePages(newPages: Page<TPageType>[]): void {
+    if (this.destroyed) return;
+    this.pages = newPages;
+    if (!this.activeRendererPageId) return;
+    const activePage = newPages.find((p) => p.id === this.activeRendererPageId);
+    if (!activePage) {
+      // Defensive — runtime should have classified this as structural.
+      // Tear down the stranded renderer rather than leaving stale DOM up.
+      this.activeRenderer?.destroy();
+      this.activeRenderer = null;
+      this.activeRendererPageId = null;
+      return;
+    }
     this.swapRenderer(activePage);
   }
 }

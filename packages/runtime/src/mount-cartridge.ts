@@ -45,9 +45,11 @@ import {
 } from '@airo-js/core';
 import type {
   App,
+  AppConfig,
   IEventBus,
   IsolationRoot,
   NavigationState,
+  Page,
   RouterOption,
   StyleIsolation,
   UpdateResult,
@@ -60,6 +62,7 @@ import type {
   DataSourceInput,
   DeepPartial,
   Template,
+  TemplatePage,
 } from '@airo-js/cartridge-kit';
 import { createCartridgeApp, templateToAppConfig } from '@airo-js/cartridge-kit';
 
@@ -131,7 +134,7 @@ export interface MountCartridgeOptions<
    */
   config: TConfig;
   /** Picked template. The runtime builds AppConfig from `template.pages[]`. */
-  template: Template<TConfig>;
+  template: Template<TConfig, TPageType>;
   /** Element the runtime mounts into. */
   host: HTMLElement;
 
@@ -271,7 +274,10 @@ export type { UpdateResult };
  * default preserves backward compatibility for callers that don't
  * propagate the type parameter.
  */
-export type MountCartridgeResult<TConfig = unknown> =
+export type MountCartridgeResult<
+  TConfig = unknown,
+  TPageType extends string = string,
+> =
   | {
       app: App;
       blocked: false;
@@ -294,6 +300,31 @@ export type MountCartridgeResult<TConfig = unknown> =
        * that returns `'block'` — same surface as initial mount blocking.
        */
       update: (delta: DeepPartial<TConfig>) => Promise<UpdateResult>;
+      /**
+       * Live page-graph dispatcher (0.8.0). Replaces (does NOT merge)
+       * `AppConfig.pages` with `nextPages` and classifies the per-page
+       * diff against `cartridge.pageHotSwapKeys`:
+       *
+       *  - Covered diff → hot-swap. The active renderer is re-rendered
+       *    with the new `ctx.page` and `ctx.pages`; the existing
+       *    post-Transformer snapshot is reused (pages are cosmetic from
+       *    the snapshot's point of view).
+       *  - Uncovered diff OR any structural change (added / removed
+       *    pages, changed `id` / `type` / `enabled` / `parent`) →
+       *    remount. NavigationState preserved across destroy/recreate
+       *    the same way `update(delta)`'s remount path preserves it.
+       *
+       * The hot-swap path needs `cartridge.pageHotSwapKeys` to declare
+       * which page fields are cosmetic. Common allowlists:
+       * `['componentSettings', 'styles', 'layout.regions']` covers the
+       * per-component override + page-style + slot-prop / slot-visibility
+       * surface that a Component-panel editor writes.
+       *
+       * Async + throws on blocked-gate remount, same surface as `update`.
+       */
+      updatePages: (
+        nextPages: ReadonlyArray<TemplatePage<TPageType>>,
+      ) => Promise<UpdateResult>;
     }
   | {
       app: null;
@@ -327,7 +358,7 @@ export async function mountCartridge<
   TPageType extends string = string,
 >(
   opts: MountCartridgeOptions<TData, TConfig, TPageType>,
-): Promise<MountCartridgeResult<TConfig>> {
+): Promise<MountCartridgeResult<TConfig, TPageType>> {
   const isolation: StyleIsolation = opts.styleIsolation ?? 'shadow';
   const mode: 'csr' | 'hydrate' = opts.mode ?? 'csr';
   const events: IEventBus = opts.events ?? new EventBus();
@@ -392,9 +423,9 @@ export async function mountCartridge<
   };
   opts.onShellReady?.(shell);
 
-  // === Mutable state across remounts (`update`) ===
+  // === Mutable state across remounts (`update` / `updatePages`) ===
   // The result handle the caller holds remains stable; we swap the
-  // underlying App + snapshot here when a remount path runs.
+  // underlying App + snapshot + pages here when a remount path runs.
   //
   // Declared up front (before `doMountInner` is defined) so the `update`
   // closure below can be wired through to renderers as `ctx.update` BEFORE
@@ -405,9 +436,18 @@ export async function mountCartridge<
   // `ctx.update` during their first render anyway (it fires from listener
   // handlers triggered post-mount), so the defensive guard in `update`
   // below is purely a safety net.
+  //
+  // `widgetId` captured once so a no-widgetId call doesn't generate a
+  // fresh `Date.now()` appId on every remount (stable handle for SSR
+  // hydration markers + analytics).
+  const widgetId = opts.widgetId ?? `${opts.cartridge.id}-${Date.now()}`;
   let currentApp: App | null = null;
   let currentSnapshot: TData | undefined = undefined;
   let currentConfig: TConfig = opts.config;
+  let currentPages: Page<TPageType>[] = templateToAppConfig<TConfig, TPageType>(
+    opts.template,
+    widgetId,
+  ).pages;
 
   // === Live update dispatcher (defined before doMountInner so the
   // `hostUpdate` wrapper below can reference it forward-of-call) ===
@@ -462,6 +502,62 @@ export async function mountCartridge<
     return { mode: 'hot-swap', navState };
   };
 
+  // === Live page-graph dispatcher ===
+  // Classify the per-page diff against `cartridge.pageHotSwapKeys`. Any
+  // structural change (page added / removed / reordered, or `id` / `type`
+  // / `enabled` / `parent` flip on an existing entry) skips the
+  // classifier and routes straight to remount — page graph shape is
+  // always structural regardless of the allowlist.
+  const updatePages = async (
+    nextPagesTemplate: ReadonlyArray<TemplatePage<TPageType>>,
+  ): Promise<UpdateResult> => {
+    if (!currentApp || currentSnapshot === undefined) {
+      throw new Error(
+        '[@airo-js/runtime] updatePages() called before mount completed or after destroy(). Wait for `await mountCartridge(...)` to resolve before invoking, and stop calling updatePages from renderers post-destroy.',
+      );
+    }
+    // Translate via the same helper as the initial mount + remount paths
+    // so any future rich-field addition flows through one source of truth.
+    const nextAppConfig = templateToAppConfig<TConfig, TPageType>(
+      { ...opts.template, pages: [...nextPagesTemplate] },
+      widgetId,
+    );
+    const nextPages = nextAppConfig.pages;
+    const navState = currentApp.getNavigationState();
+    const allowed = (opts.cartridge.pageHotSwapKeys ?? []).map(String);
+    const canHotSwap = pagesDiffIsCoveredByHotSwap(
+      currentPages,
+      nextPages,
+      allowed,
+    );
+
+    if (!canHotSwap) {
+      currentApp.destroy();
+      if (isolationRoot.isolated) {
+        renderRoot.innerHTML = '';
+      }
+      // Set `currentPages` BEFORE doMountInner so Phase 4 reads the new
+      // graph. doMountInner consumes `currentPages` directly.
+      currentPages = nextPages;
+      const next = await doMountInner(currentConfig, navState);
+      if (next.result.blocked) {
+        throw new Error(
+          `[@airo-js/runtime] updatePages() remount was blocked by gate "${next.result.blockedBy}". Resolve the gate or revert the offending page-graph delta.`,
+        );
+      }
+      currentApp = next.result.app;
+      currentSnapshot = next.snapshot;
+      return { mode: 'remount', navState };
+    }
+
+    // Hot-swap path. Snapshot reused; replace pages on the live App and
+    // let PageManager re-render the active page in place with the new
+    // `ctx.page` / `ctx.pages`.
+    currentApp.replacePages(nextPages);
+    currentPages = nextPages;
+    return { mode: 'hot-swap', navState };
+  };
+
   // Type-erased wrapper passed to PageManager as `hostUpdate`. Cast is
   // safe at runtime — `update()` walks the delta via `leafPaths` regardless
   // of the static type, and cartridge-side callers wrap in
@@ -511,7 +607,10 @@ export async function mountCartridge<
     }
 
     // Phase 3 — pipeline.
-    const firstPage = opts.template.pages.find((p) => p.enabled && !p.parent);
+    // Use the live `currentPages` snapshot (not `opts.template.pages`) so
+    // a remount triggered after `updatePages()` reflects the swapped graph
+    // when picking the entry page.
+    const firstPage = currentPages.find((p) => p.enabled && !p.parent);
     if (!firstPage) {
       const err = new Error(
         '[@airo-js/runtime] mountCartridge: template has no enabled entry page.',
@@ -538,13 +637,15 @@ export async function mountCartridge<
     opts.onPipelineComplete?.(snapshot);
 
     // Phase 4 — createCartridgeApp.
-    // AppConfig translation lives in @airo-js/cartridge-kit so SSR callers
-    // (renderAppWithPublication, renderAppToHTML) consume the same helper —
-    // single source of truth for the Template → AppConfig shape.
-    const appConfig = templateToAppConfig<TConfig, TPageType>(
-      opts.template,
-      opts.widgetId ?? `${opts.cartridge.id}-${Date.now()}`,
-    );
+    // AppConfig is built from the live `currentPages` snapshot so the
+    // remount path triggered by `updatePages()` carries the new page
+    // graph. Initial mount + `update(delta)` remount both still consume
+    // the template-derived pages via the `currentPages` initialization
+    // above — single state, no drift.
+    const appConfig: AppConfig<TPageType> = {
+      appId: widgetId,
+      pages: currentPages,
+    };
     let result: CartridgeAppResult;
     try {
       result = await createCartridgeApp<TData, TConfig, TPageType>(
@@ -632,6 +733,7 @@ export async function mountCartridge<
     shell,
     destroy,
     update,
+    updatePages,
   };
 }
 
@@ -726,5 +828,136 @@ export function deepMerge<T>(base: T, delta: unknown): T {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Structural fields that always force a page-graph remount when they
+ * differ between current and next pages. Listed here (not derived from
+ * `keyof Page`) because the framework's classifier is the contract — a
+ * future Page widening shouldn't silently upgrade fields into the
+ * "always-remount" set.
+ */
+const STRUCTURAL_PAGE_KEYS = ['id', 'type', 'enabled', 'parent'] as const;
+type StructuralPageKey = (typeof STRUCTURAL_PAGE_KEYS)[number];
+
+/**
+ * Decide whether a `currentPages` → `nextPages` swap can hot-swap (true)
+ * or must remount (false). Hot-swap requires:
+ *
+ *  - Same number of pages, same id sequence (no add / remove / reorder).
+ *  - Every page matched 1:1 by id with identical structural fields
+ *    (`id` / `type` / `enabled` / `parent`).
+ *  - Every leaf-path that differs between `current[i]` and `next[i]` on
+ *    the non-structural fields (`layout` / `props` / `styles` /
+ *    `componentSettings`) is covered by `allowed` via the same
+ *    prefix-match rule used by `isCovered`.
+ *
+ * Anything else → remount with NavigationState preserved.
+ *
+ * Exported for tests; otherwise module-internal.
+ */
+export function pagesDiffIsCoveredByHotSwap<TPageType extends string>(
+  current: ReadonlyArray<Page<TPageType>>,
+  next: ReadonlyArray<Page<TPageType>>,
+  allowed: string[],
+): boolean {
+  if (current.length !== next.length) return false;
+  for (let i = 0; i < next.length; i++) {
+    const cur = current[i];
+    const nxt = next[i];
+    if (!cur || !nxt) return false;
+    // Same-index id match — page reorder still counts as structural
+    // because the entry-page resolution + ctx.pages iteration order
+    // matter for renderers that index pages positionally.
+    for (const k of STRUCTURAL_PAGE_KEYS) {
+      if (cur[k as StructuralPageKey] !== nxt[k as StructuralPageKey]) {
+        return false;
+      }
+    }
+    // Non-structural diff: compute leaf paths of the difference, then
+    // require every one to fall under `allowed`. Any uncovered path
+    // routes to remount.
+    const diff = diffLeafPaths(cur, nxt, '', new Set(STRUCTURAL_PAGE_KEYS));
+    if (diff.some((p) => !isCovered(p, allowed))) return false;
+  }
+  return true;
+}
+
+/**
+ * Leaf-path diff between two values. Returns the dot-paths at which
+ * `a` and `b` differ (`a` missing the key, `b` missing the key, or
+ * holding different leaf values). Arrays are leaves — a structurally
+ * different array reports the array's path itself, not per-index paths,
+ * mirroring `leafPaths`' "arrays are leaves" rule.
+ *
+ * Deep-equal short-circuit: distinct references holding structurally
+ * identical content return no paths. This matters for page-graph
+ * comparison — a host that rebuilds `templatePages` from React state on
+ * every render passes fresh references for `layout`, `componentSettings`,
+ * etc., and reference-only equality would always classify those as
+ * diff'd even when nothing changed.
+ *
+ * `skipKeys` is consulted only at the top level (`prefix === ''`), so
+ * callers can exclude structural fields without leaking the exclusion
+ * into nested diffs.
+ *
+ * Exported for tests; otherwise module-internal.
+ */
+export function diffLeafPaths(
+  a: unknown,
+  b: unknown,
+  prefix = '',
+  skipKeys?: ReadonlySet<string>,
+): string[] {
+  if (deepEqual(a, b)) return [];
+  if (!isPlainObject(a) || !isPlainObject(b)) {
+    return prefix ? [prefix] : [];
+  }
+  const keys = new Set<string>([...Object.keys(a), ...Object.keys(b)]);
+  const out: string[] = [];
+  for (const k of keys) {
+    if (!prefix && skipKeys?.has(k)) continue;
+    const av = (a as Record<string, unknown>)[k];
+    const bv = (b as Record<string, unknown>)[k];
+    out.push(...diffLeafPaths(av, bv, prefix ? `${prefix}.${k}` : k));
+  }
+  return out;
+}
+
+/**
+ * Structural deep equality — recurses into plain objects + arrays,
+ * primitives compared via `Object.is` (so `NaN === NaN`, `+0 !== -0`
+ * matches the engine's semantics). Used by `diffLeafPaths` for the
+ * short-circuit + by `pagesDiffIsCoveredByHotSwap` indirectly through
+ * that helper. Module-internal; tests cover the deep-equal behaviour
+ * via `diffLeafPaths` and `pagesDiffIsCoveredByHotSwap`.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (
+        !deepEqual(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k],
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
