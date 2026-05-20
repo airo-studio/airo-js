@@ -263,6 +263,51 @@ my-cartridge/
 
 Browser builds import `<my-cartridge>/runtime`; SSR / publication-runner builds import `<my-cartridge>/full`. Cartridge author writes the split once. Bundlers tree-shake at the package boundary.
 
+### 2.5b Chunked-client cartridge for per-page browser splitting
+
+**Different axis from §2.5; the two compose.** §2.5 splits along the **build target** (browser-safe code vs server-with-adapters). §2.5b splits along **factory resolution** (which page renderer factory is in the bundle today vs arrives later via mailbox). A storefront that ships publication adapters AND per-page chunks does both.
+
+**The trap:** a chunked browser bundle still ships every page renderer's factory in the cartridge envelope's `views: [...]` array, because `views` is required and the resolver short-circuits on a static match before consulting the mailbox. The `pushToMailbox` chunks register their factories under the same `pageType` keys — never reached. Bundle stays monolithic; chunking does nothing.
+
+**Why it matters:** per-page chunks are the difference between a 25–50 KB active-page bundle and a 100+ KB everything-bundle. Mailbox-driven late binding is the framework's primitive for this.
+
+**The fix:** ship two cartridge artifacts with a shared envelope and a different `views` shape:
+
+```
+my-cartridge/
+├── parts/
+│   ├── schema.ts                 ← shared
+│   ├── transformers.ts           ← shared
+│   ├── data-sources.ts           ← shared
+│   ├── views/                    ← per-page renderers (each chunked separately)
+│   ├── publication-adapters/     ← server-only (per §2.5)
+│   └── mcp-tools.ts              ← server-only (per §2.5)
+├── runtime.ts                    ← browser entry: views: [], factories arrive via pushToMailbox
+└── full.ts                       ← server entry: views: [full list with factories + capabilities],
+                                     re-exports adapters + mcpTools
+```
+
+The browser cartridge's `views: []` is what makes the mailbox the active resolution path. Each per-page chunk:
+
+```ts
+// dist/chunks/my-cartridge-quickshop.js
+import { pushToMailbox } from '@airo-js/core';
+pushToMailbox('__AIRO_MY_CARTRIDGE_PAGES__', {
+  key: 'quickshop',
+  factory: () => new QuickshopRenderer(),
+});
+```
+
+The server cartridge keeps `views: [...]` with full factories + capabilities — SSR uses `templateOnly()` factories that have no hydrate code, so chunking saves no bytes on the server.
+
+**Do NOT ship placeholder factories.** The framework's resolver checks the static `views[]` array first ([packages/cartridge-kit/src/cartridge-registry.ts:62-80](packages/cartridge-kit/src/cartridge-registry.ts#L62-L80)) and short-circuits on `pageType` match. A placeholder factory permanently blocks the mailbox path for that `pageType`. Empty array means "all factories arrive via mailbox."
+
+**`capabilities` lives on the server cartridge only.** SSR coverage gating and adapter routing both consume `ViewDefinition.capabilities`; the browser doesn't filter on it. Maintaining capabilities in one place (server cartridge) is the correct mental model.
+
+**Multi-version-on-same-page = same cartridge id, same mailbox.** Two browser instances of the same cartridge at different patch versions share one mailbox; their factories collide on `pageType` and last-write-wins. This is the framework's contract for semver patch interchangeability. If two majors must coexist (1.x → 2.x migration), declare them as separate cartridges with different `id` and `mailboxName`.
+
+**Subscribe to `'renderer:missing'` for chunk-load orchestration.** When the active page's chunk hasn't loaded yet, `PageManager.swapRenderer` soft-fails (warns + skips paint) and emits `'renderer:missing'` on the App event bus with `{ pageType, pageId, phase }`. Host apps wire a skeleton / spinner UI and re-navigate to the page once the chunk's `pushToMailbox` lands. The framework does NOT retry on its own; one missing-resolve → one event, host drives the rest.
+
 ### 2.6 Subfolder-per-page beats flat `views/`
 
 **The trap:** flat `views/CategoriesRenderer.ts`, `views/ProductsRenderer.ts`, etc. Works for skeletons; breaks once renderers gain sub-views, page-specific styles, scoped components.

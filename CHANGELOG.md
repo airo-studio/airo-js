@@ -6,6 +6,38 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/cartridge-kit` 0.8.2 — 2026-05-20
+
+Docs-only patch. Renames a terminology collision flagged on the bridge cross-check.
+
+### Changed
+- `Cartridge.views` JSDoc — the chunked-browser-bundle pattern is now called the **"chunked-client cartridge pattern"** (was: "two-envelope pattern", which collided with `docs/best-practices.md` §2.5's existing use of "two-envelope" for the `runtime.ts` / `full.ts` build-target split). The two patterns are orthogonal and frequently combined — added cross-link to §2.5b.
+
+### Notes
+- Zero contract surface change. `CONTRACT_VERSION` stays at `0.5.0`.
+
+## `@airo-js/core` 0.8.2 — 2026-05-20
+
+Docs-only patch.
+
+### Changed
+- `decodeNavHint` JSDoc broadened — previously framed as a "Server-side SSR helper" because of its first use case, but the function is pure URL/string parsing with a mandatory `validPages` allowlist gate and runs cleanly in any environment. JSDoc now documents both the SSR-runner and browser-bootstrap call sites alongside each other (symmetric trust gate is the design intent for SSR-then-hydrate).
+
+## `@airo-js/runtime` 0.8.2 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.2 line. No source change.
+
+## `@airo-js/ssr` 0.8.2 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.2 line. No source change.
+
+## `@airo-js/embed` 0.8.2 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.2 line. No source change.
+
+### Docs (not a package, but landed in this commit)
+- `docs/best-practices.md` adds **§2.5b — Chunked-client cartridge for per-page browser splitting**, the canonical write-up the JSDoc on `Cartridge.views` cross-links into. Clarifies that the chunked-client pattern (factory-resolution axis) is orthogonal to §2.5's two-envelope pattern (build-target axis), and that a real cartridge often does both: `runtime.ts` carries the chunked-client cartridge (`views: []`); `full.ts` swaps in the full views list plus server-only publication adapters + MCP tools. Includes the placeholder-factory anti-pattern, server-only `capabilities`, multi-version-on-same-page semantics, and the `'renderer:missing'` event integration.
+
 ## `@airo-js/core` 0.8.1 — 2026-05-20
 
 `'renderer:missing'` event — observability for lazy-loaded page chunks.

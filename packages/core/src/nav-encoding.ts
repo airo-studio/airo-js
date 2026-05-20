@@ -107,15 +107,26 @@ export function fragmentToState(
 }
 
 /**
- * Server-side SSR helper. Decode a navHint (the bare fragment from
- * a `?nav=...` query param, a path tail from `extractPathTail`, or
- * the slice of `window.location.hash` after `#`) into a RouteState
- * the SSR runner can pass as `entryPageId` to
- * `renderAppWithPublication`.
+ * URL nav-hint decoder. Used by BOTH sides of the SSR-then-hydrate
+ * boundary to derive an entry page from a URL-encoded hint:
  *
- * `validPages` is mandatory here — server-side decoding is the place
- * where untrusted URL data crosses into the framework, so the
- * allowlist gate fails closed by default.
+ *   - **Server (SSR runner)** — decode the hint forwarded by the embed
+ *     loader (`?nav=...` query param, or a path tail from
+ *     `extractPathTail`) into a `RouteState` the SSR runner passes as
+ *     `entryPageId` to `renderAppWithPublication`.
+ *   - **Browser (runtime bootstrap)** — decode the same hint (the slice
+ *     of `window.location.hash` after `#`, or whatever the embed shim
+ *     hands through) so the client mounts the SAME entry page the
+ *     server rendered. Symmetric trust gate using the same
+ *     `validPages` allowlist on both sides keeps hydration honest.
+ *
+ * Pure string/URL parsing — no DOM, no Node-specific imports. Safe to
+ * call from anywhere.
+ *
+ * `validPages` is mandatory because navHint is untrusted URL data
+ * crossing into the framework. The allowlist gate fails closed by
+ * default; pass the cartridge's known page-id set or the active
+ * cartridge's `template.pages.map(p => p.id)`.
  */
 export function decodeNavHint(
   hint: string | null | undefined,

@@ -112,14 +112,23 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
    * framework's resolver walks this list first and short-circuits on
    * `pageType` match. This is the default and the simplest shape.
    *
-   * **Chunked browser bundle (two-envelope pattern)** — when page
-   * renderers ship as separate code-split chunks (`product.chunk.js`,
-   * `quickshop.chunk.js`, etc.), the BROWSER cartridge declares
-   * `views: []` and lets each chunk self-register via
-   * `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })`
+   * **Chunked browser bundle (chunked-client cartridge pattern)** —
+   * when page renderers ship as separate code-split chunks
+   * (`product.chunk.js`, `quickshop.chunk.js`, etc.), the BROWSER
+   * cartridge declares `views: []` and lets each chunk self-register
+   * via `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })`
    * at load time. The SERVER cartridge keeps the full `views: [...]`
    * with factories + capabilities (server SSR has no hydrate code to
    * split and benefits from one-load-per-worker).
+   *
+   * This is the **factory-resolution axis** of cartridge bundle
+   * splitting. It is orthogonal to the build-target axis (`runtime.ts`
+   * vs `full.ts`, a.k.a. the "two-envelope pattern" in
+   * `docs/best-practices.md` §2.5) — a single cartridge may apply
+   * both: `runtime.ts` exports the chunked-client cartridge
+   * (`views: []`, no MCP / publication adapters), `full.ts` swaps in
+   * the full views list plus server-only primitives. See
+   * `docs/best-practices.md` §2.5b for the canonical write-up.
    *
    * Do NOT ship placeholder factories on the browser cartridge — the
    * resolver checks `views[]` BEFORE consulting the mailbox, so a
