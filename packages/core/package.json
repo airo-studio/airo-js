@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/core",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Airo core runtime — createApp, PageManager, EventBus, HashRouter, Theme, IsolationRoot, RuntimePipeline, registry mailbox.",
   "keywords": [
     "airo",

@@ -103,7 +103,36 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
    */
   gates?: Gate<TConfig>[];
 
-  /** Views — PageRenderer factories, keyed by page.type. */
+  /**
+   * Views — `ViewDefinition` entries keyed by `pageType`. Two valid
+   * shapes depending on how the cartridge ships its renderers:
+   *
+   * **Monolithic bundle** — every view in one build artifact. Declare
+   * the full `views: [...]` array with factories + capabilities. The
+   * framework's resolver walks this list first and short-circuits on
+   * `pageType` match. This is the default and the simplest shape.
+   *
+   * **Chunked browser bundle (two-envelope pattern)** — when page
+   * renderers ship as separate code-split chunks (`product.chunk.js`,
+   * `quickshop.chunk.js`, etc.), the BROWSER cartridge declares
+   * `views: []` and lets each chunk self-register via
+   * `pushToMailbox(cartridge.mailboxName, { key: pageType, factory })`
+   * at load time. The SERVER cartridge keeps the full `views: [...]`
+   * with factories + capabilities (server SSR has no hydrate code to
+   * split and benefits from one-load-per-worker).
+   *
+   * Do NOT ship placeholder factories on the browser cartridge — the
+   * resolver checks `views[]` BEFORE consulting the mailbox, so a
+   * placeholder permanently blocks the mailbox path for that
+   * `pageType`. Empty array means "all factories arrive via mailbox."
+   *
+   * `capabilities` (declared per `ViewDefinition`) is consumed by SSR
+   * coverage gating + adapter routing — they only matter on the
+   * SERVER cartridge. The browser doesn't need them.
+   *
+   * See `getDefaultRenderResolver` and `createCartridgeRegistry` in
+   * this package for the resolver order.
+   */
   views: ViewDefinition<TData, TConfig>[];
 
   /** Pre-composed (view-set, default config) bundles for the host app's template picker. */
@@ -136,9 +165,32 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
   defaultTemplateId: string;
 
   /**
-   * Mailbox name for this cartridge's view chunks. Each cartridge gets its
-   * own namespace so two cartridges in the same host app don't collide.
-   * Convention: `__AIRO_<CARTRIDGE_ID>_PAGES__` (uppercase, underscored).
+   * Mailbox name for this cartridge's view chunks. The global symbol
+   * (`window[mailboxName]`) is the stub-queue that lazy-loaded page
+   * chunks push their factories into; the framework's registry drains
+   * the queue and replaces it with a live-registering proxy. See
+   * `createRegistry` / `pushToMailbox` in `@airo-js/core`.
+   *
+   * **Naming:** `__AIRO_<CARTRIDGE_ID>_PAGES__` (uppercase,
+   * underscored). The framework doesn't enforce the convention; pick
+   * any string. What matters is that the cartridge declaration here
+   * and the `pushToMailbox(name, ...)` call inside each page chunk
+   * agree on the exact string.
+   *
+   * **Mailbox identity = cartridge identity, not patch version.** The
+   * framework assumes patch versions of the same cartridge id are
+   * interchangeable (semver patch contract). Two browser instances of
+   * the same cartridge pinned to different patches (e.g. `0.1.3` +
+   * `0.1.5`) share the same mailbox; their pushed factories collide on
+   * `pageType` and last-write-wins. This is fine when patches are
+   * interchangeable, and a versioning bug when they aren't. If you
+   * genuinely need isolation (e.g. a 1.x → 2.x migration where both
+   * majors must coexist on the same page), declare them as separate
+   * cartridges with different `id` and different `mailboxName`.
+   *
+   * **Same-cartridge multi-instance is fine.** Two widgets on one page
+   * running the same cartridge at the same patch version share one
+   * mailbox + one chunk fetch — that's the intended efficiency.
    */
   mailboxName: string;
 

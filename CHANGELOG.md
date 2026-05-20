@@ -6,6 +6,40 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/core` 0.8.1 — 2026-05-20
+
+`'renderer:missing'` event — observability for lazy-loaded page chunks.
+
+### Added
+- `PageManager` emits `'renderer:missing'` on the App event bus when `resolveRenderer(pageType)` returns `undefined` and the framework soft-fails the paint. Fires on both the CSR `navigate` path and the SSR-hydrate path. Payload: `{ pageType: string; pageId: string; phase: 'navigate' | 'hydrate' }`.
+- Studios that lazy-load page chunks subscribe to this event to render a skeleton / spinner while the chunk fetch is in flight, then re-navigate to the page once `pushToMailbox` registers the factory. Replaces the previous workaround of monkey-patching the warn-log line. Documented in the `PageManager` JSDoc alongside the existing `'navigation:changed'` event.
+
+### Notes
+- Event fires once per missing-resolve attempt; PageManager does NOT retry on its own. Subscribers re-navigate or invoke `app.navigate(state)` after their chunk-load callback resolves to drive the next attempt.
+
+## `@airo-js/cartridge-kit` 0.8.1 — 2026-05-20
+
+JSDoc clarifications on the two-envelope chunking pattern.
+
+### Changed
+- `Cartridge.views` JSDoc — documents both shapes: monolithic (`views: [...]` with factories) and chunked browser bundles (`views: []`, factories arrive via `pushToMailbox` from each page chunk; server cartridge keeps the full views list). Warns against shipping placeholder factories — the resolver checks `views[]` first and a placeholder permanently blocks the mailbox path for that `pageType`.
+- `Cartridge.mailboxName` JSDoc — documents the mailbox-identity contract: mailbox identity = cartridge identity, not patch version. Patch versions of the same cartridge are assumed interchangeable (semver patch). If two majors must coexist on the same page, declare them as separate cartridges with different `id` and `mailboxName`.
+
+### Notes
+- Pure documentation patch — no surface change. `CONTRACT_VERSION` stays at `0.5.0`.
+
+## `@airo-js/runtime` 0.8.1 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.1 line. No source change. The new `'renderer:missing'` event is observable through `mountCartridge` opts.events when consumers supply their own EventBus.
+
+## `@airo-js/ssr` 0.8.1 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.1 line. No source change.
+
+## `@airo-js/embed` 0.8.1 — 2026-05-20
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.1 line. No source change.
+
 ## `@airo-js/cartridge-kit` 0.8.0 — 2026-05-18
 
 Rich `TemplatePage` round-trip + `cartridge.pageHotSwapKeys` for live page-graph deltas. Closes the contract gap reported on the bridge: pre-0.8 `templateToAppConfig` dropped `componentSettings` / `styles` / `props` / `layout` on the floor, so `resolveComponentProp` had no path to honour per-page overrides — half-built feature.

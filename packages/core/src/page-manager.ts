@@ -7,8 +7,22 @@
  * module talks to PageManager, never to its peers.
  *
  * Headless: PageManager never paints DOM beyond delegating to the active
- * renderer. Anything visual (breadcrumbs, chrome) subscribes to
- * `navigation:changed` on the event bus and renders itself.
+ * renderer. Anything visual (breadcrumbs, chrome) subscribes to events on
+ * the bus and renders itself.
+ *
+ * **Emits:**
+ *   - `'navigation:changed'` — payload: `NavigationState`. Fires after
+ *     every successful `navigate()` and `hydrateEntry()`. Subscribe for
+ *     breadcrumbs, chrome, analytics.
+ *   - `'renderer:missing'` — payload:
+ *     `{ pageType: string; pageId: string; phase: 'navigate' | 'hydrate' }`.
+ *     Fires when `resolveRenderer(pageType)` returns `undefined` and
+ *     PageManager soft-fails the paint (warns + returns without rendering).
+ *     Studios that lazy-load page chunks subscribe to this to render a
+ *     skeleton / spinner / "loading…" UI while the chunk fetch is in
+ *     flight, then re-navigate to the page once `pushToMailbox` registers
+ *     the factory. The event fires once per missing-resolve attempt; it
+ *     does NOT retry on its own.
  *
  * Generic over `TPageType` (a string narrowing — domain apps narrow this
  * to their own enum) and over `TAppContext` (the opaque bag of app-level
@@ -298,6 +312,11 @@ export class PageManager<
         pageType: targetPage.type,
         phase: 'hydrate',
       });
+      this.opts.events.emit('renderer:missing', {
+        pageType: targetPage.type,
+        pageId: targetPage.id,
+        phase: 'hydrate',
+      });
       return;
     }
 
@@ -435,6 +454,11 @@ export class PageManager<
         `no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
         { pageType: targetPage.type, phase: 'navigate' },
       );
+      this.opts.events.emit('renderer:missing', {
+        pageType: targetPage.type,
+        pageId: targetPage.id,
+        phase: 'navigate',
+      });
       return;
     }
 

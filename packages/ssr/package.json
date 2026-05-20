@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/ssr",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Airo SSR — runtime-agnostic edge dispatch, renderAppToHTML, and publication-adapter execution.",
   "keywords": [
     "airo",
