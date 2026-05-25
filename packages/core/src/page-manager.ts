@@ -306,16 +306,25 @@ export class PageManager<
     const targetPage = this.pages.find((p) => p.id === pageId);
     if (!targetPage || !targetPage.enabled || this.isGatePage(targetPage.type)) return;
 
+    // Idempotency contract — repeat calls for the same already-hydrated
+    // page are a no-op. Without this guard, a recovery path that races
+    // itself (two consumer paths firing `app.hydratePage(activePageId)`
+    // off the same chunk-load event) calls `factory()` twice and stacks
+    // a fresh renderer over the live one. The previous renderer is
+    // never `destroy()`-ed, so its hydrate cleanup never runs and its
+    // event-bus listeners + component instances orphan — visible as
+    // duplicated DOM, double-fired handlers, "ghost" subscribers.
+    if (this.activeRenderer && this.activeRendererPageId === pageId) {
+      return;
+    }
+
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
-      log.warn(`no renderer registered for page type "${targetPage.type}". Hydrate skipped.`, {
-        pageType: targetPage.type,
-        phase: 'hydrate',
-      });
-      this.opts.events.emit('renderer:missing', {
+      emitRendererMissing(this.opts.events, {
         pageType: targetPage.type,
         pageId: targetPage.id,
         phase: 'hydrate',
+        missingHint: 'Hydrate skipped.',
       });
       return;
     }
@@ -450,14 +459,11 @@ export class PageManager<
 
     const factory = this.opts.resolveRenderer(targetPage.type);
     if (!factory) {
-      log.warn(
-        `no renderer registered for page type "${targetPage.type}". The matching chunk may not have loaded yet.`,
-        { pageType: targetPage.type, phase: 'navigate' },
-      );
-      this.opts.events.emit('renderer:missing', {
+      emitRendererMissing(this.opts.events, {
         pageType: targetPage.type,
         pageId: targetPage.id,
         phase: 'navigate',
+        missingHint: 'The matching chunk may not have loaded yet.',
       });
       return;
     }
@@ -538,4 +544,42 @@ export class PageManager<
     }
     this.swapRenderer(activePage);
   }
+}
+
+/**
+ * Emit the `'renderer:missing'` event and log at the appropriate level.
+ *
+ * Chunked-client cartridges (`docs/best-practices.md` §2.5b) catch this
+ * event to drive their lazy-chunk recovery flow — so when a subscriber
+ * is wired, the missing-factory case is a documented *happy-path*
+ * recovery signal, not a misconfiguration. We log at `info` in that
+ * case to avoid red triangles in DevTools during normal cold-hydrate
+ * recovery. When nobody's listening, the log stays at `warn` because
+ * the missing factory IS a real misconfiguration the host needs to
+ * notice — same signal as before for hosts that haven't wired the
+ * pattern.
+ */
+function emitRendererMissing(
+  events: IEventBus,
+  payload: {
+    pageType: string;
+    pageId: string;
+    phase: 'navigate' | 'hydrate';
+    /** Phase-specific suffix on the log message (e.g. "Hydrate skipped."). */
+    missingHint: string;
+  },
+): void {
+  const wired = events.listenerCount('renderer:missing') > 0;
+  const message = `no renderer registered for page type "${payload.pageType}". ${payload.missingHint}`;
+  const meta = { pageType: payload.pageType, phase: payload.phase };
+  if (wired) {
+    log.info(message, meta);
+  } else {
+    log.warn(message, meta);
+  }
+  events.emit('renderer:missing', {
+    pageType: payload.pageType,
+    pageId: payload.pageId,
+    phase: payload.phase,
+  });
 }

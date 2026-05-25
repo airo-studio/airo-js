@@ -18,6 +18,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { EventBus, pushToMailbox } from '@airo-js/core';
 import type { PageRendererFactory } from '@airo-js/core';
+import type { AiroEvent } from '@airo-js/log';
+import {
+  resetLogLevels,
+  resetSink,
+  setChannelLevel,
+  setLogLevel,
+  setSink,
+} from '@airo-js/log';
 
 import { mountCartridge } from '../src/mount-cartridge.js';
 import {
@@ -41,6 +49,10 @@ afterEach(() => {
   // doesn't matter — each test starts with a clean global slot for
   // `__AIRO_FAKE_PAGES__`.
   delete (globalThis as Record<string, unknown>).__AIRO_FAKE_PAGES__;
+  // Tests that install a capturing sink reset here to avoid log
+  // pollution leaking between tests.
+  resetSink();
+  resetLogLevels();
 });
 
 interface MissingPayload {
@@ -162,6 +174,176 @@ describe("'renderer:missing' event", () => {
     expect(record).not.toContain('render');
     // No second renderer:missing — the recovery completed cleanly.
     expect(received).toHaveLength(1);
+  });
+
+  test('app.hydratePage() is idempotent for an already-hydrated pageId — second call is a no-op', async () => {
+    // Regression guard for the bug consumers hit when two parallel
+    // recovery paths both call `app.hydratePage(activePageId)` after a
+    // chunk-load event (e.g. a pre-mount `renderer:missing` subscriber
+    // AND a `chunkPromise.then(...)` block). Before the fix, the second
+    // call would invoke factory() a second time, build a fresh renderer
+    // instance, hydrate it against the same DOM, and never destroy the
+    // first — causing duplicate listeners + component instances. After
+    // the fix, the second call returns immediately when activeRenderer
+    // is already set for that pageId.
+    const events = new EventBus();
+    host.innerHTML = '<div data-airo-ssr="1">pre-rendered</div>';
+
+    const record: string[] = [];
+    let factoryCalls = 0;
+    const homeFactory: PageRendererFactory = () => {
+      factoryCalls++;
+      return recordingRenderer(record);
+    };
+
+    const result = await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ views: [] }),
+      config: {},
+      template: fakeTemplate(),
+      host,
+      events,
+      mode: 'hydrate',
+      preloadedData: { items: [] },
+    });
+    if (result.blocked) throw new Error('expected unblocked mount');
+
+    pushToMailbox('__AIRO_FAKE_PAGES__', { key: 'home', factory: homeFactory });
+
+    // First call — proceeds, factory invoked, hydrate runs.
+    result.app.hydratePage('home');
+    expect(factoryCalls).toBe(1);
+    expect(record).toEqual(['hydrate']);
+
+    // Second call with the same pageId — must be a no-op. No second
+    // factory() invocation, no second hydrate() call, no orphaned
+    // renderer (would manifest as a second 'hydrate' in record).
+    result.app.hydratePage('home');
+    expect(factoryCalls).toBe(1);
+    expect(record).toEqual(['hydrate']);
+
+    // Third call too, for good measure (idempotent means n calls = 1
+    // effect, not just 2 calls = 1 effect).
+    result.app.hydratePage('home');
+    expect(factoryCalls).toBe(1);
+    expect(record).toEqual(['hydrate']);
+  });
+
+  test("logs renderer:missing at 'warn' when no subscriber is wired", async () => {
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+
+    // Note: NO events subscriber on renderer:missing — the warn signal
+    // exists exactly for hosts that haven't wired the recovery seam.
+    host.innerHTML = '<div data-airo-ssr="1">pre-rendered</div>';
+
+    await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ views: [] }),
+      config: {},
+      template: fakeTemplate(),
+      host,
+      mode: 'hydrate',
+      preloadedData: { items: [] },
+    });
+
+    const rendererMissingLogs = captured.filter(
+      (e) => e.msg.startsWith('no renderer registered'),
+    );
+    expect(rendererMissingLogs).toHaveLength(1);
+    expect(rendererMissingLogs[0]?.level).toBe('warn');
+  });
+
+  test("logs renderer:missing at 'info' when a subscriber IS wired (recoverable path)", async () => {
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+
+    // Subscriber wired BEFORE mount — same shape consumers use for
+    // chunk-load recovery. The presence of a subscriber means the
+    // missing-factory case is a documented recovery flow, not a
+    // misconfiguration; log demotes from warn to info.
+    const events = new EventBus();
+    events.on('renderer:missing', () => {
+      /* recovery handler */
+    });
+
+    host.innerHTML = '<div data-airo-ssr="1">pre-rendered</div>';
+
+    await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ views: [] }),
+      config: {},
+      template: fakeTemplate(),
+      host,
+      events,
+      mode: 'hydrate',
+      preloadedData: { items: [] },
+    });
+
+    const rendererMissingLogs = captured.filter(
+      (e) => e.msg.startsWith('no renderer registered'),
+    );
+    expect(rendererMissingLogs).toHaveLength(1);
+    expect(rendererMissingLogs[0]?.level).toBe('info');
+  });
+
+  test('setLogLevel("warn") drops the info-level recoverable-renderer:missing log entirely', async () => {
+    // End-to-end check that the @airo-js/log threshold filter composes
+    // with the renderer-missing demotion: when a subscriber IS wired,
+    // the log is at 'info'; bumping the global threshold to 'warn'
+    // means the info-level log never reaches the sink. Confirms apps
+    // can tighten log noise in prod without losing the 'renderer:missing'
+    // event itself (the event still emits — only the log is filtered).
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+    setLogLevel('warn');
+
+    const events = new EventBus();
+    const eventPayloads: unknown[] = [];
+    events.on('renderer:missing', (p) => eventPayloads.push(p));
+
+    host.innerHTML = '<div data-airo-ssr="1">pre-rendered</div>';
+
+    await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ views: [] }),
+      config: {},
+      template: fakeTemplate(),
+      host,
+      events,
+      mode: 'hydrate',
+      preloadedData: { items: [] },
+    });
+
+    const rendererMissingLogs = captured.filter(
+      (e) => e.msg.startsWith('no renderer registered'),
+    );
+    // Log dropped by the threshold filter.
+    expect(rendererMissingLogs).toHaveLength(0);
+    // Event still emits — log filtering is purely cosmetic.
+    expect(eventPayloads).toHaveLength(1);
+  });
+
+  test('setChannelLevel("core", "silent") drops core logs but leaves the event bus untouched', async () => {
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+    setChannelLevel('core', 'silent');
+
+    const events = new EventBus();
+    const eventPayloads: unknown[] = [];
+    events.on('renderer:missing', (p) => eventPayloads.push(p));
+
+    host.innerHTML = '<div data-airo-ssr="1">pre-rendered</div>';
+
+    await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ views: [] }),
+      config: {},
+      template: fakeTemplate(),
+      host,
+      events,
+      mode: 'hydrate',
+      preloadedData: { items: [] },
+    });
+
+    const coreLogs = captured.filter((e) => e.channel === 'core');
+    expect(coreLogs).toHaveLength(0);
+    expect(eventPayloads).toHaveLength(1);
   });
 
   test('does NOT fire when the cartridge declares a matching view', async () => {

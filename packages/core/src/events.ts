@@ -20,6 +20,16 @@ export interface IEventBus {
   emit(event: string, ...args: unknown[]): void;
   once(event: string, callback: EventCallback): void;
   clear(event?: string): void;
+  /**
+   * Number of subscribers currently wired for `event`. Used internally
+   * (e.g. PageManager downgrades the `'renderer:missing'` warn to info
+   * when a subscriber is wired — recoverable path) and available to
+   * consumers that want the same introspection.
+   *
+   * Returns 0 for events with no listeners. Includes `once` listeners
+   * that haven't fired yet.
+   */
+  listenerCount(event: string): number;
 }
 
 export class EventBus implements IEventBus {
@@ -67,5 +77,9 @@ export class EventBus implements IEventBus {
     } else {
       this.events.clear();
     }
+  }
+
+  listenerCount(event: string): number {
+    return this.events.get(event)?.size ?? 0;
   }
 }

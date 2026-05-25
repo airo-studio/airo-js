@@ -8,18 +8,61 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 ## `@airo-js/core` 0.8.3 — 2026-05-25
 
-`App.hydratePage(pageId)` — close the chunked-SSR cold-hydrate race without wiping the SSR DOM.
+`App.hydratePage(pageId)` — close the chunked-SSR cold-hydrate race without wiping the SSR DOM. Plus two follow-ups from the commerce yalc smoke: `hydrateEntry` idempotency bug fix + `renderer:missing` log-level demotion when a subscriber is wired.
 
 ### Added
 - `App.hydratePage(pageId: PageId)` — re-runs the SSR-hydrate path for `pageId` against the DOM already in `host`. Public-surface pass-through to `PageManager.hydrateEntry`. Intended pairing: catch `'renderer:missing'` with `phase: 'hydrate'`, wait for the missing chunk's `pushToMailbox` to land, then call `app.hydratePage(pageId)`. Listeners wire against the existing SSR DOM in place — no `swapRenderer`, no repaint, no flicker. Idempotent + tolerant: no-ops on destroyed app, disabled / missing / gate page; re-emits `'renderer:missing'` if the resolver still has nothing.
+- `IEventBus.listenerCount(event: string): number` — subscriber-count introspection on the event bus. Used internally by PageManager to subscriber-gate the `'renderer:missing'` log level; available to consumers that want the same.
+
+### Fixed
+- `PageManager.hydrateEntry` is now actually idempotent for an already-hydrated `pageId`. Pre-0.8.3, a second `app.hydratePage(pageId)` for the same already-active page would call `factory()` a second time, build a fresh renderer over the live one, and orphan the previous renderer's listeners + cleanup. Manifested as duplicate DOM / double-fired handlers when consumers had two parallel recovery paths racing on the same chunk-load event. Now: when `activeRenderer && activeRendererPageId === pageId`, hydrateEntry returns immediately. Matches the documented JSDoc promise on `App.hydratePage`.
+
+### Changed
+- `'renderer:missing'` log demotes from `warn` to `info` when an `events.listenerCount('renderer:missing') > 0`. When a subscriber IS wired, the missing-factory case is a documented chunked-load recovery (§2.5b) — informational, not alarming. When no subscriber is wired, the log stays at `warn` (real signal: the host hasn't set up recovery). Same payload, same event emission — only the log level shifts. Affects both `hydrateEntry` (`phase: 'hydrate'`) and `swapRenderer` (`phase: 'navigate'`) emission sites.
 
 ### Why this exists
 - Pre-0.8.3, the only public method that could "re-attempt hydrate after chunk arrival" was `app.navigate({ page })` — but `navigate` routes through `swapRenderer`, which calls `render()` and clobbers the SSR-painted DOM. Chunked-client cartridges (§2.5b) that ship enriched SSR markup were forced into a visible flicker on every cold hydrate, even with the `'renderer:missing'` subscription pattern.
 - `hydratePage` is the symmetric primitive: `navigate` is for the CSR repaint path; `hydratePage` is for the SSR-preserve path. Use the one that matches the active page's first-paint origin.
+- The two follow-up fixes came out of the dotter-monorepo commerce yalc smoke against the 0.8.3 candidate (bridge thread `msg_mpl1ttjq_f04f2f`). 3× duplicated carousel renderers exposed the idempotency gap; alarming-looking red triangles in DevTools during normal cold-hydrate recovery exposed the over-aggressive log level.
 
 ### Notes
-- Zero impact on consumers that don't ship chunked SSR. The method is additive; existing `App` consumers keep working unchanged.
+- Zero impact on consumers that don't ship chunked SSR. All three changes are additive on the public surface (new method, new interface property, demoted log level — never tighter).
 - Docs: `best-practices.md §2.5b` updated with the pre-subscribe + recovery snippet (the `EventBus` you pass via `MountCartridgeOptions.events` is the same instance PageManager emits on — late subscriptions via `result.app.events` miss the phase-5 emission). `§5.1` gains an explicit rule-4: `hydrate()` does NOT reconcile; SSR markup must reflect final visual state.
+
+## `@airo-js/cartridge-kit` 0.8.3 — 2026-05-25
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.3 line. One small source change: the dummy `IEventBus` fixture in `cartridge-app.ts`'s gate-id resolver gained a `listenerCount()` stub to satisfy the new interface property on `@airo-js/core@0.8.3`. No behaviour change.
+
+## `@airo-js/runtime` 0.8.3 — 2026-05-25
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.3 line. No source change. `@airo-js/log@0.2.0` added to `devDependencies` for the new test coverage on `setLogLevel` + subscriber-aware `renderer:missing` log demotion (does not affect the runtime's published surface — consumers picking up `@airo-js/runtime@0.8.3` continue to consume `@airo-js/log` transitively through `@airo-js/core`'s peerDep).
+
+## `@airo-js/ssr` 0.8.3 — 2026-05-25
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.3 line. No source change.
+
+## `@airo-js/embed` 0.8.3 — 2026-05-25
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.3 line. No source change.
+
+## `@airo-js/log` 0.2.0 — 2026-05-25
+
+Threshold-filter API on top of the existing sink primitive — apps can tighten log noise globally or per-channel without writing custom sink wrappers.
+
+### Added
+- `setLogLevel(level: LogLevel | 'silent')` — global threshold. Events below `level` are dropped before reaching the sink.
+- `getLogLevel(): LogLevel | 'silent'` — read current threshold.
+- `setChannelLevel(channel: LogChannel, level: LogLevel | 'silent')` — per-channel override. Wins over the global for that channel only.
+- `getChannelLevel(channel: LogChannel): LogLevel | 'silent' | null` — read per-channel override; `null` means "inherit global."
+- `resetLogLevels()` — reset global + clear all per-channel overrides. Tests' `afterEach` seam.
+
+### Why this exists
+- Driven by the dotter-monorepo commerce yalc smoke (bridge thread `msg_mplase48_d982a5`). Three concrete consumer use cases: silence framework chatter in dev stages, `setLogLevel('warn')` for customer-facing prod consoles, `setLogLevel('silent')` for Lambda@Edge SSR where CloudWatch already owns structured logs. Filing a primitive instead of forcing every consumer to write the same ~20-line filter sink.
+
+### Notes
+- Default threshold is `'debug'` — every event flows through. Pre-0.2.0 behaviour preserved for apps that don't call `setLogLevel`.
+- Composes with `setSink`: the threshold filter runs *before* the sink. Custom sinks installed via `setSink` keep working — they just see fewer events.
+- Skipped the optional `hookupLogLevelFromEnv` helper. YAGNI until a consumer needs it; apps can call `setLogLevel` from their own boot path with whatever env signal they want.
 
 ## `@airo-js/cartridge-kit` 0.8.2 — 2026-05-20
 

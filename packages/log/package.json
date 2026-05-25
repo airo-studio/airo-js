@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Airo log — sink-based structured event logging for the airo-js framework. Replaces scattered console.* calls across @airo-js/* packages with a single dispatcher; apps replace the sink to feed events into devtools panels, Sentry, Datadog, or stay with the default console behaviour.",
   "keywords": [
     "airo",

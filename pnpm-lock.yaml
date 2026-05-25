@@ -85,6 +85,9 @@ importers:
         specifier: workspace:^
         version: link:../core
     devDependencies:
+      '@airo-js/log':
+        specifier: workspace:^
+        version: link:../log
       happy-dom:
         specifier: ^15.0.0
         version: 15.11.7

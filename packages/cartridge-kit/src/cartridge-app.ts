@@ -186,7 +186,16 @@ async function firstBlockedGateId<TConfig>(
     try {
       const decision = await gate.precheck({
         config,
-        events: { on() {}, off() {}, emit() {}, once() {}, clear() {} },
+        events: {
+          on() {},
+          off() {},
+          emit() {},
+          once() {},
+          clear() {},
+          listenerCount() {
+            return 0;
+          },
+        },
         scope,
       });
       if (decision === 'gate-required') return gate.id;
