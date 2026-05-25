@@ -306,7 +306,39 @@ The server cartridge keeps `views: [...]` with full factories + capabilities —
 
 **Multi-version-on-same-page = same cartridge id, same mailbox.** Two browser instances of the same cartridge at different patch versions share one mailbox; their factories collide on `pageType` and last-write-wins. This is the framework's contract for semver patch interchangeability. If two majors must coexist (1.x → 2.x migration), declare them as separate cartridges with different `id` and `mailboxName`.
 
-**Subscribe to `'renderer:missing'` for chunk-load orchestration.** When the active page's chunk hasn't loaded yet, `PageManager.swapRenderer` soft-fails (warns + skips paint) and emits `'renderer:missing'` on the App event bus with `{ pageType, pageId, phase }`. Host apps wire a skeleton / spinner UI and re-navigate to the page once the chunk's `pushToMailbox` lands. The framework does NOT retry on its own; one missing-resolve → one event, host drives the rest.
+**Subscribe to `'renderer:missing'` for chunk-load orchestration.** When the active page's chunk hasn't loaded yet, `PageManager.swapRenderer` soft-fails (warns + skips paint) and emits `'renderer:missing'` on the App event bus with `{ pageType, pageId, phase }`. Host apps wire a skeleton / spinner UI and recover once the chunk's `pushToMailbox` lands. The framework does NOT retry on its own; one missing-resolve → one event, host drives the rest.
+
+**Subscribe BEFORE `mountCartridge` returns.** The runtime constructs an `EventBus` internally unless you pass your own via `MountCartridgeOptions.events`. Reading `result.app.events` AFTER `await mountCartridge(...)` resolves is too late for the phase-5 hydrate emission — by then `hydrateEntry` already ran and the event fired with no subscribers. Pre-build the bus and pass it in:
+
+```ts
+import { EventBus } from '@airo-js/core';
+import { mountCartridge } from '@airo-js/runtime';
+
+const events = new EventBus();
+events.on('renderer:missing', async ({ pageType, pageId, phase }) => {
+  // Paint a skeleton for the active page (optional).
+  // Then wait for the chunk that owns `pageType` to arrive.
+  await ensureChunkLoaded(pageType);
+
+  // Recovery: CSR-navigate vs SSR-hydrate split.
+  if (phase === 'hydrate') {
+    // SSR markup is in the DOM already — keep it. `app.hydratePage(pageId)`
+    // re-runs the hydrate path, wiring listeners in place. No repaint.
+    result.app.hydratePage(pageId);
+  } else {
+    // CSR path. No SSR markup to preserve — navigate triggers a fresh paint.
+    result.app.navigate({ page: pageId });
+  }
+});
+
+const result = await mountCartridge({
+  cartridge, config, template, host, events, mode: 'hydrate',
+});
+// `result.app.events` is the same bus — late subscribers are fine for
+// observability, but the chunk-race recovery has to be pre-subscribed.
+```
+
+`app.hydratePage(pageId)` exists specifically for this recovery — calling `app.navigate({ page })` on a `phase: 'hydrate'` miss would route through the CSR `swapRenderer` path and repaint, wiping the SSR DOM. The two methods are not interchangeable for chunked SSR cartridges.
 
 ### 2.6 Subfolder-per-page beats flat `views/`
 
@@ -589,6 +621,8 @@ Every SSR-safe cartridge renderer follows three rules:
 3. **State is NEVER serialized into the SSR HTML.** The client recomputes from the same `(config, snapshot)` the server saw. Two reasons: (a) recomputation is cheap — the same work `renderSSR` did, no DOM; (b) removes the entire class of tampering bugs from trusting a serialized state blob round-tripped through the customer's page.
 
 Inline payloads (the `<script type="application/json">` that ships data alongside the markup) MUST carry recomputable signals only — `config`, `snapshot` — never derived state like `selectedIndex`, `expandedGroups`, `cartItems`. The client re-derives state from the same inputs the server saw; output matches because the function is pure.
+
+4. **`hydrate()` does NOT reconcile.** The framework invokes `renderer.hydrate(root, ctx)` once against the existing DOM and runs no diff, no virtual-DOM patch, no template re-execution. SSR markup MUST already reflect the **final visual state** the user sees post-hydrate — active classes (`.selected` on the current carousel index, `.active` on the current variant button), current selections, full nav controls, all gallery images, every filter pill. If the server emits "neutral" markup and the client is supposed to fill in active states, hydrate won't do that for you — listeners will attach to inert DOM and the first interaction will look correct only by accident. Derive the active state in your `template(ctx)` from the same `(config, snapshot, navState)` the client sees; the byte-identical-HTML invariant (§5.7) is what makes that work.
 
 ### 5.2 `defineSSRSafeRenderer` — the canonical factory
 

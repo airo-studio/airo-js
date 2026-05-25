@@ -7,7 +7,7 @@
  * inspect appContext.
  */
 
-import type { AppConfig, Page } from './schema.js';
+import type { AppConfig, Page, PageId } from './schema.js';
 import type { IEventBus } from './events.js';
 import { EventBus } from './events.js';
 import type {
@@ -116,6 +116,21 @@ export interface App {
    * `PageManager.replacePages` for the contract.
    */
   replacePages(newPages: unknown[]): void;
+  /**
+   * Re-run the SSR-hydrate path for `pageId` against the DOM already
+   * inside `host`. Use after catching `'renderer:missing'` with
+   * `phase: 'hydrate'` when the missing chunk has since arrived (its
+   * `pushToMailbox` ran and the resolver now returns a factory) — calling
+   * `hydratePage` wires listeners against the SSR DOM in place. Distinct
+   * from `navigate({ page })`, which routes through the CSR `swapRenderer`
+   * path and repaints from scratch, wiping the SSR markup.
+   *
+   * Idempotent and tolerant: no-ops if the app is destroyed, the page is
+   * disabled / missing, or the page is a gate. If the resolver still
+   * returns no factory, the call re-emits `'renderer:missing'` and
+   * leaves the DOM untouched.
+   */
+  hydratePage(pageId: PageId): void;
   destroy(): void;
   readonly state: AppLifecycleState;
   readonly events: IEventBus;
@@ -179,6 +194,10 @@ export function createApp<
     replacePages(newPages) {
       if (lifecycle === 'destroyed') return;
       pageManager.replacePages(newPages as Page<TPageType>[]);
+    },
+    hydratePage(pageId) {
+      if (lifecycle === 'destroyed') return;
+      pageManager.hydrateEntry(pageId);
     },
     destroy() {
       if (lifecycle === 'destroyed') return;

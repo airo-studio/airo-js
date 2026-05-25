@@ -6,6 +6,21 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/core` 0.8.3 — 2026-05-25
+
+`App.hydratePage(pageId)` — close the chunked-SSR cold-hydrate race without wiping the SSR DOM.
+
+### Added
+- `App.hydratePage(pageId: PageId)` — re-runs the SSR-hydrate path for `pageId` against the DOM already in `host`. Public-surface pass-through to `PageManager.hydrateEntry`. Intended pairing: catch `'renderer:missing'` with `phase: 'hydrate'`, wait for the missing chunk's `pushToMailbox` to land, then call `app.hydratePage(pageId)`. Listeners wire against the existing SSR DOM in place — no `swapRenderer`, no repaint, no flicker. Idempotent + tolerant: no-ops on destroyed app, disabled / missing / gate page; re-emits `'renderer:missing'` if the resolver still has nothing.
+
+### Why this exists
+- Pre-0.8.3, the only public method that could "re-attempt hydrate after chunk arrival" was `app.navigate({ page })` — but `navigate` routes through `swapRenderer`, which calls `render()` and clobbers the SSR-painted DOM. Chunked-client cartridges (§2.5b) that ship enriched SSR markup were forced into a visible flicker on every cold hydrate, even with the `'renderer:missing'` subscription pattern.
+- `hydratePage` is the symmetric primitive: `navigate` is for the CSR repaint path; `hydratePage` is for the SSR-preserve path. Use the one that matches the active page's first-paint origin.
+
+### Notes
+- Zero impact on consumers that don't ship chunked SSR. The method is additive; existing `App` consumers keep working unchanged.
+- Docs: `best-practices.md §2.5b` updated with the pre-subscribe + recovery snippet (the `EventBus` you pass via `MountCartridgeOptions.events` is the same instance PageManager emits on — late subscriptions via `result.app.events` miss the phase-5 emission). `§5.1` gains an explicit rule-4: `hydrate()` does NOT reconcile; SSR markup must reflect final visual state.
+
 ## `@airo-js/cartridge-kit` 0.8.2 — 2026-05-20
 
 Docs-only patch. Renames a terminology collision flagged on the bridge cross-check.
