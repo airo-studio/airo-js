@@ -66,8 +66,10 @@ export type {
   IHashRouter,
   RouterOption,
   HashRouterOptions,
+  QueryRouterOptions,
+  DecodeNavParamsOptions,
 } from './router.js';
-export { HashRouter } from './router.js';
+export { HashRouter, QueryRouter, routerHrefFor, decodeNavParams } from './router.js';
 
 export type { PathRouterOptions } from './path-router.js';
 export { PathRouter } from './path-router.js';

@@ -42,7 +42,7 @@ import type {
 } from './page.js';
 import type { IEventBus } from './events.js';
 import type { IRouter, RouteState, RouterOption } from './router.js';
-import { HashRouter } from './router.js';
+import { HashRouter, QueryRouter } from './router.js';
 import { PathRouter } from './path-router.js';
 
 const log = logger('core');
@@ -412,8 +412,7 @@ export class PageManager<
 
     // Discriminated-union branch on the opt shape. `true` is the
     // back-compat alias for `{ mode: 'hash' }`.
-    const mode: 'hash' | 'path' = opt === true ? 'hash' : opt.mode;
-    const pathContextKey = opt === true ? undefined : opt.pathContextKey;
+    const mode: 'hash' | 'path' | 'query' = opt === true ? 'hash' : opt.mode;
 
     const onRouterNavigate = (state: RouteState): void => {
       this.suppressRouterPush = true;
@@ -426,14 +425,29 @@ export class PageManager<
 
     try {
       if (mode === 'hash') {
-        this.router = new HashRouter(onRouterNavigate, { validPages, pathContextKey });
-      } else {
-        // mode === 'path' — TS narrows `opt` to the path variant here.
+        // Hash variant — `pathContextKey` belongs to the hash/path
+        // family; the `true` alias has no pathContextKey override.
+        const hashOpt = opt === true ? {} : (opt as { pathContextKey?: string });
+        this.router = new HashRouter(onRouterNavigate, {
+          validPages,
+          pathContextKey: hashOpt.pathContextKey,
+        });
+      } else if (mode === 'path') {
+        // TS narrows `opt` to the path variant here.
         const pathOpt = opt as { mode: 'path'; basePath: string; pathContextKey?: string };
         this.router = new PathRouter(onRouterNavigate, {
           basePath: pathOpt.basePath,
           validPages,
-          pathContextKey,
+          pathContextKey: pathOpt.pathContextKey,
+        });
+      } else {
+        // mode === 'query' — `paramPrefix` optional, defaults inside
+        // QueryRouter. `pathContextKey` isn't honored in query mode
+        // (discrete-param shape has no path segments).
+        const queryOpt = opt as { mode: 'query'; paramPrefix?: string };
+        this.router = new QueryRouter(onRouterNavigate, {
+          paramPrefix: queryOpt.paramPrefix,
+          validPages,
         });
       }
       this.router.start();

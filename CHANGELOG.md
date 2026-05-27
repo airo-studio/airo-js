@@ -6,6 +6,77 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/cartridge-kit` 0.8.4 — 2026-05-27
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source change.
+
+## `@airo-js/runtime` 0.8.4 — 2026-05-27
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source change.
+
+## `@airo-js/ssr` 0.8.4 — 2026-05-27
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source change.
+
+## `@airo-js/embed` 0.8.4 — 2026-05-27
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source change.
+
+## `@airo-js/core` 0.8.4 — 2026-05-27
+
+`QueryRouter` — third router mode for customer-edge SSR. Discrete prefix-namespaced URL params (one slot per nav-state field), NOT a single opaque blob. Preserves SEO + AI-agent discoverability of individual filter dimensions; supports customer-site integration (host JS can write `pushState('?dtr_category=' + value)` without knowing the framework's encoding format).
+
+### Added
+- `QueryRouter` class implementing `IRouter` ([`packages/core/src/router.ts`](packages/core/src/router.ts)). Reads `window.location.search` via `URLSearchParams`, writes via `history.pushState` / `history.replaceState`, listens for `popstate`. Each `RouteState` field maps to its own URL param under the configured prefix; the `page` selector lands at `<prefix>nav`. Host-page params (`utm_source`, `ref`, anything not matching the prefix) preserved across pushes. Stale prefixed slots from the prior state cleared on push (so removing a filter actually drops its URL slot).
+- `QueryRouterOptions` interface — `paramPrefix` (default `'airo_'`), `validPages` (tampering gate, same semantic as `HashRouterOptions.validPages`).
+- `RouterOption` discriminated union extends to a fourth variant: `{ mode: 'query'; paramPrefix?: string }`. `pathContextKey` is omitted from this variant (discrete-param shape has no path segments — making it accepted-but-ignored would be a footgun).
+- `routerHrefFor(option, state)` — pure helper for cartridges building anchor hrefs. Returns the URL shape matching the active router:
+  ```
+  routerHrefFor(false, state)                          → '#'
+  routerHrefFor({ mode: 'hash' }, state)               → '#quickshop?category=whiskey'
+  routerHrefFor({ mode: 'path', basePath: '/c/x' }, state)
+                                                       → '/c/x/quickshop?category=whiskey'
+  routerHrefFor({ mode: 'query', paramPrefix: 'dtr_' }, state)
+                                                       → '?dtr_nav=quickshop&dtr_category=whiskey'
+  ```
+  Pure function — no DOM, no globals. Cartridges pass the same `RouterOption` they configured at mount time.
+- `decodeNavParams(searchParams, options)` — server-side decoder for query mode. Pure URL parsing; same `(searchParams, paramPrefix, validPages)` triplet yields the same `RouteState` on both sides of the SSR-then-hydrate boundary. Worker pattern:
+  ```ts
+  import { decodeNavParams } from '@airo-js/core';
+  const url = new URL(request.url);
+  const navState = decodeNavParams(url.searchParams, {
+    paramPrefix: 'dtr_',
+    validPages: appConfig.pages.map((p) => p.id),
+  });
+  ```
+
+### Why this shape (discrete params, not single blob)
+- **SEO discoverability.** Google indexes individual query params as meaningful filter dimensions and surfaces those URLs in search results. An opaque URL-encoded blob in one param looks like a tracking parameter to crawlers and isn't indexed. The entire customer-edge SSR initiative exists to make deep-linked content crawler-visible; single-blob would ship the plumbing without the SEO win.
+- **AI shopping agent discovery.** Same reasoning — agents inspect URL structure to discover product / category / filter dimensions.
+- **Customer-site integration.** Customer JS driving the widget from arbitrary host-page UI wants `history.pushState('?dtr_category=' + value)` not "serialize through the framework's encoding format then double-escape."
+- **Shareable / bookmarkable URLs.** Users land on readable URLs (`?dtr_category=Tennessee+Whiskey&dtr_retailer=walmart`) instead of walls of `%3F`/`%26`/`%2B`.
+
+### Trade-off: QueryRouter does NOT share encoding with Hash/Path routers
+- `QueryRouter` uses its own discrete-param serializer/parser instead of the shared `stateToFragment` / `fragmentToState`. Cross-mode round-trips (decoding a hash URL with `QueryRouter` or vice versa) won't work. Each widget picks one router mode for its lifetime; cross-mode preservation isn't a real use case.
+
+### Field-name preservation (no case conversion)
+- `productId` → `<prefix>productId`, NOT `<prefix>product_id`. Framework does no implicit case conversion. Cartridges that want different URL keys than internal field names (e.g. `dtr_product_id` URLs but `productId` internal state) either rename the state field or add a cartridge-side mapping layer.
+
+### Encoding scope
+- String values only (matches `RouteState`'s typing — `{ page: string; [key: string]: string | undefined }`). Arrays / nested objects aren't part of the contract; cartridges wanting array values join/split themselves (`?dtr_brands=walmart,target` → `value.split(',')`).
+
+### prefix collision caveat
+- `paramPrefix` should include its own separator (`'dtr_'`, `'commerce-'`) — otherwise `dtr` would match `dtractually` during the decode scan and produce a stray state field. Default `'airo_'` includes the separator; consumer overrides should too.
+
+### Why this exists
+- Customer-edge SSR pattern (driven by dotter-monorepo bridge thread `msg_mpm9ilzv_81ee75`): a customer installs an edge worker (Cloudflare Workers / Lambda@Edge / Shopify Oxygen) on their own CDN; the worker fetches a signed snapshot and runs per-request SSR to inject crawler-visible product HTML + JSON-LD on first paint. The worker only sees what the customer's CDN sends — `request.url.pathname + search`. Hash-mode routers fail closed in this topology because the fragment is stripped client-side before the HTTP request is built; the worker only ever sees the default view, then the client repaints after hydration → visible flicker for users and zero deep-link content for crawlers / AI shopping agents.
+- Path-mode routers don't work either — on a customer's domain (`coolretailer.com/products/whiskey`) the path is owned by the customer's routing; widgets can't claim path segments.
+- Query strings are the only viable primitive: sent to the server, namespaced via prefix, survive bookmarking + sharing + crawler discovery.
+
+### Notes
+- Zero impact on consumers using `HashRouter` / `PathRouter` — all four variants of `RouterOption` are additive; `false` (no router) and `true` (hash alias) preserved.
+- Architecture note: `nav-encoding.ts`'s file-header JSDoc already mentioned "future QueryRouter or SearchParamsRouter" — this ship is the anticipated extension, with a more SEO-friendly serialization than the original "shared fragment encoding" sketch implied.
+
 ## `@airo-js/core` 0.8.3 — 2026-05-25
 
 `App.hydratePage(pageId)` — close the chunked-SSR cold-hydrate race without wiping the SSR DOM. Plus two follow-ups from the commerce yalc smoke: `hydrateEntry` idempotency bug fix + `renderer:missing` log-level demotion when a subscriber is wired.

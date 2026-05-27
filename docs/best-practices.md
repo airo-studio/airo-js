@@ -994,14 +994,15 @@ The framework supports both with no code change — DSD detection is a runtime c
 
 ### 5.10 Deep-linkable SSR with router modes
 
-Two URL surfaces; two router modes; one shared encoding. Pick based on whether the widget owns its URL space.
+Three URL surfaces; three router modes; one shared encoding. Pick based on whether the widget owns its URL space AND whether the SSR runner is on the same origin as the customer's page.
 
 | Surface | Router | Picks because |
 |---|---|---|
 | Customer-page embed (`<my-app>` on someone else's HTML) | **Hash** | Widget can claim `#fragment` without colliding with host's path/query routing |
 | Owned domain (Campaign Page — `dotter.me/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
+| Customer-edge SSR (worker on customer's CDN — Lambda@Edge / CF Workers / Shopify Oxygen) | **Query** | Customer owns the path; HTTP spec strips the fragment client-side before the request; only `?paramName=` reaches the worker |
 
-Both share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter — round-trip-compatible across modes.
+All three share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter or `?paramName=...` for QueryRouter — round-trip-compatible across modes.
 
 **`RouterOption` discriminated union:**
 
@@ -1012,8 +1013,11 @@ type RouterOption =
   | false                                                  // memory only (default)
   | true                                                    // back-compat: HashRouter
   | { mode: 'hash'; pathContextKey?: string }
-  | { mode: 'path'; basePath: string; pathContextKey?: string };
+  | { mode: 'path'; basePath: string; pathContextKey?: string }
+  | { mode: 'query'; paramPrefix?: string };
 ```
+
+**Encoding shape differs between modes.** Hash + path modes share a single-fragment encoding (`pageId/contextValue?key=value`); query mode uses discrete prefix-namespaced params (`?<prefix>nav=pageId&<prefix><field>=value`). The two encodings are NOT round-trip-compatible across modes — a state encoded as a hash URL can't be decoded by `QueryRouter` and vice versa. Each widget picks one router mode for its lifetime; cross-mode preservation isn't a real use case.
 
 Pass via `mountCartridge({ enableRouter })`, `createApp({ deps: { enableRouter } })`, or — from the customer-embed flow — `LoadConfigResult.enableRouter` returned by the studio's `loadConfig` callback. The runtime instantiates the matching router on mount.
 
@@ -1100,6 +1104,92 @@ app.get('/campaign/:widgetId/*', async (req, res) => {
   res.send(/* render full page HTML with `result.html` inlined */);
 });
 ```
+
+**Query mode — customer-edge SSR.** Customer installs an edge worker (Cloudflare Workers / Lambda@Edge / Shopify Oxygen) on their own CDN. Worker fetches a signed snapshot, runs per-request SSR, injects crawler-visible product HTML + JSON-LD on first paint. The customer owns the URL path, so path-mode is unavailable; hash-mode fails closed because HTTP strips the fragment client-side before the request reaches the worker. Query strings are the only viable primitive — sent to the server in `request.url.search`, namespaced via `paramPrefix`, survive bookmarking + sharing + crawler discovery.
+
+**Discrete-param encoding (NOT a single opaque blob).** Each `RouteState` field maps to its own top-level URL param under the prefix. The page selector lands at `<prefix>nav`:
+
+```
+RouteState: { page: 'quickshop', category: 'Tennessee Whiskey', retailer: 'walmart' }
+URL:        ?dtr_nav=quickshop&dtr_category=Tennessee+Whiskey&dtr_retailer=walmart
+```
+
+This is the load-bearing design choice for the customer-edge use case:
+
+- **SEO discoverability.** Google indexes individual query params as meaningful filter dimensions and surfaces those URLs in search. An opaque URL-encoded blob in one param looks like a tracking parameter to crawlers; the individual product / category states inside it aren't discoverable.
+- **AI shopping agent discovery.** Same reasoning — agents read URL structure to discover product / category / filter dimensions.
+- **Customer-site integration.** Customers driving the widget from arbitrary host-page UI write `history.pushState('?dtr_category=' + value)` from their own JS — no need to know the framework's serialization format.
+- **Shareable URLs.** Users land on readable URLs instead of `%3F`/`%26`/`%2B` walls.
+
+Mount-time config:
+
+```ts
+defineAiroApp({
+  elementName: 'my-app',
+  loadConfig: async (id) => ({
+    cartridgeId: 'commerce',
+    config: { /* ... */ },
+    enableRouter: { mode: 'query', paramPrefix: 'dtr_' },
+  }),
+  resolveCartridge: /* ... */,
+});
+```
+
+Server-side (in the customer-edge worker):
+
+```ts
+import { decodeNavParams, templateToAppConfig } from '@airo-js/core';
+import { renderAppWithPublication } from '@airo-js/ssr';
+
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const appConfig = templateToAppConfig(template, widgetId);
+    const navState = decodeNavParams(url.searchParams, {
+      paramPrefix: 'dtr_',
+      validPages: appConfig.pages.map((p) => p.id),
+    });
+    // → { page: 'quickshop', category: 'Tennessee Whiskey', retailer: 'walmart' } or null
+
+    const result = await renderAppWithPublication({
+      cartridge,
+      appConfig,
+      snapshot,
+      publicationCtx,
+      entryPageId: navState?.page,
+      // pass navState through to the entry page renderer as the
+      // server-side mirror of `ctx.navState` for full deep-link parity
+    });
+    return new Response(/* render full page HTML with `result.html` inlined */);
+  },
+};
+```
+
+`decodeNavParams` is the symmetric counterpart to `QueryRouter.parseCurrent` on the client — same `(searchParams, paramPrefix, validPages)` triplet yields the same `RouteState` on both sides of the SSR-then-hydrate boundary. `decodeNavHint` does NOT apply to query mode (no single hint string).
+
+Cartridges build anchor hrefs via the framework's `routerHrefFor` helper — same call across all three modes:
+
+```ts
+import { routerHrefFor } from '@airo-js/core';
+
+// Inside a renderer's template(ctx):
+const href = routerHrefFor(myRouterOption, { page: 'quickshop', category: 'whiskey' });
+// hash mode  → '#quickshop?category=whiskey'
+// path mode  → '/campaign/xyz/quickshop?category=whiskey'
+// query mode → '?dtr_nav=quickshop&dtr_category=whiskey'
+```
+
+Pure function — no DOM, no globals, no router instance threading required.
+
+**Query-mode caveats worth knowing:**
+
+- **Field-name preservation, no case conversion.** `productId` becomes `<prefix>productId`, NOT `<prefix>product_id`. Framework does no implicit conversion. Cartridges that want different URL keys than internal field names either rename the state field or add a cartridge-side mapping layer.
+- **String values only.** `RouteState`'s contract is string-typed; arrays / nested objects aren't supported. Cartridges wanting array filter values join/split themselves (`?dtr_brands=walmart,target` → `value.split(',')`).
+- **Stale slots cleared on push.** `QueryRouter.push` clears all prefixed slots from the prior state before writing the new ones, so a state transition that removes a field actually drops its URL slot. Non-prefixed params (host-page `utm_*`, `ref`, etc.) preserved across pushes.
+- **Anchor-click drops non-prefixed params.** `routerHrefFor`'s output is the prefixed slots only; the browser's anchor navigation replaces the current query string at click time, dropping `utm_source` etc. If the cartridge needs to preserve them on anchor click, use `QueryRouter.push(state)` from a click handler instead of an anchor href.
+- **`paramPrefix` should include its separator.** `'dtr_'` is safe; `'dtr'` (no separator) would scan into `dtractually` and decode a stray field. Default `'airo_'` is fine; consumer overrides should also end with a non-identifier character.
+- **`popstate`, not `hashchange`.** Search-only URL changes don't fire `hashchange` — QueryRouter listens for `popstate` (back / forward button).
+- **No cross-mode round-trip.** Query mode's discrete-param encoding is NOT compatible with hash / path mode's single-fragment encoding. Pick one router mode per widget for its lifetime.
 
 **Path-mode caveats worth knowing:**
 
