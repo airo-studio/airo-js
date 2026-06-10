@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { EventBus } from '@airo-js/core';
+import { EventBus, pushToMailbox } from '@airo-js/core';
 
 import { defineAiroApp } from '../src/define-airo-app.js';
-import { fakeCartridge, uniqueElementName, waitFor } from './fixtures.js';
+import {
+  fakeCartridge,
+  recordingRenderer,
+  uniqueElementName,
+  waitFor,
+} from './fixtures.js';
 
 let host: HTMLElement;
 let consoleError: ReturnType<typeof vi.spyOn>;
@@ -592,5 +597,83 @@ describe('defineAiroApp', () => {
     const warnArgs = consoleWarn.mock.calls[0].map(String).join(' ');
     expect(warnArgs).toContain(elementName);
     expect(warnArgs).toContain('@airo-js/embed');
+  });
+
+  test('resolveView: missing renderer → host loads chunk → recovers via navigate', async () => {
+    const elementName = uniqueElementName();
+    const sink: string[] = [];
+    // Cartridge whose template declares `home` but ships NO static renderer
+    // for it — forces the chunked-client `renderer:missing` case. Unique id +
+    // mailbox so the module-level chunk registry (keyed by cartridge.id)
+    // doesn't share registrations with other tests.
+    const base = fakeCartridge(sink);
+    const cartridge = {
+      ...base,
+      id: 'fake-rv',
+      mailboxName: '__AIRO_FAKE_RV_PAGES__',
+      views: [],
+    };
+
+    const resolveView = vi.fn(async (_cartridgeId: string, pageType: string) => {
+      // Host loads the chunk; it self-registers to the mailbox. Resolve
+      // void — embed re-resolves through the registry (no factory returned).
+      pushToMailbox(cartridge.mailboxName, {
+        key: pageType,
+        factory: () => recordingRenderer(sink),
+      });
+    });
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => cartridge,
+      resolveView,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_rv' });
+
+    await waitFor(() => sink.includes('render'));
+    // Called with the resolved cartridge.id (not the loadConfig lookup key)
+    // and the bare pageType.
+    expect(resolveView).toHaveBeenCalledWith('fake-rv', 'home');
+    // Singleflight: one load even though the miss can re-emit.
+    expect(resolveView).toHaveBeenCalledTimes(1);
+  });
+
+  test('resolveView: load rejection → onError(resolve-view) fires', async () => {
+    const elementName = uniqueElementName();
+    const onError = vi.fn();
+    const base = fakeCartridge();
+    const cartridge = {
+      ...base,
+      id: 'fake-rv-err',
+      mailboxName: '__AIRO_FAKE_RV_ERR_PAGES__',
+      views: [],
+    };
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => cartridge,
+      resolveView: async () => {
+        throw new Error('chunk 404');
+      },
+      onError,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_rv_err' });
+
+    await waitFor(() => onError.mock.calls.length > 0);
+    expect(onError.mock.calls[0][0]).toBe('resolve-view');
   });
 });

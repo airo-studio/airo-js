@@ -6,6 +6,38 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/embed` 0.8.5 — 2026-06-10
+
+First-class per-page chunk loading. A multi-page cartridge can now ship one renderer chunk per page type and pay ~one renderer's bytes per mount instead of bundling every page. Resolves the dotter-widget-studio adoption blocker (full `defineAiroApp` adoption was regressing customer bundles ~3.6×); contract validated against two production consumers before locking.
+
+### Added
+- `resolveView?(cartridgeId, pageType): Promise<void>` hook on `DefineAiroAppOptions` ([`packages/embed/src/define-airo-app.ts`](packages/embed/src/define-airo-app.ts)). Called when the active page's renderer factory isn't loaded yet (core emits `'renderer:missing'`). The host loads the chunk — which self-registers to the cartridge mailbox via `pushToMailbox` — and resolves; embed re-resolves through the registry. **Transport-agnostic**: embed never assumes ESM module semantics, so a dynamic `import()` and a `<script>`-tag injection with SRI are equally valid bodies. `cartridgeId` is always the resolved `cartridge.id`.
+- embed-owned recovery dispatch: singleflight per `(cartridgeId, pageType)` with delete-on-reject (concurrent misses collapse to one load; a failed load retries on the next miss), plus the hydrate-vs-navigate split — `hydratePage()` on an SSR miss (preserves server markup) vs `navigate()` on a CSR miss (fresh paint). Hosts no longer hand-roll this loop.
+- `'resolve-view'` error phase on `onError(phase, err, host)` — fires when `resolveView` rejects.
+
+### Fixed
+- Chunk-recovery dispatch now gates on a mount-ready signal rather than assuming the chunk fetch outlasts the synchronous tail of `mountCartridge`. A preloaded/cached chunk whose `resolveView` settles on a microtask previously could dispatch before the App handle existed and silently no-op; recovery is now correct regardless of chunk-resolution timing.
+
+### Notes
+- Entry bundle sits at the 5.00 KB minified ceiling (5,118 / 5,120 B); gzip — the real wire cost — has ~330 B headroom (2.18 / 2.50 KB). `EventBus` for the recovery path is pulled off the lazy `@airo-js/runtime` import, not statically imported from core, so it adds nothing to the entry bundle.
+
+## `@airo-js/runtime` 0.8.5 — 2026-06-10
+
+### Added
+- Re-export `EventBus` from `@airo-js/core` ([`packages/runtime/src/index.ts`](packages/runtime/src/index.ts)). Lets lazy consumers (notably `@airo-js/embed`) construct a pre-mount event bus from the same dynamic `import('@airo-js/runtime')` they already pay for, without a static `@airo-js/core` import inflating their entry bundle. The runtime already bundles `EventBus` (it constructs one when none is passed), so the re-export adds nothing to the runtime chunk.
+
+## `@airo-js/core` 0.8.5 — 2026-06-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.5 line. No source change.
+
+## `@airo-js/cartridge-kit` 0.8.5 — 2026-06-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.5 line. No source change.
+
+## `@airo-js/ssr` 0.8.5 — 2026-06-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.5 line. No source change.
+
 ## `@airo-js/cartridge-kit` 0.8.4 — 2026-05-27
 
 Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source change.

@@ -2,7 +2,7 @@
 
 Customer-facing browser bootstrap loader. The script host pages paste into their HTML to mount an Airo app.
 
-> Status: **v0.1.0**. Custom-element registration + lazy runtime load + SSR-hydrate path. Per-page chunk loading deferred to a future minor.
+> Status: **v0.2.0**. Custom-element registration + lazy runtime load + SSR-hydrate path + per-page chunk loading via the `resolveView` hook.
 
 ## What this does
 
@@ -13,6 +13,7 @@ Customer-facing browser bootstrap loader. The script host pages paste into their
    - Optionally calls `fetchSsrHtml(id, token)` to fetch pre-rendered HTML.
    - Lazy-imports `@airo-js/runtime` (peer dependency).
    - Calls `mountCartridge(...)` with `mode: 'hydrate'` if SSR HTML was provided, else `'csr'`.
+   - When the active page's renderer isn't in the bundle yet, calls your optional `resolveView(cartridgeId, pageType)` to load the chunk, then recovers in place (see [Per-page chunk loading](#per-page-chunk-loading)).
 3. On disconnect, tears down the mount.
 
 Generic plumbing (custom-element registration, lifecycle, runtime lazy-load, mount handoff) lives here. Studio-specific concerns (auth, LoadResponse shape, cartridge module location, error UI, telemetry) live behind hooks. Same M13 line as `@airo-js/runtime`.
@@ -20,11 +21,13 @@ Generic plumbing (custom-element registration, lifecycle, runtime lazy-load, mou
 ## Bundle size
 
 ```
-minified: 2.51 KB  /  budget: 5.00 KB
-gzip:     1.14 KB  /  budget: 2.50 KB
+minified: 5.00 KB  /  budget: 5.00 KB
+gzip:     2.18 KB  /  budget: 2.50 KB
 ```
 
-`pnpm size:check` enforces the budget. The runtime is **not** counted — it's loaded lazily via `import('@airo-js/runtime')` when an element mounts, so customer pages with N widgets pay the runtime cost once, and pages with no widget elements never pay it.
+`pnpm size:check` enforces the budget. The runtime is **not** counted — it's loaded lazily via `import('@airo-js/runtime')` when an element mounts, so customer pages with N widgets pay the runtime cost once, and pages with no widget elements never pay it. `EventBus` (used by the `resolveView` recovery path) is pulled off that same lazy runtime import rather than statically imported from `@airo-js/core`, so it adds nothing to the entry bundle.
+
+> The minified figure now sits at the 5 KB ceiling (gzip — the real wire cost — has ~330 B of headroom). The next entry-bundle addition needs a trim pass or a budget revisit.
 
 ## Minimal host-app setup
 
@@ -119,6 +122,60 @@ defineAiroApp({
 
 For hydration to actually skip the repaint, the cartridge's view renderers must implement `hydrate(targetEl, ctx)` — without it, the runtime warns and falls back to `render()`. Cartridges that ship to SSR pages should implement `hydrate()` on every view that's allowed to be the entry page.
 
+## Per-page chunk loading
+
+A multi-page cartridge doesn't have to bundle every page renderer into one module. Ship one chunk per page type, lazy-load only the chunk for the page a given widget actually renders, and you pay ~one renderer's bytes per mount instead of the whole cartridge.
+
+The mechanism: a page chunk **self-registers** its renderer factory to the cartridge mailbox on load (via `pushToMailbox` from `@airo-js/core`). When the active page's factory isn't in the mailbox yet, the runtime emits `'renderer:missing'`; embed routes that to your `resolveView(cartridgeId, pageType)` hook, waits for it to settle, then recovers in place — `hydratePage()` on an SSR miss (keeps the server markup) or `navigate()` on a CSR miss (fresh paint).
+
+```ts
+defineAiroApp({
+  loadConfig,
+  resolveCartridge,
+  // Load the chunk that owns `pageType`. Resolve AFTER it has registered
+  // its factory to the mailbox. The resolved value is discarded — embed
+  // re-resolves through the registry.
+  resolveView: (cartridgeId, pageType) =>
+    import(`https://cdn.my-studio.example/${cartridgeId}/${pageType}.js`),
+});
+```
+
+The chunk itself, loaded by that import, self-registers:
+
+```ts
+// quickshop.js — a per-page chunk
+import { pushToMailbox } from '@airo-js/core';
+import { QuickShopRenderer } from './quickshop-renderer.js';
+
+pushToMailbox('__AIRO_commerce_PAGES__', { key: 'quickshop', factory: () => new QuickShopRenderer() });
+```
+
+### `resolveView` is transport-agnostic
+
+embed **never assumes ESM module semantics** — it only awaits the returned `Promise<void>` and then re-resolves through the mailbox. A dynamic `import()` is one way to load a chunk; a `<script>`-tag injection with Subresource Integrity is equally valid (and is what hosts that ship IIFE bundles or can't rely on import-map SRI use):
+
+```ts
+resolveView: (cartridgeId, pageType) =>
+  new Promise((resolve, reject) => {
+    const { url, integrity } = chunkManifest[`${cartridgeId}-${pageType}`];
+    const s = document.createElement('script');
+    s.src = url;
+    s.integrity = integrity;       // SRI — no import-map dependency
+    s.crossOrigin = 'anonymous';
+    s.onload = () => resolve();     // chunk's pushToMailbox already ran
+    s.onerror = () => reject(new Error(`chunk failed: ${pageType}`));
+    document.head.appendChild(s);
+  }),
+```
+
+Contract notes:
+
+- **`cartridgeId` is always the resolved `cartridge.id`** (the key the chunk registry uses) — reconstruct your own transport/manifest key from `(cartridgeId, pageType)` as the SRI example does.
+- **embed singleflights per `(cartridgeId, pageType)` with delete-on-reject.** Concurrent misses for the same view collapse to one `resolveView` call; a rejected load is evicted so the next miss retries. Your hook does **not** need its own dedup map.
+- **The hydrate-vs-navigate recovery dispatch is embed's job, not yours** — getting it wrong (navigating on a hydrate miss) wipes the SSR DOM. Without a `resolveView` hook, a missing renderer soft-fails (no paint) and emits `'renderer:missing'` for observability only — the pre-0.2.0 behaviour.
+
+See [`docs/best-practices.md` §2.5b](../../docs/best-practices.md) for the underlying chunked-client cartridge pattern.
+
 ## Error phases
 
 `onError(phase, err, host)` fires once per mount-attempt failure. Phases:
@@ -128,6 +185,7 @@ For hydration to actually skip the repaint, the cartridge's view renderers must 
 | `'load-config'` | Your `loadConfig` rejected. |
 | `'resolve-cartridge'` | Your `resolveCartridge` rejected. |
 | `'fetch-ssr'` | Your `fetchSsrHtml` rejected. **Mount continues** (CSR fallback). |
+| `'resolve-view'` | Your `resolveView` rejected (chunk failed to load). The page stays unpainted until a later miss retries. |
 | `'mount'` | Template not found, runtime import failed, or `mountCartridge` rejected. |
 
 Without an `onError` hook, embed logs to `console.error` and leaves the host element empty. For customer-visible errors, supply a hook that paints a studio-branded fallback into `host`.
@@ -139,10 +197,12 @@ Without an `onError` hook, embed logs to `console.error` and leaves the host ele
 | Custom element class + lifecycle | `@airo-js/embed` |
 | Runtime lazy-import + handoff | `@airo-js/embed` |
 | SSR HTML paint + `mode: 'hydrate'` wiring | `@airo-js/embed` |
+| Chunk-recovery dispatch (singleflight + hydrate-vs-navigate) | `@airo-js/embed` |
 | Element name + attribute names | host app (config knob) |
 | Auth + LoadResponse fetch | host app (`loadConfig` hook) |
 | Cartridge module resolution | host app (`resolveCartridge` hook) |
 | SSR HTML fetch endpoint | host app (`fetchSsrHtml` hook) |
+| Page-chunk loading (transport) | host app (`resolveView` hook) |
 | Error UI / fallbacks | host app (`onError` hook) |
 | Telemetry | host app (`onMounted` hook) |
 | Per-page chunk loading | `@airo-js/embed` (deferred) |
