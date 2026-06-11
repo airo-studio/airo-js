@@ -999,7 +999,7 @@ Three URL surfaces; three router modes; one shared encoding. Pick based on wheth
 | Surface | Router | Picks because |
 |---|---|---|
 | Customer-page embed (`<my-app>` on someone else's HTML) | **Hash** | Widget can claim `#fragment` without colliding with host's path/query routing |
-| Owned domain (Campaign Page — `dotter.me/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
+| Owned domain (a dedicated landing page — `shop.example.com/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
 | Customer-edge SSR (worker on customer's CDN — Lambda@Edge / CF Workers / Shopify Oxygen) | **Query** | Customer owns the path; HTTP spec strips the fragment client-side before the request; only `?paramName=` reaches the worker |
 
 All three share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter or `?paramName=...` for QueryRouter — round-trip-compatible across modes.
@@ -1212,6 +1212,35 @@ const navState = decodeNavHint(req.query.nav, validPages);
 ```
 
 **Why drop Query mode** (the path-not-taken). An earlier framework rev considered `mode: 'query'` (`?nav=products/abc`) as a third option. Hash + Path covers every named use case (embed vs owned domain); Query mode was the awkward middle — SSR-readable like Path but with messier URLs. No concrete consumer needed it. Drop. If a future case surfaces, the `RouterOption` union is openly extensible — `mode: 'query'` is a single variant add, not a third consumer-side implementation.
+
+### 5.11 Three audiences — humans, search engines, AI agents (AIO vs LLMO/SEO)
+
+A cartridge renders for three audiences at once, and the framework gives each its own surface off **one snapshot**:
+
+| Audience | Wants | Surface |
+|---|---|---|
+| **Humans** | Interactive, styled UI | `ViewDefinition` render/hydrate (§5) |
+| **Search engines** | Crawlable HTML + structured data | SSR HTML + `PublicationAdapter` `format: 'json-ld'` |
+| **AI agents** | Extraction-friendly content + callable actions | `PublicationAdapter` `format: 'custom'` (`llms.txt`), `'mcp-tools'` + `@airo-js/mcp` |
+
+This is what app frameworks have started calling **AIO** (AI Optimisation), **LLMO** (LLM Optimisation), or **GEO** (Generative Engine Optimisation). The vocabulary is converging; the mechanism question is where approaches differ.
+
+**SEO and AIO are not the same job.** SEO optimises for a crawler ranking links; AIO optimises for an LLM accurately *extracting, citing, and recommending* your content. The signals diverge:
+
+| | SEO | AIO / LLMO |
+|---|---|---|
+| Goal | Rank in search results | Be cited correctly in AI answers |
+| Consumer | Search crawler | LLM training + retrieval |
+| Strongest signal | Links, keywords, speed | Structured data, factual clarity, single source of truth |
+| Failure mode | Lower ranking | **Wrong citation** — worse than absent |
+
+That last row is why the framework treats AIO as a **contract**, not a checklist. The typical framework guidance is "render server-side, hand-write JSON-LD, expose a feed, add an `llms.txt`" — four surfaces a developer keeps in sync by discipline. The moment the rendered price and the JSON-LD price disagree, an agent cites a wrong number, and a wrong citation erodes the authority signal AIO exists to build.
+
+**The contract closes that gap structurally.** All four surfaces consume the *same* post-Transformer snapshot ([snapshot fidelity, §1.9](#19-publicationadaptertdata-toutput-tconfig)), and `validate(output)` is a [hard publish gate](#19-publicationadaptertdata-toutput-tconfig). Drift between what a human sees, what a crawler indexes, and what an agent cites isn't discouraged — it's impossible.
+
+**`llms.txt` is one adapter, not a maintained file.** The AI-discovery manifest ([llmstxt.org](https://llmstxt.org/)) is a `PublicationAdapter` with `format: 'custom'`, generated from the snapshot, gated by `validate()`. See [`examples/llms-txt-adapter`](../examples/llms-txt-adapter/) for a complete generate + validate implementation.
+
+**Where AIO crosses the M13 line.** The framework supplies the *mechanism* — snapshot-faithful emission, coverage gating, validation. It does **not** own *content strategy*. "Write clear factual statements, use hierarchical headings, add author attribution" is real AIO advice, but it's cartridge-author guidance, not framework code. Keep it in your cartridge's content, not in a framework primitive.
 
 ---
 

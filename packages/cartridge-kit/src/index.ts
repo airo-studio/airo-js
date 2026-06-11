@@ -124,6 +124,17 @@ export { defineStyleSurface } from './style-surface.js';
 export type { CssVarFor } from './derive-component-tokens.js';
 export { deriveComponentTokens } from './derive-component-tokens.js';
 
+export type { GlobalOption } from './derive-global-options.js';
+export { deriveGlobalOptions } from './derive-global-options.js';
+
+export type { InvalidGlobalConfigKey } from './validate-global-config-keys.js';
+export {
+  validateGlobalConfigKeys,
+  assertGlobalConfigKeys,
+} from './validate-global-config-keys.js';
+
+export { getByPath, hasByPath, setByPath } from './path-utils.js';
+
 export type {
   HydrateCleanup,
   SSRSafeRendererOptions,
@@ -151,4 +162,4 @@ export const PACKAGE_NAME = '@airo-js/cartridge-kit';
  * `package.json` for the package version; this constant is the
  * separate, load-bearing signal that consumers can train on.
  */
-export const CONTRACT_VERSION = '0.5.0';
+export const CONTRACT_VERSION = '0.6.0';

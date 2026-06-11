@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/embed",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Airo embed — customer-facing browser bootstrap loader. Registers a custom element, fetches widget config + cartridge via host-app hooks, lazy-loads @airo-js/runtime, and mounts. ~5 KB minified bundle.",
   "keywords": [
     "airo",
@@ -32,7 +32,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

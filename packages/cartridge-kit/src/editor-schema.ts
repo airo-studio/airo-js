@@ -120,6 +120,32 @@ export interface PropSchema {
    * common conventions, not a closed enum.
    */
   category?: string;
+  /**
+   * Dot-path into the cartridge's `TConfig`. When set, the prop inherits
+   * this GLOBAL config value as its default — `resolveComponentProp` reads
+   * it as the tier between the slot default and the schema default, so a
+   * brand-level setting (e.g. `'display.showRatings'`) cascades to every
+   * component bound to it, while a per-instance override still wins.
+   *
+   * **Always explicit — never defaults to the prop name.** Prop name and
+   * global leaf name routinely differ (`removeBackground` ↔
+   * `display.removeProductBackground`, `showStars` ↔ `display.showRatings`);
+   * the binding is the dot-path, decoupled from the prop key.
+   *
+   * **The key is a shared bus.** Every prop declaring the SAME
+   * `globalConfigKey` — across any component type — subscribes to the one
+   * global value: set it once, all of them inherit; flip it, all flip.
+   * Cross-type sharing is intentional (one toggle drives Star and
+   * ProductCard); independent behaviour needs distinct keys. The cascade is
+   * on the GLOBAL only — the per-instance override
+   * (`componentSettings[id].props[key]`) stays independent per component.
+   *
+   * Open string, not `keyof TConfig`: typing it would force `PropSchema`
+   * (and `ComponentSchema`) generic over `TConfig`, a heavy ripple for a
+   * check authors rarely get wrong. Same posture as `cartridge.hotSwapKeys`.
+   * A typed `Paths<TConfig>` is a possible future additive.
+   */
+  globalConfigKey?: string;
 }
 
 /**

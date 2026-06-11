@@ -40,8 +40,12 @@
  *   prop value:
  *     1. `page.componentSettings[componentId].props[propKey]`
  *     2. `slot.props[propKey]`
- *     3. `schema.props[propKey].default`
- *     4. `undefined` (when no schema entry exists for the key)
+ *     3. `getByPath(config, schema.props[propKey].globalConfigKey)` —
+ *        the GLOBAL config tier, present only when the prop declares a
+ *        `globalConfigKey` AND the caller passes the resolved cartridge
+ *        config. Skipped (no change) otherwise.
+ *     4. `schema.props[propKey].default`
+ *     5. `undefined` (when no schema entry exists for the key)
  *
  * **Scope**: these helpers resolve framework-defined precedence on
  * framework-owned schema. They do NOT execute cartridge-specific
@@ -54,6 +58,7 @@
 import type { ComponentSettings, Page, Slot } from '@airo-js/core';
 
 import type { ComponentSchema } from './editor-schema.js';
+import { getByPath } from './path-utils.js';
 
 /**
  * Walk `page.layout.regions` to find the slot whose `componentId`
@@ -112,10 +117,25 @@ export function resolveComponentVisibility<TPageType extends string>(
  * Resolve the effective value of a single prop on a component, applying
  * the precedence rule documented at the top of this file.
  *
+ * The optional `config` is the resolved cartridge config (`TConfig`) — what
+ * a renderer sees as `ctx.app.config`. Pass it to activate the global tier:
+ * when the prop's schema declares a `globalConfigKey`, the resolver reads
+ * that dot-path out of `config` and uses it as the default ahead of the
+ * schema default. Omit `config` (or omit `globalConfigKey`) and the global
+ * tier is skipped entirely — behaviour is identical to before.
+ *
  * Returns `undefined` when:
  *   - No `componentSettings` override exists for the prop, AND
  *   - No slot has a `props[propKey]` value, AND
+ *   - No `globalConfigKey` global value resolves from `config`, AND
  *   - The schema has no entry for `propKey` (or no `default`)
+ *
+ * A `globalConfigKey` that resolves to `undefined` (path absent, or the
+ * brand simply hasn't set that global) is NOT distinguishable from "no
+ * global" — it falls through to the schema default. The dot-path is an
+ * open string, so key validity is the author's responsibility (same
+ * posture as `cartridge.hotSwapKeys`); a stray path silently uses the
+ * schema default rather than throwing.
  *
  * Studios use `undefined` to render a "no value" indicator on the
  * inspector; renderers typically guard against it before painting
@@ -127,6 +147,7 @@ export function resolveComponentProp<TPageType extends string, TStyles = unknown
   componentId: string,
   propKey: string,
   schema?: ComponentSchema<TStyles>,
+  config?: unknown,
 ): unknown {
   const settings: ComponentSettings | undefined =
     page.componentSettings?.[componentId];
@@ -136,6 +157,11 @@ export function resolveComponentProp<TPageType extends string, TStyles = unknown
   const slot = findSlot(page, componentId);
   if (slot?.props && propKey in slot.props) {
     return slot.props[propKey];
+  }
+  const globalConfigKey = schema?.props?.[propKey]?.globalConfigKey;
+  if (globalConfigKey && config !== undefined) {
+    const globalValue = getByPath(config, globalConfigKey);
+    if (globalValue !== undefined) return globalValue;
   }
   return schema?.props?.[propKey]?.default;
 }

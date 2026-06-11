@@ -74,7 +74,7 @@ done
 PACKAGES=(
   "@airo-js/log"
   "@airo-js/core"
-  "@airo-js/cartridge-kit --tag rc"
+  "@airo-js/cartridge-kit"
   "@airo-js/runtime"
   "@airo-js/embed"
   "@airo-js/ssr"
@@ -211,5 +211,4 @@ echo "  https://www.npmjs.com/package/@airo-js/runtime"
 echo "  https://www.npmjs.com/package/@airo-js/embed"
 echo "  https://www.npmjs.com/package/@airo-js/ssr"
 echo
-echo "cartridge-kit is on the 'rc' dist-tag. Consumers opt in with:"
-echo "  pnpm add @airo-js/cartridge-kit@rc"
+echo "All packages publish to the 'latest' dist-tag (cartridge-kit is GA on the 0.8 line)."

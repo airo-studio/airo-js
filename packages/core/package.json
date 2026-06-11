@@ -1,6 +1,6 @@
 {
   "name": "@airo-js/core",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Airo core runtime — createApp, PageManager, EventBus, HashRouter, Theme, IsolationRoot, RuntimePipeline, registry mailbox.",
   "keywords": [
     "airo",
@@ -33,7 +33,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

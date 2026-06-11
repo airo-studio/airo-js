@@ -1,0 +1,16 @@
+{
+  "name": "@airo-js-examples/llms-txt-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Worked example: an llms.txt PublicationAdapter. Emits the llmstxt.org manifest format from a post-Transformer snapshot, demonstrating that the AI-discovery surface popularised by app frameworks (llms.txt, LLMO/AIO) is a subset of one existing cartridge-kit primitive.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*"
+  }
+}

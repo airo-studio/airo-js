@@ -242,3 +242,130 @@ describe('resolveComponentProp — precedence ladder', () => {
     expect(resolveComponentProp(page, 'product-card', 'showPrice', TEST_SCHEMA)).toBe(false);
   });
 });
+
+describe('resolveComponentProp — global config tier', () => {
+  // A schema whose props bind to a global TConfig value via dot-path.
+  // Prop name (`removeBackground`) deliberately differs from the global
+  // leaf name (`display.removeProductBackground`) — the binding is the
+  // dot-path, not the prop key.
+  const GLOBAL_SCHEMA: ComponentSchema = {
+    id: 'product-image',
+    label: 'Product Image',
+    icon: 'image',
+    category: 'media',
+    props: {
+      removeBackground: {
+        type: 'boolean',
+        label: 'Remove background',
+        default: false,
+        changeScope: 'page',
+        globalConfigKey: 'display.removeProductBackground',
+      },
+    },
+  };
+
+  // Same shape but no slot props, so the global tier is reachable.
+  function imagePage(): Page<string> {
+    return {
+      id: 'home',
+      type: 'home',
+      enabled: true,
+      layout: { regionOrder: ['main'], regions: { main: { id: 'main', components: [] } } },
+    };
+  }
+
+  test('global config value resolves between slot and schema default', () => {
+    const page = imagePage();
+    const config = { display: { removeProductBackground: true } };
+    // No override, no slot → global wins over schema default (false).
+    expect(
+      resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA, config),
+    ).toBe(true);
+  });
+
+  test('componentSettings override wins over global', () => {
+    const page = imagePage();
+    page.componentSettings = { 'product-image': { props: { removeBackground: false } } };
+    const config = { display: { removeProductBackground: true } };
+    expect(
+      resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA, config),
+    ).toBe(false);
+  });
+
+  test('slot prop wins over global', () => {
+    const page: Page<string> = {
+      id: 'home',
+      type: 'home',
+      enabled: true,
+      layout: {
+        regionOrder: ['main'],
+        regions: {
+          main: {
+            id: 'main',
+            components: [
+              {
+                id: 'img-slot',
+                order: 0,
+                componentId: 'product-image',
+                visible: true,
+                props: { removeBackground: false },
+              },
+            ],
+          },
+        },
+      },
+    };
+    const config = { display: { removeProductBackground: true } };
+    expect(
+      resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA, config),
+    ).toBe(false);
+  });
+
+  test('global path absent in config → falls through to schema default', () => {
+    const page = imagePage();
+    const config = { display: {} };
+    expect(
+      resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA, config),
+    ).toBe(false);
+  });
+
+  test('no config passed → global tier skipped, schema default used', () => {
+    const page = imagePage();
+    expect(resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA)).toBe(
+      false,
+    );
+  });
+
+  test('prop without globalConfigKey ignores config entirely', () => {
+    const page = imagePage();
+    const config = { display: { removeProductBackground: true } };
+    // TEST_SCHEMA.showPrice has no globalConfigKey → schema default (true).
+    expect(resolveComponentProp(page, 'product-card', 'showPrice', TEST_SCHEMA, config)).toBe(true);
+  });
+
+  test('shared key — two component schemas binding the same path read the same global', () => {
+    const page = imagePage();
+    const config = { display: { removeProductBackground: true } };
+    const otherSchema: ComponentSchema = {
+      id: 'product-gallery',
+      label: 'Product Gallery',
+      icon: 'image',
+      category: 'media',
+      props: {
+        stripBg: {
+          type: 'boolean',
+          label: 'Strip background',
+          default: false,
+          changeScope: 'page',
+          globalConfigKey: 'display.removeProductBackground',
+        },
+      },
+    };
+    expect(
+      resolveComponentProp(page, 'product-image', 'removeBackground', GLOBAL_SCHEMA, config),
+    ).toBe(true);
+    expect(
+      resolveComponentProp(page, 'product-gallery', 'stripBg', otherSchema, config),
+    ).toBe(true);
+  });
+});
