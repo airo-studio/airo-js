@@ -1,0 +1,28 @@
+{
+  "name": "@airo-js-examples/shopify-edge-worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Edge-rendered live Shopify product card on Cloudflare Workers. Demonstrates the three-audience guarantee (human HTML + JSON-LD + MCP) from one snapshot, with no cache to bust.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "bootstrap": "./scripts/setup.sh",
+    "dev": "wrangler dev",
+    "ship": "wrangler deploy",
+    "build:bundle": "wrangler deploy --dry-run --outdir=dist",
+    "smoke": "bun scripts/smoke.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo .wrangler"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "@airo-js/ssr": "workspace:*",
+    "linkedom": "^0.18.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240502.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.60.0"
+  }
+}

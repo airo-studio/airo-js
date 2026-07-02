@@ -1,0 +1,39 @@
+name = "shopify-edge-worker"
+main = "src/worker.ts"
+# Use a date your installed wrangler understands. v3.114.17 supports up to
+# 2025-07-18; the local-dev fallback works, but deploys reject "future"
+# dates with entitlements.not_available (CF-API code 10007). Bump as you
+# upgrade wrangler.
+compatibility_date = "2024-09-23"
+# nodejs_compat needed for any Node-style APIs the bundle pulls in
+# (linkedom is pure JS but some dependencies expect Node globals).
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace for cartridge config storage.
+# Create with: wrangler kv:namespace create CONFIG
+# Then paste the returned id below.
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "70c69410a3e4485fa3ddd672dbe1f2f0"
+
+[vars]
+# Shopify storefront domain (e.g. "demo-store.myshopify.com").
+# Override per-environment if needed.
+SHOPIFY_DOMAIN = "sticker-it-nb1gjy1l.myshopify.com"
+
+# Default product handle to render at `/shopify/` when no `?product=...`
+# is passed. Override per request to test other products without redeploying.
+DEFAULT_PRODUCT_HANDLE = "the-collection-snowboard-liquid"
+
+# The Shopify Storefront API access token is supplied via secret:
+#   wrangler secret put SHOPIFY_STOREFRONT_TOKEN
+# For local dev, put it in .dev.vars (gitignored).
+
+# WordPress REST API site to render at `/wp/`. No auth needed — WP
+# REST API is public for published posts. Try any WordPress site:
+# 'wordpress.org/news', 'techcrunch.com', or your own.
+WP_SITE = "wordpress.org/news"
+
+# Default post slug. Empty string falls back to "latest post" on the
+# configured site (per_page=1). Override per request via ?post=<slug>.
+DEFAULT_POST_SLUG = ""

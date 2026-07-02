@@ -1,0 +1,3 @@
+# Copy to .dev.vars (gitignored) and fill in your Shopify Storefront API token.
+# Get one at: Shopify Admin → Apps → Develop apps → Create app → Storefront API access tokens.
+SHOPIFY_STOREFRONT_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
