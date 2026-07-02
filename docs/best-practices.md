@@ -594,6 +594,60 @@ Host apps that already render markup server-side (Next.js / Astro / SvelteKit / 
 
 The cartridge's renderer hydrates against the existing markup — no re-paint, no flash, no extra HTTP round-trip.
 
+### 4.6 BFF — serve the snapshot as a structured-data endpoint (optional)
+
+If your architecture wants a Backend-For-Frontend — one backend service that fetches, shapes, and formats data behind a single endpoint the frontend calls — you don't need a new framework. The pieces already exist: run the cartridge pipeline server-side and return the **post-Transformer snapshot** as JSON. The framework provides the data-shaping (`DataSource`, `Transformer`, snapshot); the host owns the endpoint, auth, caching, and rate-limiting.
+
+```ts
+// Host's route handler — Express / Hono / Worker / Lambda, your choice.
+import { createPipeline } from '@airo-js/core';
+import { runPublicationAdapters } from '@airo-js/ssr';
+
+app.get('/api/widget-data', async (req, res) => {
+  const raw      = await cartridge.dataSource.fetch(cfg, { signal });        // upstream fetch
+  const pipeline = createPipeline(cartridge.transformers, cartridge.postProcessors);
+  const snapshot = await pipeline.run(raw, ctx);                             // TData → TData
+  const adapters = await runPublicationAdapters(cartridge, snapshot, ctx);   // optional: feeds / MCP tools
+  res.json({ snapshot, adapters });                                         // single structured payload
+});
+```
+
+**Why this is the right shape.** The BFF's JSON *is* the same snapshot that the widget's DOM, the JSON-LD blocks, and the MCP tools consume — snapshot fidelity (contract guarantee #1) now extends to your data endpoint, so there's zero drift between what the BFF returns and what the widget renders. Your frontend `@airo-js` app then **hydrates from that snapshot** — the SSR-hydrate path already consumes `(config, snapshot)` (see §5). One snapshot, one source of truth, many consumers.
+
+**What stays host-owned (and why the framework won't do it for you).** The HTTP endpoint, routing, auth, response caching, rate-limiting, upstream-credential hiding, and tenancy are all host concerns — remove them and rendering still works, so they never cross into framework code. Building your BFF *with* the framework's pipeline primitives is the pattern; expecting the framework to *be* the BFF is not.
+
+**One caveat — don't lose SSR for SEO.** A BFF-returns-JSON + client-renders flow gives crawlers an empty shell. If the frontend is `@airo-js` and you care about search/agent visibility, prefer the SSR-hydrate path (`renderAppWithPublication` returns HTML + JSON-LD server-side; the client hydrates) over a BFF+CSR split. The BFF-JSON pattern earns its keep when the frontend is pure CSR by choice, when several *different* frontends (widget + native app + email) share one shaping layer, or when you're centralizing upstream credentials server-side.
+
+### 4.7 Multiple apps per page — JSON-LD stacks, it doesn't merge
+
+When a single page hosts more than one `@airo-js` app (e.g. a product carousel and a store-finder), each app's SSR path emits its own `<script type="application/ld+json">` block(s) from its own adapters. These **stack** — the framework does not, and should not, merge them into one graph.
+
+- **Separate blocks are valid.** Search engines accept multiple independent `<script type="application/ld+json">` blocks on one page. Merging into a single `@graph` is only worthwhile when entities cross-reference each other via `@id` — which independent apps don't.
+- **Merging would need page-level authority the framework doesn't have.** Each app renders in isolation and owns only its snapshot; a merge step must know about *every* app on the page, which is a host-page concern, not a widget concern.
+- **The one edge case is shared top-level nodes.** If two apps each emit an `Organization` or `WebSite` node you get duplicates. That's a page-level dedup concern for the host to solve *if it cares* — fold the blocks into one `@graph` and dedupe by `@id` in your page template. Don't reach for it until Search Console actually flags duplicates.
+
+### 4.8 Server-driven UI over a stream (SSE)
+
+If you want the server to drive a live widget — push new state and have the mounted UI re-render without a reload — the framework already gives you the apply-seam: `MountCartridgeResult.update(delta)`. You own the transport; the framework owns the re-render.
+
+**The M13 split.** The stream itself — the `EventSource` connection, reconnection/backoff, auth headers, heartbeat, frame parsing, and slow-client backpressure — is host-owned. It's network policy, and network policy never crosses into framework code. The framework's job starts once you have a parsed delta in hand.
+
+```ts
+const src = new EventSource('/widget-stream', { withCredentials: true }); // HOST: transport
+src.onmessage = (e) => result.update(JSON.parse(e.data));                 // FRAMEWORK: apply
+src.onerror   = () => { /* HOST: jittered backoff + Last-Event-ID resume */ };
+```
+
+`update(delta)` deep-merges the delta into the live config, classifies each path against `cartridge.hotSwapKeys`, and re-renders — paths covered by `hotSwapKeys` skip the refetch/pipeline for a cheap update, others trigger a remount. So server-driven **props, visibility, page-graph, and small live values** work today with no framework change.
+
+**Streaming *data* (not config) — the buffer pattern.** `update(delta)` takes a `DeepPartial<TConfig>`, but a stream usually pushes new `TData` (live inventory, a growing feed). Bridge it without a new primitive: have the stream handler write the latest frame into a client-side buffer, have `DataSource.fetch` read that buffer instead of the network, and bump a `hotSwapKeys`-listed field to trigger the re-render. The streamed frame becomes the snapshot; nothing goes back over the wire.
+
+**Scaling is host-owned too.** Fanning a stream out to many users (HTTP/2 multiplexing, a Redis-style pub/sub bus across instances, connection-count autoscaling) is all infrastructure the host runs — the framework's cost is client-side and O(one widget re-render), independent of user count. Broadcast-shaped updates (the same delta to everyone) fan out far more cheaply than per-user streams; prefer them where the UX allows.
+
+**The boundary.** This drives UI from *config and data*, not from an arbitrary server-sent component tree. The page graph is statically declared by the template (§2.9) — the server can flip visibility, swap props, change which *declared* pages show, and push new data, but it cannot introduce a component type the cartridge never registered. If you need that, it's a cartridge change, not a stream.
+
+**If this pattern doesn't fit — file a feature request.** The buffer bridge above is deliberately host-side so the framework ships nothing speculative. If it's failing your team — e.g. you want a direct server-pushed-snapshot seam (`result.setData(snapshot)`) that bypasses `DataSource.fetch`, or granular append semantics for high-frequency feeds — open a feature request describing the real workload. Those are additive-compatible primitives the framework will ship once a concrete consumer validates the shape.
+
 ---
 
 ## 5. SSR-safe rendering
