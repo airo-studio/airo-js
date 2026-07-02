@@ -12,7 +12,7 @@
  * cardinality. Uses Web Crypto SubtleCrypto — available in
  * Cloudflare Workers, Deno, Bun, modern Node, and browsers.
  *
- * Per dotter-monorepo team advice (bridge thread):
+ * Snapshot-id timing convention:
  * compute post-pipeline, pre-PostProcessor. This example has no
  * pipeline, so we hash the DataSource output.
  */

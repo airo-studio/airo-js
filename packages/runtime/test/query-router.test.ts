@@ -10,7 +10,7 @@
  *   configurable prefix. The page selector lands at `<prefix>nav`.
  *
  *     navState { page: 'quickshop', category: 'whiskey' }
- *       → ?dtr_nav=quickshop&dtr_category=whiskey
+ *       → ?airo_nav=quickshop&airo_category=whiskey
  *
  * Coverage:
  *   - parseCurrent: prefix scan, page-slot decoding, validPages gate,
@@ -53,14 +53,14 @@ afterEach(() => {
 describe('QueryRouter — parseCurrent (discrete params)', () => {
   test('returns null when the configured paramPrefix has no `<prefix>nav` slot', () => {
     setLocation('/', '?utm_source=newsletter');
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     expect(router.parseCurrent()).toBeNull();
   });
 
   test('decodes a single-field state from `<prefix>nav` only', () => {
-    setLocation('/', '?dtr_nav=quickshop');
+    setLocation('/', '?airo_nav=quickshop');
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     expect(router.parseCurrent()).toEqual({ page: 'quickshop' });
@@ -69,10 +69,10 @@ describe('QueryRouter — parseCurrent (discrete params)', () => {
   test('decodes multiple discrete prefixed params into one RouteState', () => {
     setLocation(
       '/',
-      '?dtr_nav=quickshop&dtr_category=Tennessee+Whiskey&dtr_retailer=walmart',
+      '?airo_nav=quickshop&airo_category=Tennessee+Whiskey&airo_retailer=walmart',
     );
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     expect(router.parseCurrent()).toEqual({
@@ -97,19 +97,19 @@ describe('QueryRouter — parseCurrent (discrete params)', () => {
   test('non-prefixed params on the URL are ignored (host-page coexistence)', () => {
     setLocation(
       '/',
-      '?utm_source=newsletter&dtr_nav=home&ref=feed&dtr_locale=en',
+      '?utm_source=newsletter&airo_nav=home&ref=feed&airo_locale=en',
     );
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['home'],
     });
     expect(router.parseCurrent()).toEqual({ page: 'home', locale: 'en' });
   });
 
   test('field-name preservation — productId stays productId, no case conversion', () => {
-    setLocation('/', '?dtr_nav=product&dtr_productId=abc-123');
+    setLocation('/', '?airo_nav=product&airo_productId=abc-123');
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['product'],
     });
     expect(router.parseCurrent()).toEqual({
@@ -122,52 +122,52 @@ describe('QueryRouter — parseCurrent (discrete params)', () => {
 describe('QueryRouter — push / replace', () => {
   test('push writes the state as discrete prefixed params', () => {
     setLocation('/');
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push({ page: 'quickshop', category: 'whiskey', retailer: 'walmart' });
 
     const params = new URLSearchParams(window.location.search);
-    expect(params.get('dtr_nav')).toBe('quickshop');
-    expect(params.get('dtr_category')).toBe('whiskey');
-    expect(params.get('dtr_retailer')).toBe('walmart');
+    expect(params.get('airo_nav')).toBe('quickshop');
+    expect(params.get('airo_category')).toBe('whiskey');
+    expect(params.get('airo_retailer')).toBe('walmart');
   });
 
   test('push preserves OTHER (non-prefixed) query params', () => {
     setLocation('/', '?utm_source=newsletter&ref=feed');
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push({ page: 'quickshop' });
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get('utm_source')).toBe('newsletter');
     expect(params.get('ref')).toBe('feed');
-    expect(params.get('dtr_nav')).toBe('quickshop');
+    expect(params.get('airo_nav')).toBe('quickshop');
   });
 
   test('push CLEARS stale prefixed slots from the prior state', () => {
     // Critical: a state transition that REMOVES a field (e.g. clearing a
     // filter) must drop its URL slot. Without explicit clear, the prior
     // filter would re-decode on reload.
-    setLocation('/', '?dtr_nav=quickshop&dtr_category=whiskey&dtr_retailer=walmart');
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    setLocation('/', '?airo_nav=quickshop&airo_category=whiskey&airo_retailer=walmart');
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push({ page: 'quickshop' });  // dropped category + retailer
 
     const params = new URLSearchParams(window.location.search);
-    expect(params.get('dtr_nav')).toBe('quickshop');
-    expect(params.has('dtr_category')).toBe(false);
-    expect(params.has('dtr_retailer')).toBe(false);
+    expect(params.get('airo_nav')).toBe('quickshop');
+    expect(params.has('airo_category')).toBe(false);
+    expect(params.has('airo_retailer')).toBe(false);
   });
 
   test('replace uses replaceState (no history entry)', () => {
     setLocation('/');
     const startLength = window.history.length;
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.replace({ page: 'home' });
     expect(window.history.length).toBe(startLength);
-    expect(new URLSearchParams(window.location.search).get('dtr_nav')).toBe('home');
+    expect(new URLSearchParams(window.location.search).get('airo_nav')).toBe('home');
   });
 
   test('push is idempotent — same state twice does NOT stack history entries', () => {
     setLocation('/');
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push({ page: 'home' });
     const lengthAfterFirst = window.history.length;
     router.push({ page: 'home' });
@@ -179,12 +179,12 @@ describe('QueryRouter — popstate handling', () => {
   test('popstate fires onNavigate with the decoded state', () => {
     const onNavigate = vi.fn();
     const router = new QueryRouter(onNavigate, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['home', 'quickshop'],
     });
     router.start();
 
-    setLocation('/', '?dtr_nav=quickshop&dtr_category=whiskey');
+    setLocation('/', '?airo_nav=quickshop&airo_category=whiskey');
     window.dispatchEvent(new PopStateEvent('popstate'));
 
     expect(onNavigate).toHaveBeenCalledWith({
@@ -196,7 +196,7 @@ describe('QueryRouter — popstate handling', () => {
 
   test('popstate with no `<prefix>nav` slot does NOT fire onNavigate', () => {
     const onNavigate = vi.fn();
-    const router = new QueryRouter(onNavigate, { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(onNavigate, { paramPrefix: 'airo_' });
     router.start();
 
     setLocation('/', '?utm_source=newsletter');
@@ -208,11 +208,11 @@ describe('QueryRouter — popstate handling', () => {
 
   test('stop removes the popstate listener', () => {
     const onNavigate = vi.fn();
-    const router = new QueryRouter(onNavigate, { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(onNavigate, { paramPrefix: 'airo_' });
     router.start();
     router.stop();
 
-    setLocation('/', '?dtr_nav=home');
+    setLocation('/', '?airo_nav=home');
     window.dispatchEvent(new PopStateEvent('popstate'));
 
     expect(onNavigate).not.toHaveBeenCalled();
@@ -251,12 +251,12 @@ describe('routerHrefFor — link emission across all RouterOption variants', () 
   });
 
   test("{ mode: 'query', paramPrefix } honors the override", () => {
-    const opt: RouterOption = { mode: 'query', paramPrefix: 'dtr_' };
-    expect(routerHrefFor(opt, state)).toBe('?dtr_nav=quickshop&dtr_category=whiskey');
+    const opt: RouterOption = { mode: 'query', paramPrefix: 'airo_' };
+    expect(routerHrefFor(opt, state)).toBe('?airo_nav=quickshop&airo_category=whiskey');
   });
 
   test("query mode — multi-field state emits multiple discrete params", () => {
-    const opt: RouterOption = { mode: 'query', paramPrefix: 'dtr_' };
+    const opt: RouterOption = { mode: 'query', paramPrefix: 'airo_' };
     const richState = {
       page: 'quickshop',
       productId: 'abc-123',
@@ -268,10 +268,10 @@ describe('routerHrefFor — link emission across all RouterOption variants', () 
     // engines; assert by re-parsing rather than literal string match.
     expect(href.startsWith('?')).toBe(true);
     const params = new URLSearchParams(href.slice(1));
-    expect(params.get('dtr_nav')).toBe('quickshop');
-    expect(params.get('dtr_productId')).toBe('abc-123');
-    expect(params.get('dtr_category')).toBe('whiskey');
-    expect(params.get('dtr_retailer')).toBe('walmart');
+    expect(params.get('airo_nav')).toBe('quickshop');
+    expect(params.get('airo_productId')).toBe('abc-123');
+    expect(params.get('airo_category')).toBe('whiskey');
+    expect(params.get('airo_retailer')).toBe('walmart');
   });
 
   test('hash + path modes still use pathContextKey override', () => {
@@ -303,12 +303,12 @@ describe('Special-character round-trip — all three router modes', () => {
   };
 
   test('query-mode: routerHrefFor → setLocation → parseCurrent yields original', () => {
-    const opt: RouterOption = { mode: 'query', paramPrefix: 'dtr_' };
+    const opt: RouterOption = { mode: 'query', paramPrefix: 'airo_' };
     const href = routerHrefFor(opt, trickyState);
     setLocation('/', href);
 
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     expect(router.parseCurrent()).toEqual(trickyState);
@@ -317,7 +317,7 @@ describe('Special-character round-trip — all three router modes', () => {
   test('query-mode: QueryRouter.push → parseCurrent yields original (push path)', () => {
     setLocation('/');
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     router.push(trickyState);
@@ -353,10 +353,10 @@ describe('Special-character round-trip — all three router modes', () => {
     // of the same state must produce the same URL string. Otherwise
     // the idempotency check (`currentUrl() !== url`) fires false-
     // positive and a redundant history entry stacks.
-    const opt: RouterOption = { mode: 'query', paramPrefix: 'dtr_' };
+    const opt: RouterOption = { mode: 'query', paramPrefix: 'airo_' };
     setLocation('/');
 
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push(trickyState);
     const urlFromPush = window.location.pathname + window.location.search + window.location.hash;
 
@@ -371,13 +371,13 @@ describe('Special-character round-trip — all three router modes', () => {
       '/',
       '?utm_source=' + encodeURIComponent('Google & News') + '&ref=feed%2Bdaily',
     );
-    const router = new QueryRouter(vi.fn(), { paramPrefix: 'dtr_' });
+    const router = new QueryRouter(vi.fn(), { paramPrefix: 'airo_' });
     router.push({ page: 'quickshop' });
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get('utm_source')).toBe('Google & News');
     expect(params.get('ref')).toBe('feed+daily');
-    expect(params.get('dtr_nav')).toBe('quickshop');
+    expect(params.get('airo_nav')).toBe('quickshop');
   });
 });
 
@@ -388,10 +388,10 @@ describe('decodeNavParams — SSR-side decoder', () => {
 
   test('decodes a multi-field state from URLSearchParams', () => {
     const params = new URLSearchParams(
-      '?dtr_nav=quickshop&dtr_category=whiskey&dtr_retailer=walmart',
+      '?airo_nav=quickshop&airo_category=whiskey&airo_retailer=walmart',
     );
     const result = decodeNavParams(params, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     expect(result).toEqual({
@@ -410,16 +410,16 @@ describe('decodeNavParams — SSR-side decoder', () => {
   test('returns null when no `<prefix>nav` slot is present', () => {
     const params = new URLSearchParams('?utm_source=newsletter');
     const result = decodeNavParams(params, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['home'],
     });
     expect(result).toBeNull();
   });
 
   test('validPages gate — unknown page id returns null (tampering protection)', () => {
-    const params = new URLSearchParams('?dtr_nav=attacker-page');
+    const params = new URLSearchParams('?airo_nav=attacker-page');
     const result = decodeNavParams(params, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['home', 'quickshop'],
     });
     expect(result).toBeNull();
@@ -427,26 +427,26 @@ describe('decodeNavParams — SSR-side decoder', () => {
 
   test('non-prefixed params on the URL are ignored', () => {
     const params = new URLSearchParams(
-      '?utm_source=newsletter&dtr_nav=home&dtr_locale=en&ref=feed',
+      '?utm_source=newsletter&airo_nav=home&airo_locale=en&ref=feed',
     );
     const result = decodeNavParams(params, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['home'],
     });
     expect(result).toEqual({ page: 'home', locale: 'en' });
   });
 
   test('symmetric with QueryRouter.parseCurrent (same inputs, same output)', () => {
-    setLocation('/', '?dtr_nav=quickshop&dtr_category=whiskey');
+    setLocation('/', '?airo_nav=quickshop&airo_category=whiskey');
     const router = new QueryRouter(vi.fn(), {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
     const clientResult = router.parseCurrent();
 
     const serverParams = new URLSearchParams(window.location.search);
     const serverResult = decodeNavParams(serverParams, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: ['quickshop'],
     });
 

@@ -9,8 +9,8 @@
  *   3. inlines the result as `<script type="application/ld+json">`
  *      BEFORE the widget HTML
  *
- * Pattern mirrors the commerce cartridge in dotter-monorepo:
- *   packages/widget-runtime-ssr/src/cartridge/publication-adapters/products-json-ld.ts
+ * Pattern mirrors a production commerce cartridge's JSON-LD
+ * publication adapter.
  * Different source data (Shopify Storefront vs feed CDN), same output
  * surface, same framework contract.
  */

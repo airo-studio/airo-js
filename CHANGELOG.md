@@ -8,7 +8,7 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 ## `@airo-js/embed` 0.8.5 — 2026-06-10
 
-First-class per-page chunk loading. A multi-page cartridge can now ship one renderer chunk per page type and pay ~one renderer's bytes per mount instead of bundling every page. Resolves the dotter-widget-studio adoption blocker (full `defineAiroApp` adoption was regressing customer bundles ~3.6×); contract validated against two production consumers before locking.
+First-class per-page chunk loading. A multi-page cartridge can now ship one renderer chunk per page type and pay ~one renderer's bytes per mount instead of bundling every page. Resolves a production studio's adoption blocker (full `defineAiroApp` adoption was regressing customer bundles ~3.6×); contract validated against two production consumers before locking.
 
 ### Added
 - `resolveView?(cartridgeId, pageType): Promise<void>` hook on `DefineAiroAppOptions` ([`packages/embed/src/define-airo-app.ts`](packages/embed/src/define-airo-app.ts)). Called when the active page's renderer factory isn't loaded yet (core emits `'renderer:missing'`). The host loads the chunk — which self-registers to the cartridge mailbox via `pushToMailbox` — and resolves; embed re-resolves through the registry. **Transport-agnostic**: embed never assumes ESM module semantics, so a dynamic `import()` and a `<script>`-tag injection with SRI are equally valid bodies. `cartridgeId` is always the resolved `cartridge.id`.
@@ -56,7 +56,7 @@ Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source chan
 
 ## `@airo-js/core` 0.8.4 — 2026-05-27
 
-`QueryRouter` — third router mode for customer-edge SSR. Discrete prefix-namespaced URL params (one slot per nav-state field), NOT a single opaque blob. Preserves SEO + AI-agent discoverability of individual filter dimensions; supports customer-site integration (host JS can write `pushState('?dtr_category=' + value)` without knowing the framework's encoding format).
+`QueryRouter` — third router mode for customer-edge SSR. Discrete prefix-namespaced URL params (one slot per nav-state field), NOT a single opaque blob. Preserves SEO + AI-agent discoverability of individual filter dimensions; supports customer-site integration (host JS can write `pushState('?airo_category=' + value)` without knowing the framework's encoding format).
 
 ### Added
 - `QueryRouter` class implementing `IRouter` ([`packages/core/src/router.ts`](packages/core/src/router.ts)). Reads `window.location.search` via `URLSearchParams`, writes via `history.pushState` / `history.replaceState`, listens for `popstate`. Each `RouteState` field maps to its own URL param under the configured prefix; the `page` selector lands at `<prefix>nav`. Host-page params (`utm_source`, `ref`, anything not matching the prefix) preserved across pushes. Stale prefixed slots from the prior state cleared on push (so removing a filter actually drops its URL slot).
@@ -68,8 +68,8 @@ Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source chan
   routerHrefFor({ mode: 'hash' }, state)               → '#quickshop?category=whiskey'
   routerHrefFor({ mode: 'path', basePath: '/c/x' }, state)
                                                        → '/c/x/quickshop?category=whiskey'
-  routerHrefFor({ mode: 'query', paramPrefix: 'dtr_' }, state)
-                                                       → '?dtr_nav=quickshop&dtr_category=whiskey'
+  routerHrefFor({ mode: 'query', paramPrefix: 'airo_' }, state)
+                                                       → '?airo_nav=quickshop&airo_category=whiskey'
   ```
   Pure function — no DOM, no globals. Cartridges pass the same `RouterOption` they configured at mount time.
 - `decodeNavParams(searchParams, options)` — server-side decoder for query mode. Pure URL parsing; same `(searchParams, paramPrefix, validPages)` triplet yields the same `RouteState` on both sides of the SSR-then-hydrate boundary. Worker pattern:
@@ -77,7 +77,7 @@ Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source chan
   import { decodeNavParams } from '@airo-js/core';
   const url = new URL(request.url);
   const navState = decodeNavParams(url.searchParams, {
-    paramPrefix: 'dtr_',
+    paramPrefix: 'airo_',
     validPages: appConfig.pages.map((p) => p.id),
   });
   ```
@@ -85,23 +85,23 @@ Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source chan
 ### Why this shape (discrete params, not single blob)
 - **SEO discoverability.** Google indexes individual query params as meaningful filter dimensions and surfaces those URLs in search results. An opaque URL-encoded blob in one param looks like a tracking parameter to crawlers and isn't indexed. The entire customer-edge SSR initiative exists to make deep-linked content crawler-visible; single-blob would ship the plumbing without the SEO win.
 - **AI shopping agent discovery.** Same reasoning — agents inspect URL structure to discover product / category / filter dimensions.
-- **Customer-site integration.** Customer JS driving the widget from arbitrary host-page UI wants `history.pushState('?dtr_category=' + value)` not "serialize through the framework's encoding format then double-escape."
-- **Shareable / bookmarkable URLs.** Users land on readable URLs (`?dtr_category=Tennessee+Whiskey&dtr_retailer=walmart`) instead of walls of `%3F`/`%26`/`%2B`.
+- **Customer-site integration.** Customer JS driving the widget from arbitrary host-page UI wants `history.pushState('?airo_category=' + value)` not "serialize through the framework's encoding format then double-escape."
+- **Shareable / bookmarkable URLs.** Users land on readable URLs (`?airo_category=Tennessee+Whiskey&airo_retailer=walmart`) instead of walls of `%3F`/`%26`/`%2B`.
 
 ### Trade-off: QueryRouter does NOT share encoding with Hash/Path routers
 - `QueryRouter` uses its own discrete-param serializer/parser instead of the shared `stateToFragment` / `fragmentToState`. Cross-mode round-trips (decoding a hash URL with `QueryRouter` or vice versa) won't work. Each widget picks one router mode for its lifetime; cross-mode preservation isn't a real use case.
 
 ### Field-name preservation (no case conversion)
-- `productId` → `<prefix>productId`, NOT `<prefix>product_id`. Framework does no implicit case conversion. Cartridges that want different URL keys than internal field names (e.g. `dtr_product_id` URLs but `productId` internal state) either rename the state field or add a cartridge-side mapping layer.
+- `productId` → `<prefix>productId`, NOT `<prefix>product_id`. Framework does no implicit case conversion. Cartridges that want different URL keys than internal field names (e.g. `airo_product_id` URLs but `productId` internal state) either rename the state field or add a cartridge-side mapping layer.
 
 ### Encoding scope
-- String values only (matches `RouteState`'s typing — `{ page: string; [key: string]: string | undefined }`). Arrays / nested objects aren't part of the contract; cartridges wanting array values join/split themselves (`?dtr_brands=walmart,target` → `value.split(',')`).
+- String values only (matches `RouteState`'s typing — `{ page: string; [key: string]: string | undefined }`). Arrays / nested objects aren't part of the contract; cartridges wanting array values join/split themselves (`?airo_brands=walmart,target` → `value.split(',')`).
 
 ### prefix collision caveat
-- `paramPrefix` should include its own separator (`'dtr_'`, `'commerce-'`) — otherwise `dtr` would match `dtractually` during the decode scan and produce a stray state field. Default `'airo_'` includes the separator; consumer overrides should too.
+- `paramPrefix` should include its own separator (`'airo_'`, `'commerce-'`) — otherwise `dtr` would match `dtractually` during the decode scan and produce a stray state field. Default `'airo_'` includes the separator; consumer overrides should too.
 
 ### Why this exists
-- Customer-edge SSR pattern (driven by dotter-monorepo bridge thread `msg_mpm9ilzv_81ee75`): a customer installs an edge worker (Cloudflare Workers / Lambda@Edge / Shopify Oxygen) on their own CDN; the worker fetches a signed snapshot and runs per-request SSR to inject crawler-visible product HTML + JSON-LD on first paint. The worker only sees what the customer's CDN sends — `request.url.pathname + search`. Hash-mode routers fail closed in this topology because the fragment is stripped client-side before the HTTP request is built; the worker only ever sees the default view, then the client repaints after hydration → visible flicker for users and zero deep-link content for crawlers / AI shopping agents.
+- Customer-edge SSR pattern (driven by a production consumer's edge-SSR spike): a customer installs an edge worker (Cloudflare Workers / Lambda@Edge / Shopify Oxygen) on their own CDN; the worker fetches a signed snapshot and runs per-request SSR to inject crawler-visible product HTML + JSON-LD on first paint. The worker only sees what the customer's CDN sends — `request.url.pathname + search`. Hash-mode routers fail closed in this topology because the fragment is stripped client-side before the HTTP request is built; the worker only ever sees the default view, then the client repaints after hydration → visible flicker for users and zero deep-link content for crawlers / AI shopping agents.
 - Path-mode routers don't work either — on a customer's domain (`coolretailer.com/products/whiskey`) the path is owned by the customer's routing; widgets can't claim path segments.
 - Query strings are the only viable primitive: sent to the server, namespaced via prefix, survive bookmarking + sharing + crawler discovery.
 
@@ -126,7 +126,7 @@ Sync rev for `workspace:^` peerDep coherence with the 0.8.4 line. No source chan
 ### Why this exists
 - Pre-0.8.3, the only public method that could "re-attempt hydrate after chunk arrival" was `app.navigate({ page })` — but `navigate` routes through `swapRenderer`, which calls `render()` and clobbers the SSR-painted DOM. Chunked-client cartridges (§2.5b) that ship enriched SSR markup were forced into a visible flicker on every cold hydrate, even with the `'renderer:missing'` subscription pattern.
 - `hydratePage` is the symmetric primitive: `navigate` is for the CSR repaint path; `hydratePage` is for the SSR-preserve path. Use the one that matches the active page's first-paint origin.
-- The two follow-up fixes came out of the dotter-monorepo commerce yalc smoke against the 0.8.3 candidate (bridge thread `msg_mpl1ttjq_f04f2f`). 3× duplicated carousel renderers exposed the idempotency gap; alarming-looking red triangles in DevTools during normal cold-hydrate recovery exposed the over-aggressive log level.
+- The two follow-up fixes came out of a production consumer's commerce smoke test against the 0.8.3 candidate. 3× duplicated carousel renderers exposed the idempotency gap; alarming-looking red triangles in DevTools during normal cold-hydrate recovery exposed the over-aggressive log level.
 
 ### Notes
 - Zero impact on consumers that don't ship chunked SSR. All three changes are additive on the public surface (new method, new interface property, demoted log level — never tighter).
@@ -160,7 +160,7 @@ Threshold-filter API on top of the existing sink primitive — apps can tighten 
 - `resetLogLevels()` — reset global + clear all per-channel overrides. Tests' `afterEach` seam.
 
 ### Why this exists
-- Driven by the dotter-monorepo commerce yalc smoke (bridge thread `msg_mplase48_d982a5`). Three concrete consumer use cases: silence framework chatter in dev stages, `setLogLevel('warn')` for customer-facing prod consoles, `setLogLevel('silent')` for Lambda@Edge SSR where CloudWatch already owns structured logs. Filing a primitive instead of forcing every consumer to write the same ~20-line filter sink.
+- Driven by a production consumer's commerce smoke test. Three concrete consumer use cases: silence framework chatter in dev stages, `setLogLevel('warn')` for customer-facing prod consoles, `setLogLevel('silent')` for Lambda@Edge SSR where CloudWatch already owns structured logs. Filing a primitive instead of forcing every consumer to write the same ~20-line filter sink.
 
 ### Notes
 - Default threshold is `'debug'` — every event flows through. Pre-0.2.0 behaviour preserved for apps that don't call `setLogLevel`.
@@ -343,7 +343,7 @@ Sync rev for the 0.7.3 line. No API changes.
 
 ## `@airo-js/core` 0.7.2 — 2026-05-18
 
-`RenderContext.pages` — renderer-readable page graph. Closes [msg_mpbfwheu_350d52](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's commerce breadcrumb-component work).
+`RenderContext.pages` — renderer-readable page graph. Closes [msg_mpbfwheu_350d52](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during a production studio's commerce breadcrumb-component work).
 
 ### Added
 - `RenderContext.pages: ReadonlyArray<Page<TPageType>>` — required field on every `RenderContext`. PageManager populates from its `opts.pages` (originally `AppConfig.pages`). Renderers reach the full page graph without re-deriving from `template.pages` via host-side `WeakMap`-on-event-bus workaround patterns. Use with the existing `buildCrumbs(pages, activePageId, navState)` helper.
@@ -376,7 +376,7 @@ Sync rev for the 0.7.2 line. `renderAppToHTML` now populates `RenderContext.page
 
 ## `@airo-js/core` 0.7.1 — 2026-05-14
 
-Renderer-callable update seam. `RenderContext` exposes `update`, so renderers can fire `MountCartridgeResult.update()` deltas from inside listener handlers without holding the host's mount handle. Closes [msg_mp58z77m_65d9ed](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during dotter-studio's D5 planning).
+Renderer-callable update seam. `RenderContext` exposes `update`, so renderers can fire `MountCartridgeResult.update()` deltas from inside listener handlers without holding the host's mount handle. Closes [msg_mp58z77m_65d9ed](https://github.com/airo-studio/airo-js — the bridge thread that surfaced this gap during a production studio's D5 planning).
 
 ### Added
 - `RenderContext.update?: (delta: Record<string, unknown>) => Promise<UpdateResult>` — optional field on every `RenderContext`. When the App is mounted via `mountCartridge` from `@airo-js/runtime`, the framework wires this to the host's `MountCartridgeResult.update()` closure on every mount. Raw `createApp` callers without a cartridge runtime can leave it `undefined` and renderers fall through their `?.()` guard.
@@ -403,7 +403,7 @@ Two type-utilities to make `update(delta)` ergonomic for cartridge authors.
 Widens `update(delta)` to `DeepPartial<TConfig>` (was shallow `Partial<TConfig>`), aligning the static type with the runtime contract. Wires `hostUpdate` through to `createCartridgeApp` so renderers receive `ctx.update`.
 
 ### Changed
-- `MountCartridgeResult<TConfig>.update(delta)` parameter type: `Partial<TConfig>` → `DeepPartial<TConfig>` (from `@airo-js/cartridge-kit`). Backward-compatible — every shallow partial is a deep partial. Removes the cast that dotter-studio's Wave 0 smoke had to use.
+- `MountCartridgeResult<TConfig>.update(delta)` parameter type: `Partial<TConfig>` → `DeepPartial<TConfig>` (from `@airo-js/cartridge-kit`). Backward-compatible — every shallow partial is a deep partial. Removes the cast that a production studio's Wave 0 smoke had to use.
 - `UpdateResult` is now re-exported from `@airo-js/core` (the canonical home). Existing `import { UpdateResult } from '@airo-js/runtime'` keeps working unchanged.
 - `mountCartridge` restructured to define the `update` closure before `doMountInner` runs, so `hostUpdate` (a type-erased wrapper around `update`) can be passed through `createCartridgeApp` → `createApp` → `PageManager`. State vars (`currentApp`, `currentSnapshot`, `currentConfig`) declared up-front; defensive guard in `update` throws if called before initial mount completes (impossible from a renderer in practice — renderers run after mount).
 
@@ -423,7 +423,7 @@ No API changes. Sync rev for `workspace:^` peerDep coherence with the 0.7.1 line
 
 ## `@airo-js/runtime` 0.7.0 — 2026-05-13
 
-Live config deltas + the cartridge test-harness. Closes the framework gap on the dotter-studio team's tech-debt punch list (their D4 / D5 / D12 unblock with this rev).
+Live config deltas + the cartridge test-harness. Closes the framework gap on a production studio team's tech-debt punch list (their D4 / D5 / D12 unblock with this rev).
 
 ### Added
 - `MountCartridgeResult.update(delta: Partial<TConfig>): Promise<UpdateResult>` — live config delta dispatcher. Reads `cartridge.hotSwapKeys` (dot-path aware) to classify each path: covered paths hot-swap in place (existing snapshot reused, active page renderer torn down + re-rendered with fresh `ctx.app`), uncovered paths trigger a full remount with `NavigationState` preserved across the destroy/recreate. Studio chrome uses this to retire its own structural-fields lifecycle policy.
@@ -503,7 +503,7 @@ Customer-facing browser bootstrap loader. Ships ahead of demand to prevent the r
 ### Notes
 - `@airo-js/runtime ^0.2` is a **peer** dep — loaded dynamically on first element mount, not bundled. Customer pages with N widgets pay the runtime cost once. Pages with no widget elements never pay it.
 - SSR-hydrate path: when `loadConfig` returns `ssrHtml` (or `fetchSsrHtml` does), embed paints the markup AND passes `mode: 'hydrate'` to `mountCartridge`. Cartridges intending to ship to SSR pages should implement `hydrate()` on every view.
-- Idempotent registration — a second `defineAiroApp` call with the same `elementName` warns and no-ops; different names can coexist (e.g. `<dotter-app>` v1 alongside `<airo-app>` cartridge during a transition).
+- Idempotent registration — a second `defineAiroApp` call with the same `elementName` warns and no-ops; different names can coexist (e.g. `<shop-app>` v1 alongside `<airo-app>` cartridge during a transition).
 
 ## `@airo-js/runtime` 0.2.0 — 2026-05-09
 

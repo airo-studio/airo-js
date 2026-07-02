@@ -15,8 +15,8 @@
  *
  * Why PathRouter exists (vs HashRouter for everything): hash is stripped
  * by browsers before sending HTTP requests. Servers never see
- * `dotter.me/campaign/xyz#/product/abc` as `#/product/abc` — they see
- * `dotter.me/campaign/xyz` and have to entry-page-only SSR. PathRouter
+ * `example.com/campaign/xyz#/product/abc` as `#/product/abc` — they see
+ * `example.com/campaign/xyz` and have to entry-page-only SSR. PathRouter
  * gives the server the full deeplink in `req.url`, enabling zero-flash
  * SSR. The cost is the host server has to register a wildcard route
  * (`/campaign/:widgetId/*`) and call `decodeNavHint` on the path tail.

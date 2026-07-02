@@ -45,8 +45,8 @@ Design context:
 - Airo-js-bridge thread `msg_mpgtzyld_19ef1e` — framework asks this
   example motivates: `DataSource.errorPolicy` (Ask 1),
   `RenderContext.snapshotId` (Ask 2), best-practices live-edge docs (Ask 3).
-- Parallel spike in `dotter-monorepo` (Lambda@Edge / commerce cartridge) —
-  co-signed all three asks.
+- A parallel Lambda@Edge / commerce-cartridge spike validated the same
+  three asks.
 
 ## Setup
 
@@ -199,8 +199,8 @@ src/
 
 ## Framework asks this example motivates
 
-See airo-js-bridge thread `msg_mpgtzyld_19ef1e` for full context + co-signs
-from the dotter-monorepo team.
+See the framework design notes for full context on the snapshot-id timing
+convention.
 
 1. **`DataSource.errorPolicy`** — currently each cartridge's `fetch()`
    uses inline `try/catch`. Framework should formalize

@@ -79,14 +79,14 @@ Then on a customer page:
 
 ```ts
 defineAiroApp({
-  elementName: 'dotter-app',
-  idAttribute: 'dtr-id',
-  tokenAttribute: 'dtr-token',
+  elementName: 'shop-app',
+  idAttribute: 'shop-id',
+  tokenAttribute: 'shop-token',
   // ...rest
 });
 ```
 
-Customer pastes: `<dotter-app dtr-id="dw_abc" dtr-token="…">`. Custom element names must contain a hyphen (HTML spec).
+Customer pastes: `<shop-app shop-id="app_abc" shop-token="…">`. Custom element names must contain a hyphen (HTML spec).
 
 ## SSR-hydrate path
 
@@ -147,7 +147,7 @@ The chunk itself, loaded by that import, self-registers:
 import { pushToMailbox } from '@airo-js/core';
 import { QuickShopRenderer } from './quickshop-renderer.js';
 
-pushToMailbox('__AIRO_commerce_PAGES__', { key: 'quickshop', factory: () => new QuickShopRenderer() });
+pushToMailbox('__AIRO_PRODUCT_PAGES__', { key: 'quickshop', factory: () => new QuickShopRenderer() });
 ```
 
 ### `resolveView` is transport-agnostic
@@ -209,7 +209,7 @@ Without an `onError` hook, embed logs to `console.error` and leaves the host ele
 
 ## Idempotent registration
 
-`defineAiroApp` is idempotent for the same `elementName`: a second call with a name already registered logs a warning and no-ops. Different element names can coexist — one bundle can register both `<dotter-app>` (v1) and `<airo-app>` (cartridge) during a transition.
+`defineAiroApp` is idempotent for the same `elementName`: a second call with a name already registered logs a warning and no-ops. Different element names can coexist — one bundle can register both `<shop-app>` (v1) and `<airo-app>` (cartridge) during a transition.
 
 ## Peer dependency
 

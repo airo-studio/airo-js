@@ -4,8 +4,8 @@
  * "next page" controls, etc. without re-deriving from `template.pages`
  * via host-side wiring.
  *
- * Closes [msg_mpbfwheu_350d52] — dotter-studio's WeakMap-on-event-bus
- * workaround retires once their breadcrumb component reads `ctx.pages`
+ * Closes [msg_mpbfwheu_350d52] — a studio consumer's WeakMap-on-event-bus
+ * workaround retires once its breadcrumb component reads `ctx.pages`
  * directly. See CHANGELOG @airo-js/core 0.7.2 entry.
  */
 

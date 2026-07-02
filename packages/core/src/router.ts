@@ -173,12 +173,12 @@ export interface QueryRouterOptions {
    * Prefix applied to every URL search-param this router emits. The
    * page selector lands at `<prefix>nav`; every other RouteState field
    * lands at `<prefix><fieldName>` (1:1 — no case conversion). Default
-   * `'airo_'`. Override with a widget-namespaced prefix (`'dtr_'`,
+   * `'airo_'`. Override with a widget-namespaced prefix (`'airo_'`,
    * `'mywidget_'`) when running on a host page whose own query string
    * the widget shouldn't collide with.
    *
    * Prefix should normally include its own separator character
-   * (`'dtr_'`, `'commerce-'`) — otherwise `dtr` would match `dtractually`
+   * (`'airo_'`, `'commerce-'`) — otherwise `dtr` would match `dtractually`
    * during the prefix-scan decode and produce a stray state field. The
    * framework does no separator enforcement; pick a prefix that ends
    * with a non-identifier character.
@@ -203,15 +203,15 @@ export interface QueryRouterOptions {
  * prefix. The page selector lands at `<prefix>nav`:
  *
  *   { page: 'quickshop', category: 'Tennessee Whiskey', retailer: 'walmart' }
- *     → ?dtr_nav=quickshop&dtr_category=Tennessee+Whiskey&dtr_retailer=walmart
+ *     → ?airo_nav=quickshop&airo_category=Tennessee+Whiskey&airo_retailer=walmart
  *
  * Why discrete params vs a single encoded blob: search-engine crawlers
  * (Google, Bing) treat individual query params as meaningful filter
  * dimensions and surface those URLs in search results. An opaque
- * `?dotter_nav=quickshop%3Fcategory%3D...` blob looks like a tracking
+ * `?nav=quickshop%3Fcategory%3D...` blob looks like a tracking
  * parameter to crawlers and isn't indexed. AI shopping agents read URL
  * structure the same way. Customer-side JS (driving the widget from
- * the host page's own UI) wants `pushState('?dtr_category=' + value)`
+ * the host page's own UI) wants `pushState('?airo_category=' + value)`
  * not "serialize through the framework's encoding format then escape."
  * Shareable URLs land readable instead of as a wall of `%3F`/`%26`
  * escapes.
@@ -226,7 +226,7 @@ export interface QueryRouterOptions {
  * server; it strips the URL fragment client-side before the request
  * is built. A customer-edge worker (Cloudflare Workers / Lambda@Edge /
  * Shopify Oxygen) running SSR for a widget on the customer's domain
- * reads `?dtr_*` from `request.url`, decodes via `decodeNavParams`,
+ * reads `?airo_*` from `request.url`, decodes via `decodeNavParams`,
  * and renders the deep-linked view on first byte. Hash routers leave
  * the worker blind to deep-link state — visible flicker for users,
  * zero deep-link content for crawlers / agents.
@@ -251,7 +251,7 @@ export interface QueryRouterOptions {
  * existing typing — `{ page: string; [key: string]: string | undefined }`).
  * Arrays / nested objects aren't part of `RouteState`'s contract; if
  * a cartridge wants array filter values, join/split at the cartridge
- * layer (`?dtr_brands=walmart,target` → `'walmart,target'.split(',')`).
+ * layer (`?airo_brands=walmart,target` → `'walmart,target'.split(',')`).
  */
 export class QueryRouter implements IRouter {
   private onNavigate: RouterOnNavigate;
@@ -336,7 +336,7 @@ export class QueryRouter implements IRouter {
 /**
  * Reserved sub-key under `paramPrefix` that carries the page selector.
  * `<prefix>nav` was picked over `<prefix>page` to match the pre-pivot
- * convention (`paramName: 'dotter_nav'` lineage) so consumers migrating
+ * convention (a `<prefix>_nav` param lineage) so consumers migrating
  * from single-blob query mode don't have to relearn the page-selector
  * URL key.
  */
@@ -412,7 +412,7 @@ function paramsToState(
  *
  *   const url = new URL(request.url);
  *   const navState = decodeNavParams(url.searchParams, {
- *     paramPrefix: 'dtr_',
+ *     paramPrefix: 'airo_',
  *     validPages: appConfig.pages.map((p) => p.id),
  *   });
  *   // → { page: 'quickshop', category: '...', retailer: '...' } or null
@@ -452,9 +452,9 @@ export function decodeNavParams(
  *     → '#quickshop?category=whiskey'
  *   routerHrefFor({ mode: 'path', basePath: '/c/xyz' }, { page: 'quickshop' })
  *     → '/c/xyz/quickshop'
- *   routerHrefFor({ mode: 'query', paramPrefix: 'dtr_' },
+ *   routerHrefFor({ mode: 'query', paramPrefix: 'airo_' },
  *                 { page: 'quickshop', category: 'whiskey' })
- *     → '?dtr_nav=quickshop&dtr_category=whiskey'
+ *     → '?airo_nav=quickshop&airo_category=whiskey'
  *
  * Pure function — no DOM, no globals. Cartridges pass the same
  * `RouterOption` they configured at mount time; no need to thread the

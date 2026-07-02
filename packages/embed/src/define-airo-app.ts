@@ -175,13 +175,13 @@ export type EmbedPhase =
 export interface DefineAiroAppOptions extends SharedLifecycleHooks {
   /**
    * Custom element tag name. Default: 'airo-app'. Host apps pick a name
-   * that fits their brand: `<dotter-app>`, `<commerce-widget>`, etc. Custom
+   * that fits their brand: `<shop-app>`, `<commerce-widget>`, etc. Custom
    * element names must contain a hyphen per the spec.
    */
   elementName?: string;
   /**
    * Attribute name carrying the widget id. Default: 'airo-id'. Customer
-   * pastes `<airo-app airo-id="dw_abc123">` to mount.
+   * pastes `<airo-app airo-id="app_abc123">` to mount.
    */
   idAttribute?: string;
   /**
@@ -335,7 +335,7 @@ const REGISTERED_ELEMENTS = new Set<string>();
 /**
  * Register the custom element. Idempotent — calling twice with the same
  * `elementName` warns and no-ops; different element names can coexist
- * (one bundle may register both `<dotter-app>` and `<airo-app>` during
+ * (one bundle may register both `<shop-app>` and `<airo-app>` during
  * a v1 → cartridge transition).
  *
  * Server-safe: when `customElements` is undefined (SSR / old runtimes)

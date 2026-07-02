@@ -1100,7 +1100,8 @@ defineAiroApp({
 Server-side (in the host's `/load` endpoint):
 
 ```ts
-import { decodeNavHint, templateToAppConfig } from '@airo-js/core';
+import { decodeNavHint } from '@airo-js/core';
+import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { renderAppWithPublication } from '@airo-js/ssr';
 
 const navHint = req.query.nav as string | undefined;
@@ -1114,7 +1115,7 @@ const result = await renderAppWithPublication({
   appConfig,
   snapshot,
   publicationCtx,
-  entryPageId: navState?.page,  // ← deeplink target, falls back to default entry if undefined
+  initialNavState: navState ?? undefined,  // deeplink target, falls back to default entry if undefined
 });
 ```
 
@@ -1153,7 +1154,7 @@ app.get('/campaign/:widgetId/*', async (req, res) => {
     appConfig,
     snapshot,
     publicationCtx,
-    entryPageId: navState?.page,
+    initialNavState: navState ?? undefined,
   });
   res.send(/* render full page HTML with `result.html` inlined */);
 });
@@ -1165,14 +1166,14 @@ app.get('/campaign/:widgetId/*', async (req, res) => {
 
 ```
 RouteState: { page: 'quickshop', category: 'Tennessee Whiskey', retailer: 'walmart' }
-URL:        ?dtr_nav=quickshop&dtr_category=Tennessee+Whiskey&dtr_retailer=walmart
+URL:        ?airo_nav=quickshop&airo_category=Tennessee+Whiskey&airo_retailer=walmart
 ```
 
 This is the load-bearing design choice for the customer-edge use case:
 
 - **SEO discoverability.** Google indexes individual query params as meaningful filter dimensions and surfaces those URLs in search. An opaque URL-encoded blob in one param looks like a tracking parameter to crawlers; the individual product / category states inside it aren't discoverable.
 - **AI shopping agent discovery.** Same reasoning — agents read URL structure to discover product / category / filter dimensions.
-- **Customer-site integration.** Customers driving the widget from arbitrary host-page UI write `history.pushState('?dtr_category=' + value)` from their own JS — no need to know the framework's serialization format.
+- **Customer-site integration.** Customers driving the widget from arbitrary host-page UI write `history.pushState('?airo_category=' + value)` from their own JS — no need to know the framework's serialization format.
 - **Shareable URLs.** Users land on readable URLs instead of `%3F`/`%26`/`%2B` walls.
 
 Mount-time config:
@@ -1183,7 +1184,7 @@ defineAiroApp({
   loadConfig: async (id) => ({
     cartridgeId: 'commerce',
     config: { /* ... */ },
-    enableRouter: { mode: 'query', paramPrefix: 'dtr_' },
+    enableRouter: { mode: 'query', paramPrefix: 'airo_' },
   }),
   resolveCartridge: /* ... */,
 });
@@ -1192,7 +1193,8 @@ defineAiroApp({
 Server-side (in the customer-edge worker):
 
 ```ts
-import { decodeNavParams, templateToAppConfig } from '@airo-js/core';
+import { decodeNavParams } from '@airo-js/core';
+import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { renderAppWithPublication } from '@airo-js/ssr';
 
 export default {
@@ -1200,7 +1202,7 @@ export default {
     const url = new URL(request.url);
     const appConfig = templateToAppConfig(template, widgetId);
     const navState = decodeNavParams(url.searchParams, {
-      paramPrefix: 'dtr_',
+      paramPrefix: 'airo_',
       validPages: appConfig.pages.map((p) => p.id),
     });
     // → { page: 'quickshop', category: 'Tennessee Whiskey', retailer: 'walmart' } or null
@@ -1210,8 +1212,8 @@ export default {
       appConfig,
       snapshot,
       publicationCtx,
-      entryPageId: navState?.page,
-      // pass navState through to the entry page renderer as the
+      initialNavState: navState ?? undefined,
+      // passes navState through to the entry page renderer as the
       // server-side mirror of `ctx.navState` for full deep-link parity
     });
     return new Response(/* render full page HTML with `result.html` inlined */);
@@ -1230,7 +1232,7 @@ import { routerHrefFor } from '@airo-js/core';
 const href = routerHrefFor(myRouterOption, { page: 'quickshop', category: 'whiskey' });
 // hash mode  → '#quickshop?category=whiskey'
 // path mode  → '/campaign/xyz/quickshop?category=whiskey'
-// query mode → '?dtr_nav=quickshop&dtr_category=whiskey'
+// query mode → '?airo_nav=quickshop&airo_category=whiskey'
 ```
 
 Pure function — no DOM, no globals, no router instance threading required.
@@ -1238,10 +1240,10 @@ Pure function — no DOM, no globals, no router instance threading required.
 **Query-mode caveats worth knowing:**
 
 - **Field-name preservation, no case conversion.** `productId` becomes `<prefix>productId`, NOT `<prefix>product_id`. Framework does no implicit conversion. Cartridges that want different URL keys than internal field names either rename the state field or add a cartridge-side mapping layer.
-- **String values only.** `RouteState`'s contract is string-typed; arrays / nested objects aren't supported. Cartridges wanting array filter values join/split themselves (`?dtr_brands=walmart,target` → `value.split(',')`).
+- **String values only.** `RouteState`'s contract is string-typed; arrays / nested objects aren't supported. Cartridges wanting array filter values join/split themselves (`?airo_brands=walmart,target` → `value.split(',')`).
 - **Stale slots cleared on push.** `QueryRouter.push` clears all prefixed slots from the prior state before writing the new ones, so a state transition that removes a field actually drops its URL slot. Non-prefixed params (host-page `utm_*`, `ref`, etc.) preserved across pushes.
 - **Anchor-click drops non-prefixed params.** `routerHrefFor`'s output is the prefixed slots only; the browser's anchor navigation replaces the current query string at click time, dropping `utm_source` etc. If the cartridge needs to preserve them on anchor click, use `QueryRouter.push(state)` from a click handler instead of an anchor href.
-- **`paramPrefix` should include its separator.** `'dtr_'` is safe; `'dtr'` (no separator) would scan into `dtractually` and decode a stray field. Default `'airo_'` is fine; consumer overrides should also end with a non-identifier character.
+- **`paramPrefix` should include its separator.** `'airo_'` is safe; `'dtr'` (no separator) would scan into `dtractually` and decode a stray field. Default `'airo_'` is fine; consumer overrides should also end with a non-identifier character.
 - **`popstate`, not `hashchange`.** Search-only URL changes don't fire `hashchange` — QueryRouter listens for `popstate` (back / forward button).
 - **No cross-mode round-trip.** Query mode's discrete-param encoding is NOT compatible with hash / path mode's single-fragment encoding. Pick one router mode per widget for its lifetime.
 

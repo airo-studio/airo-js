@@ -95,7 +95,7 @@ export function createRegistry<T>(mailboxName: string): Registry<T> {
  *
  * Usage from a chunk:
  *   import { pushToMailbox } from '@airo-js/core';
- *   pushToMailbox('__AIRO_commerce_PAGES__', { key: 'carousel', factory: () => new CarouselRenderer() });
+ *   pushToMailbox('__AIRO_PRODUCT_PAGES__', { key: 'carousel', factory: () => new CarouselRenderer() });
  */
 export function pushToMailbox<T>(mailboxName: string, entry: RegistryEntry<T>): void {
   const g = globalThis as Record<string, unknown>;

@@ -44,8 +44,8 @@ export interface ShopifyConfig {
  * `ctx.snapshotId`. Until then, putting it on the snapshot is the
  * pragmatic way to make all three surfaces report the same id.
  *
- * snapshotId timing per dotter-monorepo team advice (bridge thread
- * msg_mpgtzyld_19ef1e): computed post-pipeline, pre-PostProcessor.
+ * snapshotId timing convention: computed post-pipeline,
+ * pre-PostProcessor.
  * In this example there are no transformers or post-processors, so
  * the snapshot the DataSource returns is the snapshot we render.
  */

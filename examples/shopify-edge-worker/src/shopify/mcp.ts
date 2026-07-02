@@ -7,7 +7,7 @@
  * cartridge's `mcpTools[]` already declares the tools in the right
  * shape, so the migration is one import path away.
  *
- * Three tools (Codex's suggestion, dotter-monorepo team co-signed):
+ * Three tools:
  *   - getProduct       — full product snapshot
  *   - getPrice         — minimal price-only payload
  *   - getAvailability  — boolean + variant SKU
@@ -16,8 +16,8 @@
  * route renders, with the same snapshotId — that's the multi-surface
  * consistency demo.
  *
- * Per dotter-monorepo team advice (bridge thread msg_mpgtzyld_19ef1e):
- * snapshotId timing is post-pipeline, pre-PostProcessor. This example
+ * Snapshot-id timing convention:
+ * snapshotId is post-pipeline, pre-PostProcessor. This example
  * has no pipeline, so the snapshot the DataSource returns IS the
  * snapshot the renderer + adapters + MCP tools consume.
  */

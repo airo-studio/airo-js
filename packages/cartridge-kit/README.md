@@ -2,7 +2,7 @@
 
 The cartridge contract for the airo framework. Defines the API surface every cartridge implements and every host application consumes.
 
-> Status: **v0.2.0-rc.x**. Validation pair (commerce skeleton + PublicationAdapter pair skeleton) compiles. Surface still subject to refinement; cartridges should target `^0.2` until `1.0` ships.
+> Status: **v0.2.0-rc.x**. PublicationAdapter pair skeleton compiles. Surface still subject to refinement; cartridges should target `^0.2` until `1.0` ships.
 
 ## What's in here
 
@@ -223,12 +223,11 @@ The registry's resolver checks the cartridge's static `views[]` first, then fall
 
 ## Validation skeletons
 
-Two compile-only skeletons live in `examples/` of the airo-js repo and prove the contract holds:
+Compile-only skeletons live in `examples/` of the airo-js repo and prove the contract holds:
 
-- `examples/cartridge-commerce-skeleton/` — full Cartridge envelope with 6 transformers, 4 views, 1 template, 3 MCP tools, 2 publication adapters.
 - `examples/publication-adapter-skeleton/` — two adapters (JSON-LD inline + XML signed-feed) sharing one snapshot type. Stresses fan-out.
 
-Run `pnpm typecheck` from the workspace root to verify both still compile.
+Run `pnpm typecheck` from the workspace root to verify they still compile.
 
 ## Contract feedback loop
 
