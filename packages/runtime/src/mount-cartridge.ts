@@ -34,6 +34,24 @@
  *                                              with NavigationState preserved).
  *                                              Result type now generic over TConfig.
  *
+ * Landed in 0.8.7:
+ *   - `update()` / `updatePages()` serialize  — concurrent calls queue FIFO instead
+ *                                              of interleaving destroy/remount cycles.
+ *                                              Hosts no longer need their own dispatch
+ *                                              queue in front of the result handle.
+ *   - `'mount:remounted'` event               — emitted on the shared bus (payload:
+ *                                              `UpdateResult`) after either dispatcher
+ *                                              takes a remount path. Remounts clear
+ *                                              `renderRoot`, so live-attached tooling
+ *                                              (editor overlays, inspectors) subscribes
+ *                                              to re-inject after renderer-initiated
+ *                                              `ctx.update` remounts it never called.
+ *   - `resolveView` chunk-recovery seam       — the Decision-1 hook, moved onto
+ *                                              `SharedLifecycleHooks` so direct
+ *                                              mountCartridge callers get the same
+ *                                              engine embed's 0.8.5 hook had; embed
+ *                                              now forwards instead of owning the loop.
+ *
  * None of these change the required surface — `cartridge`, `config`,
  * `template`, `host` remain the only required options.
  */
@@ -85,8 +103,19 @@ export interface ShellHandle {
  * Phase identifier passed to `onError`. Lets studios render different
  * error UI per phase (e.g. retry-button on fetch failure, fatal panel on
  * shell setup failure).
+ *
+ * `'resolve-view'` (0.8.7) fires from the chunk-recovery engine when a
+ * host-supplied `resolveView` load rejects — post-mount and async, unlike
+ * the other phases, so it is never accompanied by a `mountCartridge`
+ * throw; the failed load retries on the next `renderer:missing` miss.
  */
-export type MountPhase = 'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount';
+export type MountPhase =
+  | 'shell'
+  | 'gate'
+  | 'fetch'
+  | 'pipeline'
+  | 'mount'
+  | 'resolve-view';
 
 /**
  * Lifecycle hooks shared between `mountCartridge` (this package) and the
@@ -112,6 +141,37 @@ export interface SharedLifecycleHooks {
    * Sync at v0.1. Async support is additive when a real use case shows up.
    */
   onShellReady?: (shell: ShellHandle) => void;
+  /**
+   * Optional per-page chunk loader — the shared chunk-recovery seam
+   * (0.8.7; previously embed-only, 0.8.5). When the active page's
+   * renderer factory isn't registered yet, core's PageManager emits
+   * `'renderer:missing'` and the runtime routes it here so the host can
+   * load the chunk that owns `pageType`.
+   *
+   * Contract (locked 0.2.0 on the embed side; identical here):
+   *   - Return a `Promise<void>` that resolves AFTER the chunk has
+   *     registered its factory to the cartridge mailbox
+   *     (`pushToMailbox`). The runtime re-dispatches once the promise
+   *     settles; the resolved value is discarded.
+   *   - **Transport-agnostic.** The body may be a dynamic `import()`, a
+   *     `<script>`-tag injection with SRI, an import-map load, or a
+   *     no-op for an already-inlined chunk. The only contract is
+   *     "resolves when the factory is in the mailbox."
+   *
+   * The runtime owns the recovery orchestration so hosts never re-derive
+   * it: singleflight per `(cartridgeId, pageType)` with delete-on-reject
+   * (a cached rejected promise would permanently brick a chunk), a
+   * mount-ready gate (the hook can settle on a microtask — preloaded /
+   * warm-CDN chunk — before the mount promise resolves), and the
+   * hydrate-vs-navigate dispatch split (getting it wrong wipes SSR DOM).
+   * Load rejections surface via `onError` with each facade's own
+   * `'resolve-view'` phase and retry on the next miss.
+   *
+   * Without this hook, a missing renderer soft-fails (no paint) and
+   * emits `'renderer:missing'` for host-wired observability only. See
+   * best-practices.md §2.5b.
+   */
+  resolveView?: (cartridgeId: string, pageType: string) => Promise<void>;
 }
 
 /**
@@ -296,6 +356,15 @@ export type MountCartridgeResult<
        * (gates, transformers, `createCartridgeApp`); hot-swap awaits a
        * resolved promise. Callers can `await` uniformly.
        *
+       * Serialized (0.8.7): concurrent `update` / `updatePages` calls
+       * queue FIFO — a second call dispatched while a remount is in
+       * flight observes the first call's post-remount state instead of
+       * interleaving with it. A remount additionally emits
+       * `'mount:remounted'` (payload: `UpdateResult`) on `shell.events`
+       * so live-attached tooling can re-inject into the cleared
+       * renderRoot — including remounts initiated by renderers via
+       * `ctx.update`, where the host is not in the call stack.
+       *
        * Throws when a remount triggered by `update` runs into a gate
        * that returns `'block'` — same surface as initial mount blocking.
        */
@@ -321,6 +390,8 @@ export type MountCartridgeResult<
        * surface that a Component-panel editor writes.
        *
        * Async + throws on blocked-gate remount, same surface as `update`.
+       * Shares `update`'s FIFO queue and `'mount:remounted'` emission
+       * (0.8.7) — see the `update` doc above.
        */
       updatePages: (
         nextPages: ReadonlyArray<TemplatePage<TPageType>>,
@@ -449,9 +520,84 @@ export async function mountCartridge<
     widgetId,
   ).pages;
 
+  // === Chunk-recovery engine (0.8.7 — the shared seam, formerly embed
+  // Phase 6.5) ===
+  // The subscription MUST land before the initial mount below: hydrate-
+  // phase misses emit DURING createCartridgeApp, so a post-await
+  // subscriber would miss them. Three corners the engine owns so hosts
+  // don't re-derive them:
+  //   1. Singleflight per (cartridge.id, pageType), delete-on-reject —
+  //      concurrent misses collapse to one load; a cached rejected
+  //      promise would otherwise permanently brick the chunk.
+  //   2. Mount-ready gate — `resolveView` can settle on a microtask
+  //      (preloaded / warm-CDN chunk) before the mount promise resolves;
+  //      dispatching then would hit a null app and silently strand the
+  //      page. Blocked or thrown initial mounts resolve the gate `false`
+  //      so queued recoveries return instead of hanging forever.
+  //   3. Hydrate-vs-navigate dispatch — a hydrate miss re-runs hydrate
+  //      in place (SSR DOM preserved); a navigate miss repaints (CSR —
+  //      nothing to preserve). Getting this wrong wipes SSR DOM.
+  // Dispatch reads `currentApp` at fire time, so misses emitted after an
+  // `update()`/`updatePages()` remount recover against the live App, not
+  // a stale capture.
+  let signalMountReady: (ready: boolean) => void = () => {};
+  if (opts.resolveView) {
+    const resolveView = opts.resolveView;
+    const mountReady = new Promise<boolean>((res) => {
+      signalMountReady = res;
+    });
+    const inflight = new Map<string, Promise<void>>();
+    events.on('renderer:missing', async (payload: unknown) => {
+      // Documented `'renderer:missing'` payload shape from PageManager.
+      const { pageType, pageId, phase } = payload as {
+        pageType: string;
+        pageId: string;
+        phase: 'navigate' | 'hydrate';
+      };
+      // NUL separator — collision-proof against ids containing spaces;
+      // same key convention the embed-side loop used pre-0.8.7.
+      const key = `${opts.cartridge.id}\u0000${pageType}`;
+      let load = inflight.get(key);
+      if (!load) {
+        // Keep the promise on success (chunk stays loaded — repeat
+        // misses are free); evict on reject so the next miss reloads.
+        load = resolveView(opts.cartridge.id, pageType);
+        inflight.set(key, load);
+        load.catch(() => inflight.delete(key));
+      }
+      try {
+        await load;
+      } catch (err) {
+        opts.onError?.('resolve-view', err, shell);
+        return;
+      }
+      if (!(await mountReady)) return;
+      const app = currentApp;
+      if (!app) return;
+      if (phase === 'hydrate') app.hydratePage(pageId);
+      else app.navigate({ page: pageId });
+    });
+  }
+
+  // === FIFO dispatch queue (0.8.7) ===
+  // Both dispatchers below destroy + rebuild the App across an await gap;
+  // two in-flight calls would otherwise interleave (both pass the mounted
+  // guard, both remount concurrently, last writer wins on `currentApp` and
+  // the loser's config merge is lost). Serialize instead: each call chains
+  // behind the previous one, errors don't stall the queue.
+  let dispatchQueue: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(op: () => Promise<T>): Promise<T> => {
+    const run = dispatchQueue.then(op, op);
+    dispatchQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   // === Live update dispatcher (defined before doMountInner so the
   // `hostUpdate` wrapper below can reference it forward-of-call) ===
-  const update = async (delta: DeepPartial<TConfig>): Promise<UpdateResult> => {
+  const updateInner = async (delta: DeepPartial<TConfig>): Promise<UpdateResult> => {
     if (!currentApp || currentSnapshot === undefined) {
       throw new Error(
         '[@airo-js/runtime] update() called before mount completed or after destroy(). Wait for `await mountCartridge(...)` to resolve before invoking, and stop calling update from renderers post-destroy.',
@@ -486,7 +632,9 @@ export async function mountCartridge<
       currentApp = next.result.app;
       currentSnapshot = next.snapshot;
       currentConfig = newConfig;
-      return { mode: 'remount', navState };
+      const outcome: UpdateResult = { mode: 'remount', navState };
+      events.emit('mount:remounted', outcome);
+      return outcome;
     }
 
     // Hot-swap path. Existing snapshot is still valid (the cartridge
@@ -508,7 +656,7 @@ export async function mountCartridge<
   // / `enabled` / `parent` flip on an existing entry) skips the
   // classifier and routes straight to remount — page graph shape is
   // always structural regardless of the allowlist.
-  const updatePages = async (
+  const updatePagesInner = async (
     nextPagesTemplate: ReadonlyArray<TemplatePage<TPageType>>,
   ): Promise<UpdateResult> => {
     if (!currentApp || currentSnapshot === undefined) {
@@ -547,7 +695,9 @@ export async function mountCartridge<
       }
       currentApp = next.result.app;
       currentSnapshot = next.snapshot;
-      return { mode: 'remount', navState };
+      const outcome: UpdateResult = { mode: 'remount', navState };
+      events.emit('mount:remounted', outcome);
+      return outcome;
     }
 
     // Hot-swap path. Snapshot reused; replace pages on the live App and
@@ -557,6 +707,15 @@ export async function mountCartridge<
     currentPages = nextPages;
     return { mode: 'hot-swap', navState };
   };
+
+  // Public dispatchers — the serialized fronts the caller (and renderers,
+  // via `hostUpdate` below) actually invoke. Everything flows through the
+  // FIFO queue so a host never observes interleaved remounts.
+  const update = (delta: DeepPartial<TConfig>): Promise<UpdateResult> =>
+    enqueue(() => updateInner(delta));
+  const updatePages = (
+    nextPages: ReadonlyArray<TemplatePage<TPageType>>,
+  ): Promise<UpdateResult> => enqueue(() => updatePagesInner(nextPages));
 
   // Type-erased wrapper passed to PageManager as `hostUpdate`. Cast is
   // safe at runtime — `update()` walks the delta via `leafPaths` regardless
@@ -675,14 +834,26 @@ export async function mountCartridge<
   }
 
   // === Initial mount ===
-  const { result: initialResult, snapshot: initialSnapshot } = await doMountInner(
-    opts.config,
-    opts.initialNavState,
-  );
+  let initialResult: CartridgeAppResult;
+  let initialSnapshot: TData;
+  try {
+    ({ result: initialResult, snapshot: initialSnapshot } = await doMountInner(
+      opts.config,
+      opts.initialNavState,
+    ));
+  } catch (err) {
+    // Release any queued chunk recoveries — the mount they were waiting
+    // on is never coming (the M-L4 corner: reject-on-blocked/failed so
+    // recoveries don't strand on a never-resolving gate).
+    signalMountReady(false);
+    throw err;
+  }
 
-  // Sync state vars with the initial mount results.
+  // Sync state vars with the initial mount results BEFORE releasing the
+  // recovery gate, so a queued dispatch sees the live app.
   if (!initialResult.blocked) currentApp = initialResult.app;
   currentSnapshot = initialSnapshot;
+  signalMountReady(!initialResult.blocked);
 
   // Unified teardown. Caller gets one destroy() regardless of which branch
   // they're on; the framework knows what to clean up either way. The

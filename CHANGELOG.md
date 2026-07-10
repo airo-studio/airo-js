@@ -6,6 +6,73 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/runtime` 0.8.7 — 2026-07-10
+
+Editor-attach + chunk-recovery hardening. All three items originate from a production consumer's validation of the `MountCartridgeResult`-as-attach-handle pattern: two lifecycle gaps their overlay tooling hit, plus the Decision-1 recovery engine that 0.8.5 was meant to put on `mountCartridge` but landed embed-only.
+
+### Added
+- `resolveView?(cartridgeId, pageType): Promise<void>` on `SharedLifecycleHooks` ([`packages/runtime/src/mount-cartridge.ts`](packages/runtime/src/mount-cartridge.ts)) — the per-page chunk loader hook, previously available only via `defineAiroApp` (0.8.5). Direct `mountCartridge` callers now get the shared recovery engine: singleflight per `(cartridgeId, pageType)` with delete-on-reject (a cached rejection would permanently brick a chunk; the next miss retries), a mount-ready gate (a preloaded chunk settling on a microtask can no longer dispatch before the App exists; blocked or failed mounts release the gate so queued recoveries return instead of stranding), and the hydrate-vs-navigate dispatch split (`hydratePage()` preserves SSR DOM on a hydrate miss; `navigate()` repaints on a CSR miss). Dispatch reads the live App at fire time, so misses emitted after an `update()`/`updatePages()` remount recover against the current instance — an improvement over the 0.8.5 embed loop's mount-time capture. Same transport-agnostic contract as the embed hook: resolve after the chunk self-registers via `pushToMailbox`; the body may be dynamic `import()`, `<script>` + SRI, or a no-op.
+- `'mount:remounted'` event on `shell.events` (payload: `UpdateResult`), emitted after either dispatcher takes a remount path. Remounts clear `renderRoot`, and renderer-initiated `ctx.update` remounts happen with no host in the call stack — live-attached tooling (editor overlays, inspectors) subscribes to re-inject. The bus instance survives remounts, so subscriptions hold. Hot-swap paths do not emit.
+- `'resolve-view'` value on `MountPhase` — fires via `onError` when a `resolveView` load rejects. Async and post-mount, unlike the other phases: never accompanied by a `mountCartridge` throw; the failed load retries on the next miss.
+
+### Fixed
+- `update()` / `updatePages()` now serialize FIFO. Concurrent calls previously interleaved: both passed the mounted-guard during the other's await gap, both destroyed + remounted, last-writer-won on the live App (leaking the loser's) and config merges computed from stale state were lost. Hosts can delete dispatch queues they built in front of the result handle; a rejected dispatch does not stall the queue.
+
+## `@airo-js/embed` 0.8.7 — 2026-07-10
+
+### Changed
+- The Phase-6.5 chunk-recovery loop is deleted; `defineAiroApp` now forwards `resolveView` to `mountCartridge` via `SharedLifecycleHooks` (whose mapped-type forwarding makes the wiring compile-enforced) and maps the runtime's `'resolve-view'` error phase to `EmbedPhase`. Behavior is unchanged — embed's existing `resolveView` tests pass through the forward — but the engine is now authored once, and the pre-mount subscription timing is owned by the runtime.
+
+### Notes
+- Entry bundle drops from the 5.00 KB minified ceiling (5,118 / 5,120 B) to 4.52 KB (4,632 B); gzip from 2.18 to 1.96 KB against the 2.50 KB budget. The recovery loop was the tightest thing under the budget; the forward restores real headroom.
+
+## `@airo-js/core` 0.8.7 — 2026-07-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.7 line. No source change.
+
+## `@airo-js/cartridge-kit` 0.8.7 — 2026-07-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.7 line. No source change.
+
+## `@airo-js/ssr` 0.8.7 — 2026-07-10
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.7 line. No source change.
+
+## `@airo-js/cartridge-kit` 0.8.6 — 2026-06-11
+
+> Backfilled 2026-07-10 — the 0.8.6 line commit (`27124a2`) shipped without a changelog entry.
+
+Global↔component prop linking. Promotes a production consumer's studio-side global/component settings registry into a declarative cartridge-kit primitive.
+
+### Added
+- `PropSchema.globalConfigKey?: string` ([`packages/cartridge-kit/src/editor-schema.ts`](packages/cartridge-kit/src/editor-schema.ts)) — a dot-path into `TConfig` linking a component prop to a global config field. Shared key = one global bus; per-instance override stays independent.
+- `resolveComponentProp(…, config?)` — additive global tier resolved between slot value and schema default.
+- `getByPath` / `hasByPath` / `setByPath` path utilities (`setByPath` = immutable copy-spine).
+- `deriveGlobalOptions(componentSchemas)` → `GlobalOption[]` — editor-side enumeration of linkable globals.
+- `validateGlobalConfigKeys` / `assertGlobalConfigKeys` — author-time typo catcher; `hasByPath` in-walk distinguishes absent path from present-but-undefined.
+
+### Changed
+- `CONTRACT_VERSION` 0.5.0 → 0.6.0.
+
+### Notes
+- Same cut: `scripts/yalc-publish.mjs` rewrites `workspace:` ranges to concrete semver in the yalc flow (yalc copies package.json verbatim, so npm-based consumers of yalc builds previously hit `EUNSUPPORTEDPROTOCOL`); `publish.sh` drops the stale cartridge-kit `--tag rc`; `examples/llms-txt-adapter` added (llms.txt as one PublicationAdapter).
+
+## `@airo-js/core` 0.8.6 — 2026-06-11
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.6 line. No source change.
+
+## `@airo-js/runtime` 0.8.6 — 2026-06-11
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.6 line. No source change.
+
+## `@airo-js/ssr` 0.8.6 — 2026-06-11
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.6 line. No source change.
+
+## `@airo-js/embed` 0.8.6 — 2026-06-11
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.6 line. No source change.
+
 ## `@airo-js/embed` 0.8.5 — 2026-06-10
 
 First-class per-page chunk loading. A multi-page cartridge can now ship one renderer chunk per page type and pay ~one renderer's bytes per mount instead of bundling every page. Resolves a production studio's adoption blocker (full `defineAiroApp` adoption was regressing customer bundles ~3.6×); contract validated against two production consumers before locking.

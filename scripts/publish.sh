@@ -84,6 +84,24 @@ PACKAGES=(
 # has been pushed to GitHub and main tracks origin/main.
 PUBLISH_FLAGS="--no-git-checks"
 
+# ---- helpers ---------------------------------------------------------------
+
+# Resolve the local version of a workspace package by reading its package.json.
+# Uses `pnpm --filter --silent exec node -p` so this works without bash 4
+# (no associative arrays needed). Whitespace stripped to handle trailing
+# newlines from `node -p`.
+local_version() {
+  pnpm --filter "$1" --silent exec node -p 'require("./package.json").version' 2>/dev/null \
+    | tr -d '[:space:]'
+}
+
+# Returns 0 if `<pkg>@<version>` exists on the registry, 1 otherwise.
+# Network errors propagate as exit 1 (skip-on-failure would silently swallow
+# real problems); the caller can re-run after a transient blip.
+registry_has() {
+  npm view "$1@$2" version >/dev/null 2>&1
+}
+
 # ---- preflight -------------------------------------------------------------
 
 echo "==> Preflight"
@@ -100,6 +118,45 @@ if [[ "$apply" == "1" ]]; then
   fi
   who="$(npm whoami)"
   echo "    npm user: $who"
+fi
+
+# ---- changelog gate ---------------------------------------------------------
+# Every version this run would publish MUST have a matching CHANGELOG.md
+# entry of the form "## `<pkg>` <version> — <date>". Versions already on the
+# registry are exempt (released before the gate existed, or a partial-release
+# re-run). Runs in dry-run too, so the gap surfaces before the release
+# ritual, not during it. Added 2026-07-10 after the 0.8.6 line reached npm
+# with no changelog entry.
+
+echo
+echo "==> Changelog gate"
+changelog_missing=0
+for entry in "${PACKAGES[@]}"; do
+  # shellcheck disable=SC2086  # intentional split: "<filter> [extra-flags]"
+  set -- $entry
+  pkg="$1"
+  version="$(local_version "$pkg")"
+  if [[ -z "$version" ]]; then
+    echo "    error: couldn't read local version for $pkg" >&2
+    exit 1
+  fi
+  if registry_has "$pkg" "$version"; then
+    echo "    $pkg@$version — already on registry (exempt)"
+    continue
+  fi
+  if grep -qF "## \`$pkg\` $version" "$REPO_ROOT/CHANGELOG.md"; then
+    echo "    $pkg@$version — entry found"
+  else
+    echo "    $pkg@$version — MISSING changelog entry" >&2
+    changelog_missing=1
+  fi
+done
+if [[ "$changelog_missing" == "1" ]]; then
+  echo >&2
+  echo "error: changelog gate failed. Add a '## \`<pkg>\` <version> — <date>' entry" >&2
+  echo "to CHANGELOG.md for every version flagged above, then re-run. Sync revs" >&2
+  echo "with no source change still get a stub entry (see the 0.8.x precedents)." >&2
+  exit 1
 fi
 
 # ---- build -----------------------------------------------------------------
@@ -120,6 +177,7 @@ if [[ "$apply" != "1" ]]; then
   echo "    (note: dist/.tsbuildinfo will appear here; prepublishOnly strips"
   echo "     it on actual publish, so the real tarball is ~17 kB smaller)"
   for entry in "${PACKAGES[@]}"; do
+    # shellcheck disable=SC2086  # intentional split: "<filter> [extra-flags]"
     set -- $entry
     pkg="$1"
     shift || true
@@ -156,23 +214,8 @@ fi
 
 # ---- publish ---------------------------------------------------------------
 
-# Resolve the local version of a workspace package by reading its package.json.
-# Uses `pnpm --filter --silent exec node -p` so this works without bash 4
-# (no associative arrays needed). Whitespace stripped to handle trailing
-# newlines from `node -p`.
-local_version() {
-  pnpm --filter "$1" --silent exec node -p 'require("./package.json").version' 2>/dev/null \
-    | tr -d '[:space:]'
-}
-
-# Returns 0 if `<pkg>@<version>` exists on the registry, 1 otherwise.
-# Network errors propagate as exit 1 (skip-on-failure would silently swallow
-# real problems); the caller can re-run after a transient blip.
-registry_has() {
-  npm view "$1@$2" version >/dev/null 2>&1
-}
-
 for entry in "${PACKAGES[@]}"; do
+  # shellcheck disable=SC2086  # intentional split: "<filter> [extra-flags]"
   set -- $entry
   pkg="$1"
   shift || true

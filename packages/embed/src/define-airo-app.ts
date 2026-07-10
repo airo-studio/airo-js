@@ -41,7 +41,6 @@ import { logger } from '@airo-js/log';
 
 import type { Cartridge, TemplatePage } from '@airo-js/cartridge-kit';
 import type {
-  IEventBus,
   NavigationState,
   RouterOption,
   StyleIsolation,
@@ -249,10 +248,11 @@ export interface DefineAiroAppOptions extends SharedLifecycleHooks {
    *   - `cartridgeId` is always the resolved `cartridge.id` (the key the
    *     chunk registry is keyed on) — reconstruct your transport/manifest
    *     key from `(cartridgeId, pageType)` as needed.
-   *   - embed singleflights calls per `(cartridgeId, pageType)` with
-   *     delete-on-reject, so this hook need not dedupe: concurrent misses
-   *     for the same view collapse to one call; a rejected load retries
-   *     on the next miss.
+   *   - The recovery engine is owned by `mountCartridge` since 0.8.7
+   *     (embed forwards this hook via `SharedLifecycleHooks`): calls are
+   *     singleflighted per `(cartridgeId, pageType)` with delete-on-reject,
+   *     so the hook need not dedupe — concurrent misses for the same view
+   *     collapse to one call; a rejected load retries on the next miss.
    *
    * Without this hook, a missing renderer soft-fails (no paint) and emits
    * `'renderer:missing'` for host-wired observability only — the same
@@ -318,16 +318,6 @@ interface MountHandle {
   updatePages?: (
     nextPages: ReadonlyArray<TemplatePage>,
   ) => Promise<{ mode: 'hot-swap' | 'remount'; navState: unknown }>;
-  /**
-   * Live App handle — structural subset used by the chunk-recovery
-   * dispatch (`resolveView`). `navigate` repaints (CSR miss); `hydratePage`
-   * re-runs hydrate in place against the SSR DOM (hydrate miss). Optional
-   * because the gate-blocked mount branch may not expose an app.
-   */
-  app?: {
-    hydratePage: (pageId: string) => void;
-    navigate: (state: Partial<NavigationState>) => void;
-  };
 }
 
 const REGISTERED_ELEMENTS = new Set<string>();
@@ -485,86 +475,22 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       // never statically importing — esbuild + tsc treat dynamic import
       // as a chunk boundary.
       let mountCartridge: typeof import('@airo-js/runtime').mountCartridge;
-      let EventBus: typeof import('@airo-js/runtime').EventBus;
       try {
-        ({ mountCartridge, EventBus } = await import('@airo-js/runtime'));
+        ({ mountCartridge } = await import('@airo-js/runtime'));
       } catch (err) {
         emitError(opts, 'mount', err, this);
         return;
       }
       if (this.disposed) return;
 
-      // Phase 6.5 — chunk-recovery wiring. Only when the host supplies
-      // `resolveView`. embed owns two things generically here that every
-      // chunked-client host would otherwise hand-roll (best-practices §2.5b):
-      //   1. Singleflight per (cartridge.id, pageType) with delete-on-reject
-      //      — concurrent misses collapse to one load; a failed load retries.
-      //   2. The hydrate-vs-navigate dispatch — getting this wrong wipes the
-      //      SSR DOM, so it must not be left to each host.
-      // The subscription MUST land before mountCartridge runs: the phase-5
-      // hydrate emission fires DURING mount, so a post-await `result.app`
-      // subscriber would miss it. We reuse the host's bus if they passed one
-      // (so their own observability subscribers still see the event), else
-      // construct one and hand it to the runtime.
-      // Resolves with the live App handle once Phase 7 finishes mounting
-      // (or `undefined` if the mount fails / the element is disposed). The
-      // recovery handler awaits this before dispatching: the CSR-navigate
-      // and SSR-hydrate misses both emit DURING mount, before `this.mount`
-      // is set — and `resolveView` can settle on a microtask (a preloaded
-      // or cached chunk), so we cannot assume the mount finished by the time
-      // the chunk did. Gating on this deferred removes the race.
-      let signalMounted: (app: MountHandle['app']) => void = () => {};
-      let events = opts.events;
-      if (opts.resolveView) {
-        const resolveView = opts.resolveView;
-        const mounted = new Promise<MountHandle['app']>((res) => {
-          signalMounted = res;
-        });
-        // Reuse the host's bus if they passed one; else construct one from
-        // `EventBus` pulled off the runtime module dynamic-imported above
-        // (Phase 6) — NOT a static `@airo-js/core` import, which would
-        // inflate the embed entry bundle past its size budget. The runtime
-        // chunk already carries EventBus, so this costs the entry zero bytes.
-        const bus: IEventBus = opts.events ?? new EventBus();
-        events = bus;
-        const inflight = new Map<string, Promise<void>>();
-        // Bus payloads are typed `unknown` (the bus is string-keyed); this
-        // is the documented `'renderer:missing'` shape from PageManager.
-        bus.on('renderer:missing', async (payload: unknown) => {
-          const { pageType, pageId, phase } = payload as {
-            pageType: string;
-            pageId: string;
-            phase: 'navigate' | 'hydrate';
-          };
-          // No disposed guard here — the post-`await mounted` check below
-          // gates every DOM mutation; a stray resolveView on a disposed
-          // element is harmless and singleflighted.
-          const key = `${cartridge.id} ${pageType}`;
-          let load = inflight.get(key);
-          if (!load) {
-            // Keep the promise on success (chunk stays loaded — repeat
-            // misses are free); evict on reject so the next miss reloads.
-            // Same shape as a host-side asset-loader singleflight.
-            load = resolveView(cartridge.id, pageType);
-            inflight.set(key, load);
-            load.catch(() => inflight.delete(key));
-          }
-          try {
-            await load;
-          } catch (err) {
-            emitError(opts, 'resolve-view', err, this);
-            return;
-          }
-          // Wait for the mount to finish so `app` is live regardless of
-          // whether the chunk resolved before or after mountCartridge
-          // returned. hydrate miss keeps the SSR DOM in place; navigate
-          // miss repaints from scratch (CSR — no SSR markup to preserve).
-          const app = await mounted;
-          if (!app || this.disposed) return;
-          if (phase === 'hydrate') app.hydratePage(pageId);
-          else app.navigate({ page: pageId });
-        });
-      }
+      // Phase 6.5 is gone (0.8.7): the chunk-recovery engine (singleflight
+      // + delete-on-reject, mount-ready gate, hydrate-vs-navigate dispatch)
+      // moved into `mountCartridge` as the shared `SharedLifecycleHooks`
+      // seam, so direct runtime callers get the same engine. embed forwards
+      // `resolveView` below and maps the engine's 'resolve-view' error
+      // phase back to `EmbedPhase`. The runtime subscribes on its bus
+      // before the phase-5 hydrate emission, preserving the pre-mount
+      // timing embed used to own here.
 
       // Phase 7 — mount.
       //
@@ -579,11 +505,11 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
       const sharedHooks: { [K in keyof Required<SharedLifecycleHooks>]: SharedLifecycleHooks[K] } = {
         events: opts.events,
         onShellReady: opts.onShellReady,
+        resolveView: opts.resolveView,
       };
       try {
         const result = await mountCartridge({
           ...sharedHooks,
-          events,
           cartridge,
           config: loaded.config,
           template,
@@ -594,11 +520,20 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           preloadedData: loaded.preloadedData,
           initialNavState: loaded.initialNavState,
           mode: hydrating ? 'hydrate' : 'csr',
+          onError: (phase, err) => {
+            // The shared chunk-recovery engine reports async load
+            // failures through the runtime's onError; map to embed's
+            // phase vocabulary. Every other runtime phase re-throws from
+            // mountCartridge and is reported by the catch below as
+            // 'mount' — forwarding those here would double-report.
+            if (phase === 'resolve-view') emitError(opts, 'resolve-view', err, this);
+          },
         });
         if (this.disposed) {
           // Element disconnected mid-mount — tear down what we just built.
+          // The runtime's recovery engine dispatches against the destroyed
+          // App, whose lifecycle FSM no-ops — no stray DOM mutations.
           result.destroy();
-          signalMounted(undefined);
           return;
         }
         // Structural cast: at the embed boundary TConfig is type-erased.
@@ -607,16 +542,11 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         // path widens to `unknown` because attribute-driven mounts can't
         // express TConfig at compile time.
         this.mount = result as unknown as MountHandle;
-        // Release any chunk-recovery handler waiting on the live App handle
-        // (no-op when `resolveView` isn't wired). Must fire AFTER `this.mount`
-        // is set so a pending `renderer:missing` recovery sees the handle.
-        signalMounted(this.mount.app);
         if (!result.blocked) {
           opts.onMounted?.(id, this);
         }
       } catch (err) {
         emitError(opts, 'mount', err, this);
-        signalMounted(undefined);
       }
     }
 
