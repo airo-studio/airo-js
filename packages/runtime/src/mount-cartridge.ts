@@ -138,6 +138,15 @@ export interface SharedLifecycleHooks {
    * styles, attach theme engines, register debug observers. Do NOT use
    * for content rendering — the runtime mounts page renderers later.
    *
+   * **Ordering guarantee (contract, not incident):** `onShellReady` runs
+   * synchronously in the shell phase, before the data fetch, pipeline,
+   * and mount phases. A `shell.events` subscription made here observes
+   * every emission from the render/hydrate phase — including events
+   * components fire during their initial render. The runtime's own
+   * chunk-recovery engine relies on this same subscribe-before-mount
+   * ordering, so it cannot regress silently. `defineAiroApp` forwards
+   * this hook unchanged; the guarantee holds through both facades.
+   *
    * Sync at v0.1. Async support is additive when a real use case shows up.
    */
   onShellReady?: (shell: ShellHandle) => void;

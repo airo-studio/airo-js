@@ -340,6 +340,10 @@ const result = await mountCartridge({
 
 `app.hydratePage(pageId)` exists specifically for this recovery — calling `app.navigate({ page })` on a `phase: 'hydrate'` miss would route through the CSR `swapRenderer` path and repaint, wiping the SSR DOM. The two methods are not interchangeable for chunked SSR cartridges.
 
+**Subscribe to `'navigation:changed'` for per-page observability (analytics, logging).** `PageManager` emits `'navigation:changed'` on the App event bus — the same bus as `shell.events` — with the full `NavigationState` payload (`{ page, ...contextParams }`). It fires on: initial mount (exactly once, CSR and hydrate paths both), every top-level navigation, and subpage activation. It does NOT fire on `update()` / `updatePages()` remounts — those are config deltas, not navigations, so a page-view metric won't double-count on hot-swap. Two caveats: the emission fires even when a `navigate()` call is a no-op (same page, same context) — dedupe by payload equality if your sink is count-sensitive; and the payload carries the page *id*, so map id → `page.type` via your template's page graph if your vocabulary is type-keyed.
+
+**`onShellReady` runs before the render phase — guaranteed.** The mount sequence is shell → `onShellReady` → data → pipeline → mount, and `onShellReady` is synchronous. A `shell.events` subscription made inside it observes every emission from the render/hydrate phase, including events components fire during their initial render (auto-fire on mount, hydrate-phase misses). This is documented contract, not observed behavior — build event bridges (analytics, debug observers) on it freely. Equivalent alternative: pre-build the bus and pass it via `options.events` as shown above.
+
 ### 2.6 Subfolder-per-page beats flat `views/`
 
 **The trap:** flat `views/CategoriesRenderer.ts`, `views/ProductsRenderer.ts`, etc. Works for skeletons; breaks once renderers gain sub-views, page-specific styles, scoped components.
