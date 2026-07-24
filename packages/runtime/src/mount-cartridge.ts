@@ -83,6 +83,9 @@ import type {
   TemplatePage,
 } from '@airo-js/cartridge-kit';
 import { createCartridgeApp, templateToAppConfig } from '@airo-js/cartridge-kit';
+import { initLogControls, logger } from '@airo-js/log';
+
+const log = logger('runtime');
 
 /**
  * Handle exposed to `onShellReady`. Studios attach theme engines, inject
@@ -108,6 +111,9 @@ export interface ShellHandle {
  * host-supplied `resolveView` load rejects — post-mount and async, unlike
  * the other phases, so it is never accompanied by a `mountCartridge`
  * throw; the failed load retries on the next `renderer:missing` miss.
+ * Since 0.8.8 it also fires when a load *resolves* but the chunk never
+ * registers a renderer for the missed page type (bad `pushToMailbox`
+ * key / mailbox name) — the other way a chunk "did not load".
  */
 export type MountPhase =
   | 'shell'
@@ -439,6 +445,11 @@ export async function mountCartridge<
 >(
   opts: MountCartridgeOptions<TData, TConfig, TPageType>,
 ): Promise<MountCartridgeResult<TConfig, TPageType>> {
+  // ?airo-log= opt-in (0.8.8): with the default threshold at 'error',
+  // this is how any surface chooses its output level. Once-guarded in
+  // @airo-js/log; browser-only; no-op when neither URL param nor the
+  // persisted __airo_log key is present.
+  initLogControls();
   const isolation: StyleIsolation = opts.styleIsolation ?? 'shadow';
   const mode: 'csr' | 'hydrate' = opts.mode ?? 'csr';
   const events: IEventBus = opts.events ?? new EventBus();
@@ -533,7 +544,7 @@ export async function mountCartridge<
   // Phase 6.5) ===
   // The subscription MUST land before the initial mount below: hydrate-
   // phase misses emit DURING createCartridgeApp, so a post-await
-  // subscriber would miss them. Three corners the engine owns so hosts
+  // subscriber would miss them. Four corners the engine owns so hosts
   // don't re-derive them:
   //   1. Singleflight per (cartridge.id, pageType), delete-on-reject —
   //      concurrent misses collapse to one load; a cached rejected
@@ -546,6 +557,11 @@ export async function mountCartridge<
   //   3. Hydrate-vs-navigate dispatch — a hydrate miss re-runs hydrate
   //      in place (SSR DOM preserved); a navigate miss repaints (CSR —
   //      nothing to preserve). Getting this wrong wipes SSR DOM.
+  //   4. Registration-failure detection (0.8.8) — a load that resolves
+  //      without registering the missed page type would otherwise loop
+  //      forever (dispatch → miss → cached resolved load → dispatch).
+  //      One re-dispatch is allowed; a re-miss after a resolved load is
+  //      a hard error (log.error + onError('resolve-view')), then reset.
   // Dispatch reads `currentApp` at fire time, so misses emitted after an
   // `update()`/`updatePages()` remount recover against the live App, not
   // a stale capture.
@@ -556,6 +572,17 @@ export async function mountCartridge<
       signalMountReady = res;
     });
     const inflight = new Map<string, Promise<void>>();
+    // Keys whose load resolved and whose recovery already dispatched once.
+    // A miss arriving for a key already in here means the chunk loaded
+    // WITHOUT registering a renderer for the missed page type — without
+    // this guard that case loops forever (dispatch → miss → cached
+    // resolved load → dispatch → …) and never surfaces an error.
+    const recovered = new Set<string>();
+    // Keys whose re-dispatch re-missed. `EventBus.emit` is synchronous,
+    // so the re-miss lands in this handler (and flags the key here)
+    // DURING the dispatching invocation's `hydratePage`/`navigate` call —
+    // letting the dispatcher skip the success log for a failed recovery.
+    const remissed = new Set<string>();
     events.on('renderer:missing', async (payload: unknown) => {
       // Documented `'renderer:missing'` payload shape from PageManager.
       const { pageType, pageId, phase } = payload as {
@@ -566,6 +593,11 @@ export async function mountCartridge<
       // NUL separator — collision-proof against ids containing spaces;
       // same key convention the embed-side loop used pre-0.8.7.
       const key = `${opts.cartridge.id}\u0000${pageType}`;
+      // Read synchronously at entry: `true` only for a re-miss emitted
+      // during our own dispatch below (registration failure), never for
+      // a second pre-dispatch miss racing the same in-flight load.
+      const rerun = recovered.has(key);
+      if (rerun) remissed.add(key);
       let load = inflight.get(key);
       if (!load) {
         // Keep the promise on success (chunk stays loaded — repeat
@@ -577,14 +609,48 @@ export async function mountCartridge<
       try {
         await load;
       } catch (err) {
+        log.error(
+          `chunk load failed for page type "${pageType}" — resolveView rejected. The next miss retries.`,
+          err,
+          { pageType, pageId, phase, cartridgeId: opts.cartridge.id },
+        );
+        opts.onError?.('resolve-view', err, shell);
+        return;
+      }
+      if (rerun) {
+        // The load resolved but the previous dispatch still missed: the
+        // chunk executed without registering this page type. Reset the
+        // key so a later attempt (e.g. after the host fixes the chunk)
+        // starts a fresh load instead of replaying this stale one.
+        const err = new Error(
+          `chunk for page type "${pageType}" loaded but registered no renderer — check the chunk's pushToMailbox key against the cartridge's mailboxName and view keys.`,
+        );
+        log.error(err.message, undefined, {
+          pageType,
+          pageId,
+          phase,
+          cartridgeId: opts.cartridge.id,
+        });
+        recovered.delete(key);
+        remissed.delete(key);
+        inflight.delete(key);
         opts.onError?.('resolve-view', err, shell);
         return;
       }
       if (!(await mountReady)) return;
       const app = currentApp;
       if (!app) return;
+      // Add BEFORE dispatching — the re-miss (if any) fires synchronously
+      // inside the dispatch and must see the key as already recovered.
+      recovered.add(key);
       if (phase === 'hydrate') app.hydratePage(pageId);
       else app.navigate({ page: pageId });
+      if (!remissed.has(key)) {
+        log.info(
+          `chunk loaded — page type "${pageType}" ${phase === 'hydrate' ? 'hydrated' : 'rendered'} after recovery.`,
+          { pageType, pageId, phase, cartridgeId: opts.cartridge.id },
+        );
+      }
     });
   }
 

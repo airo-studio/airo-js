@@ -231,6 +231,7 @@ describe("'renderer:missing' event", () => {
   test("logs renderer:missing at 'warn' when no subscriber is wired", async () => {
     const captured: AiroEvent[] = [];
     setSink({ emit: (e) => captured.push(e) });
+    setLogLevel('debug'); // default threshold is 'error' (0.3.0) — open the tap for capture
 
     // Note: NO events subscriber on renderer:missing — the warn signal
     // exists exactly for hosts that haven't wired the recovery seam.
@@ -255,11 +256,14 @@ describe("'renderer:missing' event", () => {
   test("logs renderer:missing at 'info' when a subscriber IS wired (recoverable path)", async () => {
     const captured: AiroEvent[] = [];
     setSink({ emit: (e) => captured.push(e) });
+    setLogLevel('debug');
 
     // Subscriber wired BEFORE mount — same shape consumers use for
     // chunk-load recovery. The presence of a subscriber means the
     // missing-factory case is a documented recovery flow, not a
-    // misconfiguration; log demotes from warn to info.
+    // misconfiguration; log demotes from warn to info AND the wording
+    // flips from "no renderer registered" (misconfiguration) to
+    // "not loaded yet — recovery in flight" (deferred, expected).
     const events = new EventBus();
     events.on('renderer:missing', () => {
       /* recovery handler */
@@ -277,11 +281,16 @@ describe("'renderer:missing' event", () => {
       preloadedData: { items: [] },
     });
 
-    const rendererMissingLogs = captured.filter(
-      (e) => e.msg.startsWith('no renderer registered'),
+    const deferredLogs = captured.filter(
+      (e) => e.msg.startsWith('page chunk for'),
     );
-    expect(rendererMissingLogs).toHaveLength(1);
-    expect(rendererMissingLogs[0]?.level).toBe('info');
+    expect(deferredLogs).toHaveLength(1);
+    expect(deferredLogs[0]?.level).toBe('info');
+    expect(deferredLogs[0]?.msg).toContain('recovery in flight');
+    // The misconfiguration wording never appears on the recoverable path.
+    expect(
+      captured.filter((e) => e.msg.startsWith('no renderer registered')),
+    ).toHaveLength(0);
   });
 
   test('setLogLevel("warn") drops the info-level recoverable-renderer:missing log entirely', async () => {
@@ -312,7 +321,9 @@ describe("'renderer:missing' event", () => {
     });
 
     const rendererMissingLogs = captured.filter(
-      (e) => e.msg.startsWith('no renderer registered'),
+      (e) =>
+        e.msg.startsWith('no renderer registered') ||
+        e.msg.startsWith('page chunk for'),
     );
     // Log dropped by the threshold filter.
     expect(rendererMissingLogs).toHaveLength(0);

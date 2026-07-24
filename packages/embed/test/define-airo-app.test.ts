@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { EventBus, pushToMailbox } from '@airo-js/core';
+import { resetLogLevels, setLogLevel } from '@airo-js/log';
 
 import { defineAiroApp } from '../src/define-airo-app.js';
 import {
@@ -19,12 +20,16 @@ beforeEach(() => {
   document.body.appendChild(host);
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
   consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // Default threshold is 'error' (@airo-js/log 0.3.0) — open the tap so
+  // the console spies still see warn-level framework output.
+  setLogLevel('debug');
 });
 
 afterEach(() => {
   host.remove();
   consoleError.mockRestore();
   consoleWarn.mockRestore();
+  resetLogLevels();
 });
 
 /** Mount a fresh `<elementName airo-id="...">` under `host`. */
@@ -593,8 +598,12 @@ describe('defineAiroApp', () => {
     });
 
     expect(consoleWarn).toHaveBeenCalledTimes(1);
-    // Args from @airo-js/log's consoleSink: [tag, msg, data?]. Match across all args.
-    const warnArgs = consoleWarn.mock.calls[0].map(String).join(' ');
+    // Args from @airo-js/log's consoleSink: [tag, msg, data?]. Match across
+    // all args. JSON.stringify, not String(): the 'clean' format (0.3.0)
+    // prints payloads as null-prototype clones, which have no toString.
+    const warnArgs = consoleWarn.mock.calls[0]
+      .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+      .join(' ');
     expect(warnArgs).toContain(elementName);
     expect(warnArgs).toContain('@airo-js/embed');
   });

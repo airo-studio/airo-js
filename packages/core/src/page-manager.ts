@@ -231,6 +231,11 @@ export class PageManager<
         ...this.contextOnly(next),
       };
       this.activeRenderer?.activateSubpage?.(subpage);
+      log.debug(`navigation: subpage "${targetPage.id}" on "${parent.id}" (subpage)`, {
+        pageId: targetPage.id,
+        pageType: targetPage.type,
+        phase: 'subpage',
+      });
       this.opts.events.emit('navigation:changed', this.navState);
       return;
     }
@@ -259,6 +264,13 @@ export class PageManager<
       }
     }
 
+    // Navigation narration (0.8.8): the trigger kind is the one thing
+    // the `navigation:changed` bus payload doesn't carry.
+    log.debug(`navigation: page "${anchor.id}" (navigate)`, {
+      pageId: anchor.id,
+      pageType: anchor.type,
+      phase: 'navigate',
+    });
     this.opts.events.emit('navigation:changed', this.navState);
   }
 
@@ -325,6 +337,7 @@ export class PageManager<
         pageId: targetPage.id,
         phase: 'hydrate',
         missingHint: 'Hydrate skipped.',
+        deferredHint: 'Hydrate resumes when the chunk registers.',
       });
       return;
     }
@@ -353,6 +366,11 @@ export class PageManager<
     this.activeRenderer = renderer;
     this.activeRendererPageId = targetPage.id;
     this.navState = { ...this.navState, page: targetPage.id };
+    log.debug(`navigation: page "${targetPage.id}" (hydrate)`, {
+      pageId: targetPage.id,
+      pageType: targetPage.type,
+      phase: 'hydrate',
+    });
     this.opts.events.emit('navigation:changed', this.navState);
   }
 
@@ -478,6 +496,7 @@ export class PageManager<
         pageId: targetPage.id,
         phase: 'navigate',
         missingHint: 'The matching chunk may not have loaded yet.',
+        deferredHint: 'Render resumes when the chunk registers.',
       });
       return;
     }
@@ -561,17 +580,23 @@ export class PageManager<
 }
 
 /**
- * Emit the `'renderer:missing'` event and log at the appropriate level.
+ * Emit the `'renderer:missing'` event and log at the appropriate level,
+ * with wording matched to what the miss actually means.
  *
  * Chunked-client cartridges (`docs/best-practices.md` §2.5b) catch this
  * event to drive their lazy-chunk recovery flow — so when a subscriber
  * is wired, the missing-factory case is a documented *happy-path*
- * recovery signal, not a misconfiguration. We log at `info` in that
- * case to avoid red triangles in DevTools during normal cold-hydrate
- * recovery. When nobody's listening, the log stays at `warn` because
+ * recovery signal, not a misconfiguration. We log at `info` with
+ * deferred-not-failed wording ("not loaded yet — recovery in flight")
+ * so DevTools reads it as lifecycle, not error. When nobody's
+ * listening, the log stays at `warn` with the original wording because
  * the missing factory IS a real misconfiguration the host needs to
- * notice — same signal as before for hosts that haven't wired the
- * pattern.
+ * notice.
+ *
+ * The event itself always emits — it is the trigger the recovery engine
+ * (`mountCartridge`'s `resolveView` seam) reacts to, never just a
+ * diagnostic. Core cannot know whether a chunk will arrive; only the
+ * subscriber can, so suppression decisions live one layer up.
  */
 function emitRendererMissing(
   events: IEventBus,
@@ -579,17 +604,24 @@ function emitRendererMissing(
     pageType: string;
     pageId: string;
     phase: 'navigate' | 'hydrate';
-    /** Phase-specific suffix on the log message (e.g. "Hydrate skipped."). */
+    /** Phase-specific suffix when nobody is listening (e.g. "Hydrate skipped."). */
     missingHint: string;
+    /** Phase-specific suffix when a recovery subscriber is wired (e.g. "Hydrate resumes when the chunk registers."). */
+    deferredHint: string;
   },
 ): void {
   const wired = events.listenerCount('renderer:missing') > 0;
-  const message = `no renderer registered for page type "${payload.pageType}". ${payload.missingHint}`;
   const meta = { pageType: payload.pageType, phase: payload.phase };
   if (wired) {
-    log.info(message, meta);
+    log.info(
+      `page chunk for "${payload.pageType}" not loaded yet — recovery in flight. ${payload.deferredHint}`,
+      meta,
+    );
   } else {
-    log.warn(message, meta);
+    log.warn(
+      `no renderer registered for page type "${payload.pageType}". ${payload.missingHint}`,
+      meta,
+    );
   }
   events.emit('renderer:missing', {
     pageType: payload.pageType,

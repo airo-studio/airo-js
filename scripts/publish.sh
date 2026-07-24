@@ -159,6 +159,40 @@ if [[ "$changelog_missing" == "1" ]]; then
   exit 1
 fi
 
+# ---- VERSION-const gate -----------------------------------------------------
+# Every package exporting `export const VERSION` must have it equal to its
+# package.json version. Hardcoded consts instead of build stamping (no codegen
+# step); this gate is what keeps them honest. Same trust model as the
+# changelog gate; runs in dry-run too. Packages without the export are skipped
+# (none today — all six export it since the 0.8.8 line).
+
+echo
+echo "==> VERSION-const gate"
+version_mismatch=0
+for entry in "${PACKAGES[@]}"; do
+  # shellcheck disable=SC2086  # intentional split: "<filter> [extra-flags]"
+  set -- $entry
+  pkg="$1"
+  dir="$REPO_ROOT/packages/${pkg#@airo-js/}"
+  version="$(local_version "$pkg")"
+  if ! grep -q "export const VERSION" "$dir/src/index.ts"; then
+    echo "    $pkg — no VERSION export (skipped)"
+    continue
+  fi
+  if grep -qF "export const VERSION = '$version';" "$dir/src/index.ts"; then
+    echo "    $pkg@$version — VERSION const matches"
+  else
+    echo "    $pkg@$version — VERSION const MISMATCH in src/index.ts" >&2
+    version_mismatch=1
+  fi
+done
+if [[ "$version_mismatch" == "1" ]]; then
+  echo >&2
+  echo "error: VERSION-const gate failed. Update 'export const VERSION' to match" >&2
+  echo "package.json for every package flagged above, then re-run." >&2
+  exit 1
+fi
+
 # ---- build -----------------------------------------------------------------
 
 echo

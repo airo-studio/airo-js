@@ -8,7 +8,7 @@
  * This is the contract Node's EventEmitter has too.
  */
 
-import { logger } from '@airo-js/log';
+import { isLevelEnabled, logger } from '@airo-js/log';
 
 const log = logger('core');
 
@@ -51,6 +51,21 @@ export class EventBus implements IEventBus {
 
   emit(event: string, ...args: unknown[]): void {
     const callbacks = this.events.get(event);
+    // Native bus narration (0.8.8): every emission, at debug on the
+    // core channel — `?airo-log=core:debug` narrates the whole bus.
+    // Replaces the emit-wrap consumers monkey-patched for the same
+    // trace. Single-arg payloads log unwrapped (the common case).
+    //
+    // Guarded by `isLevelEnabled` because emit() is the hottest path in
+    // the framework: at the default 'error' threshold this collapses to
+    // one map lookup + compare, so the template string + payload object
+    // are built ONLY when narration is actually on (dotter rsp_mryxzvt0).
+    if (isLevelEnabled('core', 'debug')) {
+      log.debug(`bus: ${event}`, {
+        listeners: callbacks?.size ?? 0,
+        payload: args.length === 1 ? args[0] : args.length ? args : undefined,
+      });
+    }
     if (callbacks) {
       const snapshot = Array.from(callbacks);
       for (const callback of snapshot) {

@@ -6,6 +6,57 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/log` 0.3.0 — 2026-07-24
+
+The logging upgrade (bridge thread msg_mryrycuf). Four changes, one behavioral default flip.
+
+### Changed
+- **Default threshold is `'error'`** (was `'debug'`). Only genuine failures surface unprompted on any surface; all narration is opt-in via `?airo-log=` (below) or programmatic `setLogLevel`/`setChannelLevel`. `resetLogLevels()` resets to the new default.
+- **`consoleSink` payload format defaults to `'clean'`**: payloads deep-clone as null-prototype objects before printing — DevTools shows expandable properties with no `[[Prototype]]: Object` row, and the print is a snapshot at log time (post-log mutation can't lie). Arrays stay arrays; structures that don't survive JSON (circular refs, DOM nodes) fall back to the raw reference. `setConsoleFormat('raw')` is the escape hatch (pass-through references, pre-0.3.0 behaviour). Algorithm contributed by a consumer's interim sink wrapper, adopted verbatim. Note: null-prototype clones have no `toString` — code that calls `String(payload)` on console args must use `JSON.stringify`.
+- **`LogChannel` is an open union.** The named members stay for autocomplete, but any string is a valid channel: `logger('analytics')`, `setChannelLevel('analytics', 'debug')`, `?airo-log=analytics:v` all work without the framework blessing each host domain. `consoleSink` tags well-known channels `[@airo-js/<channel>]` and app-defined ones bare (`[<channel>]`) so host domains never print under framework branding.
+
+### Added
+- **`initLogControls()`** — the `?airo-log=` URL/storage convention, promoted from a consumer runtime. Grammar (comma-separated, case-insensitive): global levels (`debug|info|warn|error|silent`), aliases (`all|v|verbose` → debug, `off` → silent), `channel:level` pairs (`analytics:v`, `warn,app:debug`), and two ergonomic rules so the common reflexes don't silently no-op — a **bare non-level token is a channel → debug** (`analytics` == `analytics:debug`), and a **level alias in channel position** (`all:v`, `debug:v`) is the global intent applied via `setLogLevel`, not a channel literally named after a level. URL-supplied directives persist under `localStorage['__airo_log']` — the literal `__airo_`-prefixed key sanitized-bundle contexts allowlist, written with a **literal string at the call site** (not a const — a const survives minification as a variable and fails static allowlist proofs); overwrite-only semantics (`off` is a stored directive, never a `removeItem`). Fallback read order: `__airo_log`, then the manual `airo-log` console convention (read-only). Once-guarded so a second mount can't clobber programmatic levels; no-op outside browsers and under disabled storage. `mountCartridge` calls it on every mount, so every runtime/embed surface honors the param with zero host wiring.
+- `applyLogDirective(directive)` — the parser behind `initLogControls`, exported for hosts that transport the directive another way (config flag, postMessage).
+- `isLevelEnabled(channel, level)` — cheap threshold predicate (one map lookup + compare) for guarding an expensive payload build BEFORE calling the logger, so the assembly cost is paid only when it will emit. `EventBus.emit`'s per-emission bus narration uses it.
+- `'json-pretty'` as a third `ConsoleFormat` — payloads render as indented `JSON.stringify` text inline (not a collapsed expandable object), for scanning event streams and copy/paste into a diff/ticket. Raw-reference fallback on circular structures, same as `'clean'`.
+- `setConsoleFormat` / `getConsoleFormat`, `resetLogControls` (test hook), `VERSION` export.
+
+## `@airo-js/runtime` 0.8.8 — 2026-07-24
+
+Chunk-recovery log story + registration-failure guard. Originates from a consumer reading the deferred-hydrate `info` as an error in DevTools: the recovery flow now narrates deferred → recovered/failed instead of logging only the miss.
+
+### Added
+- Success `info` on the `runtime` channel after a recovery dispatch paints: `chunk loaded — page type "x" hydrated|rendered after recovery.` (meta: `pageType`, `pageId`, `phase`, `cartridgeId`). Suppressed when the dispatch itself re-misses.
+- `error` log when a `resolveView` load rejects — previously the rejection was visible only to hosts that wired `onError('resolve-view')`; now the console tells the genuine-failure story either way. `onError` still fires.
+- `mountCartridge` calls `initLogControls()` (log 0.3.0) on every mount — `?airo-log=` works on any runtime or embed surface with zero host wiring.
+- `VERSION` export beside `PACKAGE_NAME` (publish preflight asserts it matches package.json) — completes consumer mount banners that want the framework version.
+
+### Fixed
+- A `resolveView` load that resolved WITHOUT registering a renderer for the missed page type (wrong `pushToMailbox` key / mailbox name) looped forever: dispatch → miss → cached resolved load → dispatch, with nothing above `info` ever logged. The engine now allows exactly one re-dispatch per resolved load; a re-miss after it is a hard failure — `error` log + `onError('resolve-view', err, shell)` — and the singleflight entry resets so a later miss starts a fresh load instead of replaying the stale one. `MountPhase` docs updated: `'resolve-view'` now also covers this resolved-but-unregistered case.
+
+## `@airo-js/core` 0.8.8 — 2026-07-24
+
+### Added
+- **Native bus narration**: every `EventBus.emit` logs `bus: <event>` at debug on the `core` channel with `{ listeners, payload }` — `?airo-log=core:debug` narrates the whole bus. Replaces the emit-wrap consumers monkey-patched for the same trace. Invisible at the default `'error'` threshold, and guarded by `isLevelEnabled` so the template string + payload object are built ONLY when narration is on — `emit()` is the hottest path in the framework, so at the default threshold this is one map lookup + compare with zero allocation.
+- **Navigation narration**: PageManager logs `navigation: page "x" (navigate|hydrate|subpage)` at debug — the trigger kind is the one thing the `navigation:changed` bus payload doesn't carry.
+- `VERSION` export beside `PACKAGE_NAME` (publish preflight asserts it matches package.json).
+
+### Changed
+- The `renderer:missing` log with a recovery subscriber wired now says what it means: `page chunk for "x" not loaded yet — recovery in flight. Hydrate|Render resumes when the chunk registers.` (still `info`). The `no renderer registered … Hydrate skipped.` wording — which read as an error during normal lazy-chunk recovery — is now exclusive to the unwired `warn` path, where it IS a misconfiguration signal. Event payload and emission are unchanged: the event is the recovery trigger and always fires.
+
+## `@airo-js/embed` 0.8.8 — 2026-07-24
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.8 line. No source change — `defineAiroApp` inherits the recovery log story, registration-failure guard, and `?airo-log=` controls through the forward to `mountCartridge`. `VERSION` export added beside `PACKAGE_NAME`.
+
+## `@airo-js/cartridge-kit` 0.8.8 — 2026-07-24
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.8 line. `VERSION` export added beside `PACKAGE_NAME`; no other source change.
+
+## `@airo-js/ssr` 0.8.8 — 2026-07-24
+
+Sync rev for `workspace:^` peerDep coherence with the 0.8.8 line. `VERSION` export added beside `PACKAGE_NAME`; no other source change.
+
 ## `@airo-js/runtime` 0.8.7 — 2026-07-10
 
 Editor-attach + chunk-recovery hardening. All three items originate from a production consumer's validation of the `MountCartridgeResult`-as-attach-handle pattern: two lifecycle gaps their overlay tooling hit, plus the Decision-1 recovery engine that 0.8.5 was meant to put on `mountCartridge` but landed embed-only.

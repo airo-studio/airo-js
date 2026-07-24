@@ -29,6 +29,14 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * Source channel — typically the emitting package's short name. Apps that
  * embed framework events into their own logging can use the channel to
  * route events to different destinations.
+ *
+ * The union is OPEN (0.3.0): the named members are the well-known
+ * framework channels (kept for autocomplete), but any string is a valid
+ * channel — `logger('analytics')`, `setChannelLevel('analytics', 'debug')`
+ * and the `?airo-log=analytics:debug` grammar all work without the
+ * framework blessing each host domain. `consoleSink` tags well-known
+ * channels `[@airo-js/<channel>]` and app-defined ones bare `[<channel>]`
+ * so host channels never print under framework branding.
  */
 export type LogChannel =
   | 'core'
@@ -38,7 +46,19 @@ export type LogChannel =
   | 'cartridge-kit'
   | 'mcp'
   /** Apps emit on this channel for their own structured events. */
-  | 'app';
+  | 'app'
+  | (string & {});
+
+/** Channels owned by framework packages — used only for console tagging. */
+const WELL_KNOWN_CHANNELS = new Set([
+  'core',
+  'runtime',
+  'embed',
+  'ssr',
+  'cartridge-kit',
+  'mcp',
+  'app',
+]);
 
 export interface AiroEvent {
   /** epoch milliseconds */
@@ -77,18 +97,90 @@ export interface AiroSink {
   emit(event: AiroEvent): void;
 }
 
+// ─── Console formatting ─────────────────────────────────────────────
+// Three payload formats for the console sink:
+//   'clean' (default, 0.3.0) — deep-clone payloads as null-prototype
+//     objects before they hit the console: DevTools renders them as
+//     expandable objects with properties only, no `[[Prototype]]: Object`
+//     row. The JSON round-trip also gives snapshot-at-log-time semantics
+//     (the printed payload can't be mutated after the fact).
+//   'json-pretty' (0.3.0) — render payloads as indented JSON.stringify
+//     text INLINE, not a collapsed expandable object. For scanning a
+//     stream of events, click-to-expand per line doesn't scale, and
+//     copy/paste of a payload into a diff/ticket wants text (dotter
+//     rsp_mryxzvt0 — the use case the initial YAGNI waited for).
+//   'raw' — pass-through references, exactly the pre-0.3.0 behaviour.
+// 'clean' and 'json-pretty' both fall back to the raw reference for any
+// payload that doesn't survive JSON (circular structures, DOM nodes).
+
+export type ConsoleFormat = 'clean' | 'json-pretty' | 'raw';
+
+let consoleFormat: ConsoleFormat = 'clean';
+
+/** Set the console payload format. Default `'clean'`; `'json-pretty'` prints indented text; `'raw'` restores pass-through references. */
+export function setConsoleFormat(format: ConsoleFormat): void {
+  consoleFormat = format;
+}
+
+/** Current console payload format. */
+export function getConsoleFormat(): ConsoleFormat {
+  return consoleFormat;
+}
+
+/**
+ * Deep-clone a payload for console display: JSON round-trip with a
+ * reviver that rebuilds plain objects as null-prototype (arrays stay
+ * arrays). Falls back to the raw value when the structure doesn't
+ * survive `JSON.stringify` (circular refs, BigInt, throwing getters).
+ */
+function cleanClone(value: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value), (_key, v) =>
+      v !== null && typeof v === 'object' && !Array.isArray(v)
+        ? Object.assign(Object.create(null), v)
+        : v,
+    );
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Format one payload arg per the active `ConsoleFormat`. Both 'clean'
+ * and 'json-pretty' fall back to the raw reference when the value can't
+ * be serialized (cleanClone handles this internally; JSON.stringify
+ * throws on circular, caught here).
+ */
+function formatPayload(value: unknown): unknown {
+  switch (consoleFormat) {
+    case 'raw':
+      return value;
+    case 'json-pretty':
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return value;
+      }
+    case 'clean':
+    default:
+      return cleanClone(value);
+  }
+}
+
 /**
  * Default sink — formats the event tag and dispatches to the matching
- * `console.*` method. Behaviour is intentionally close to the existing
- * `console.warn('[@airo-js/embed] ...')` calls this package replaces, so
- * apps that don't opt into the sink see no behavioural change.
+ * `console.*` method. Well-known framework channels tag as
+ * `[@airo-js/<channel>]`; app-defined channels tag bare (`[<channel>]`)
+ * so host domains never print under framework branding. Payloads pass
+ * through the active `ConsoleFormat` (see above).
  */
 export const consoleSink: AiroSink = {
   emit(event) {
-    const tag = `[@airo-js/${event.channel}]${event.phase ? ` ${event.phase}` : ''}`;
+    const scope = WELL_KNOWN_CHANNELS.has(event.channel) ? `@airo-js/${event.channel}` : event.channel;
+    const tag = `[${scope}]${event.phase ? ` ${event.phase}` : ''}`;
     const args: unknown[] = [tag, event.msg];
-    if (event.data) args.push(event.data);
-    if (event.err) args.push(event.err);
+    if (event.data) args.push(formatPayload(event.data));
+    if (event.err) args.push(formatPayload(event.err));
     switch (event.level) {
       case 'debug':
         console.debug(...args);
@@ -150,11 +242,12 @@ export function resetSink(): void {
 // overrides (`setChannelLevel`). The per-channel value wins for that
 // channel only; channels without an override inherit the global level.
 //
-// Default threshold is `'debug'` — every event flows through. This makes
-// the threshold API a non-breaking addition: apps that don't call
-// `setLogLevel` see the pre-0.2.0 behaviour. Apps tighten to `'warn'`
-// for prod, `'silent'` for SSR / Lambda contexts where structured
-// upstream logs already capture what they need.
+// Default threshold is `'error'` (0.3.0 — was 'debug'): only genuine
+// failures surface unprompted on any surface; info/warn narration is
+// opt-in. The intended opt-in path is `?airo-log=<directive>` via
+// `initLogControls` (persisted under `__airo_log`), or programmatic
+// `setLogLevel`/`setChannelLevel`. SSR / Lambda contexts that want
+// total quiet set `'silent'`.
 //
 // 'silent' is the sentinel above 'error'; nothing emits through a
 // channel pinned at 'silent', regardless of event level.
@@ -169,7 +262,9 @@ const LEVEL_RANK: Record<LevelOrSilent, number> = {
   silent: 4,
 };
 
-let currentLevel: LevelOrSilent = 'debug';
+const DEFAULT_LEVEL: LevelOrSilent = 'error';
+
+let currentLevel: LevelOrSilent = DEFAULT_LEVEL;
 const channelLevels: Map<LogChannel, LevelOrSilent> = new Map();
 
 function effectiveLevelFor(channel: LogChannel): LevelOrSilent {
@@ -181,13 +276,27 @@ function shouldEmit(channel: LogChannel, level: LogLevel): boolean {
 }
 
 /**
+ * Would an event at `level` on `channel` pass the current threshold?
+ * A single map-lookup + compare — cheap enough to guard a hot path.
+ * Use it to skip building an expensive payload BEFORE calling the
+ * logger, so the assembly cost is paid only when it will actually emit
+ * (e.g. per-emission bus narration in `EventBus.emit`). The logger
+ * methods run the same check internally, so this is a pure optimization,
+ * never a correctness requirement.
+ */
+export function isLevelEnabled(channel: LogChannel, level: LogLevel): boolean {
+  return shouldEmit(channel, level);
+}
+
+/**
  * Set the global log-level threshold. Events whose level is below
- * `level` are dropped. Default `'debug'` (everything flows). Channels
- * with an explicit `setChannelLevel` override win over the global.
+ * `level` are dropped. Default `'error'` (only genuine failures flow).
+ * Channels with an explicit `setChannelLevel` override win over the
+ * global.
  *
- *   setLogLevel('warn')    // prod: drop debug + info events
+ *   setLogLevel('debug')   // dev: everything flows
+ *   setLogLevel('warn')    // drop debug + info events
  *   setLogLevel('silent')  // SSR: drop everything
- *   setLogLevel('debug')   // dev: pre-0.2.0 default
  */
 export function setLogLevel(level: LevelOrSilent): void {
   currentLevel = level;
@@ -221,11 +330,11 @@ export function getChannelLevel(channel: LogChannel): LevelOrSilent | null {
 
 /**
  * Reset both global level and all per-channel overrides back to the
- * default ('debug', no overrides). Useful in tests; apps typically don't
+ * default ('error', no overrides). Useful in tests; apps typically don't
  * need this.
  */
 export function resetLogLevels(): void {
-  currentLevel = 'debug';
+  currentLevel = DEFAULT_LEVEL;
   channelLevels.clear();
 }
 
@@ -286,4 +395,144 @@ function normalizeError(err: unknown): ErrorInfo {
   return { message: String(err) };
 }
 
+// ─── URL / storage log controls (0.3.0) ─────────────────────────────
+// The `?airo-log=` convention, promoted from a consumer's runtime. With
+// the default threshold at 'error', this is the intended opt-in path on
+// any surface — reload with the param and you have chosen your output.
+//
+// Grammar (comma-separated directives, case-insensitive):
+//   ?airo-log=debug              global level
+//   ?airo-log=all | v | verbose  aliases for global debug
+//   ?airo-log=off                global silent (the off-switch)
+//   ?airo-log=analytics:debug    per-channel level (any channel string)
+//   ?airo-log=analytics:v        per-channel verbose alias
+//   ?airo-log=analytics          bare channel token → channel:debug
+//   ?airo-log=warn,app:debug     combos; later directives win on conflict
+// Two ergonomic rules keep the common reflexes from silently no-oping
+// (dotter rsp_mryxzvt0):
+//   - A bare token that is NOT a level alias is a channel → debug
+//     (`analytics` == `analytics:debug`). A typo becomes a harmless
+//     junk-channel level with nothing logging to it — never an error.
+//   - A level alias in CHANNEL position (`all:v`, `debug:v`) is the
+//     user's global intent, applied via setLogLevel — not a channel
+//     literally named "all". The suffix is ignored (the alias already
+//     carries the level).
+//
+// Persistence: when the URL param is present, the raw directive is
+// written to `localStorage['__airo_log']` so it sticks across
+// navigation and reloads. The key MUST stay a literal `__airo_`-prefixed
+// string: sanitized-bundle contexts allowlist only literal `__airo_*`
+// writes (which is also why persistence is overwrite-only — `off` is a
+// stored directive, never a removeItem). When no param is present, the
+// stored directive applies; the documented manual console convention
+// `localStorage.setItem('airo-log', …)` is the read-only fallback when
+// nothing was auto-persisted.
+
+const LOG_PARAM = 'airo-log';
+const LOG_STORAGE_KEY = '__airo_log';
+const LOG_MANUAL_KEY = 'airo-log';
+
+const LEVEL_ALIASES: Record<string, LevelOrSilent> = {
+  debug: 'debug',
+  info: 'info',
+  warn: 'warn',
+  error: 'error',
+  silent: 'silent',
+  off: 'silent',
+  all: 'debug',
+  v: 'debug',
+  verbose: 'debug',
+};
+
+/**
+ * Parse an `?airo-log=` directive string and apply it via
+ * `setLogLevel` / `setChannelLevel`. Returns `true` when at least one
+ * directive applied. Exported for hosts that transport the directive
+ * some other way (config flag, postMessage); `initLogControls` is the
+ * URL/storage wrapper most surfaces want.
+ */
+export function applyLogDirective(directive: string): boolean {
+  let applied = false;
+  for (const rawToken of directive.split(',')) {
+    const token = rawToken.trim().toLowerCase();
+    if (!token) continue;
+    const sep = token.indexOf(':');
+    if (sep === -1) {
+      // Bare token: level alias → global; anything else → channel:debug.
+      const level = LEVEL_ALIASES[token];
+      if (level) {
+        setLogLevel(level);
+      } else {
+        setChannelLevel(token, 'debug');
+      }
+      applied = true;
+      continue;
+    }
+    const head = token.slice(0, sep).trim();
+    // Level alias in channel position → the user's global intent, not a
+    // channel named after a level. Suffix ignored — the alias is the level.
+    const headAsLevel = LEVEL_ALIASES[head];
+    if (headAsLevel) {
+      setLogLevel(headAsLevel);
+      applied = true;
+      continue;
+    }
+    const level = LEVEL_ALIASES[token.slice(sep + 1).trim()];
+    if (head && level) {
+      setChannelLevel(head, level);
+      applied = true;
+    }
+  }
+  return applied;
+}
+
+let logControlsInitialized = false;
+
+/**
+ * Read the `?airo-log=` URL param (falling back to the persisted
+ * `__airo_log` key, then the manual `airo-log` console convention),
+ * apply it, and persist URL-supplied directives so they stick across
+ * reloads. No-op outside a browser context and after the first call
+ * (`mountCartridge` invokes this on every mount; a host's programmatic
+ * `setLogLevel` must not be clobbered by a second mount re-reading
+ * storage). Safe under disabled storage (private mode) — the directive
+ * still applies for the current page, it just doesn't persist.
+ */
+export function initLogControls(): void {
+  if (logControlsInitialized) return;
+  if (typeof window === 'undefined' || typeof location === 'undefined') return;
+  logControlsInitialized = true;
+  let directive: string | null = null;
+  let fromUrl = false;
+  try {
+    directive = new URLSearchParams(location.search).get(LOG_PARAM);
+    fromUrl = directive !== null;
+  } catch {
+    /* malformed search string — fall through to storage */
+  }
+  try {
+    if (!fromUrl) {
+      directive =
+        localStorage.getItem(LOG_STORAGE_KEY) ?? localStorage.getItem(LOG_MANUAL_KEY);
+    } else if (directive) {
+      // LITERAL key at the write site — NOT `LOG_STORAGE_KEY`. Sanitized-
+      // bundle consumers statically prove every `localStorage.setItem`
+      // targets a literal `__airo_*` key; a const survives minification as
+      // a variable and fails that proof (dotter rsp_mryxzvt0). Reads are
+      // unrestricted, so the getItem calls above keep the const. Keep the
+      // string in sync with LOG_STORAGE_KEY (one write site — low risk).
+      localStorage.setItem('__airo_log', directive);
+    }
+  } catch {
+    /* storage unavailable — apply without persistence */
+  }
+  if (directive) applyLogDirective(directive);
+}
+
+/** Reset the `initLogControls` once-guard. Test hook. */
+export function resetLogControls(): void {
+  logControlsInitialized = false;
+}
+
 export const PACKAGE_NAME = '@airo-js/log';
+export const VERSION = '0.3.0';
