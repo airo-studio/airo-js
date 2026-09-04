@@ -59,7 +59,7 @@ export class EventBus implements IEventBus {
     // Guarded by `isLevelEnabled` because emit() is the hottest path in
     // the framework: at the default 'error' threshold this collapses to
     // one map lookup + compare, so the template string + payload object
-    // are built ONLY when narration is actually on (dotter rsp_mryxzvt0).
+    // are built ONLY when narration is actually on (consumer rsp_mryxzvt0).
     if (isLevelEnabled('core', 'debug')) {
       log.debug(`bus: ${event}`, {
         listeners: callbacks?.size ?? 0,

@@ -857,6 +857,10 @@ export async function mountCartridge<
       opts.cartridge.transformers ?? [],
       opts.cartridge.postProcessors ?? [],
     );
+    // Skip the `postRender` wiring entirely when the cartridge declares no
+    // post-processors, so PageManager holds no closure and allocates no
+    // teardown slot on the common path.
+    const hasPostProcessors = (opts.cartridge.postProcessors?.length ?? 0) > 0;
     let snapshot: TData;
     try {
       snapshot = await pipeline.runTransformers(data, {
@@ -899,6 +903,25 @@ export async function mountCartridge<
           // so renderers can fire config delta updates from inside listener
           // handlers without holding a separate handle to this result.
           hostUpdate,
+          // 0.9.0 — the post-processor chain. PageManager owns the render
+          // cadence and the teardown stack; it supplies `container` /
+          // `navState` / `events`, and this closure adds the `config` and
+          // `data` halves of `PostProcessorContext` that only the runtime
+          // holds. Core stays ignorant of pipelines and cartridges.
+          //
+          // `snapshot` is captured per mount: `update()` / `updatePages()`
+          // replay this whole function, so a remount rebuilds the pipeline
+          // and this closure against the fresh snapshot.
+          postRender: hasPostProcessors
+            ? (rc) =>
+                pipeline.runPostProcessors({
+                  container: rc.container,
+                  navState: rc.navState,
+                  events: rc.events,
+                  config,
+                  data: snapshot,
+                })
+            : undefined,
         },
       );
     } catch (err) {

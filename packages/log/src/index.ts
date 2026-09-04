@@ -107,7 +107,7 @@ export interface AiroSink {
 //   'json-pretty' (0.3.0) — render payloads as indented JSON.stringify
 //     text INLINE, not a collapsed expandable object. For scanning a
 //     stream of events, click-to-expand per line doesn't scale, and
-//     copy/paste of a payload into a diff/ticket wants text (dotter
+//     copy/paste of a payload into a diff/ticket wants text (consumer
 //     rsp_mryxzvt0 — the use case the initial YAGNI waited for).
 //   'raw' — pass-through references, exactly the pre-0.3.0 behaviour.
 // 'clean' and 'json-pretty' both fall back to the raw reference for any
@@ -409,7 +409,7 @@ function normalizeError(err: unknown): ErrorInfo {
 //   ?airo-log=analytics          bare channel token → channel:debug
 //   ?airo-log=warn,app:debug     combos; later directives win on conflict
 // Two ergonomic rules keep the common reflexes from silently no-oping
-// (dotter rsp_mryxzvt0):
+// (consumer rsp_mryxzvt0):
 //   - A bare token that is NOT a level alias is a channel → debug
 //     (`analytics` == `analytics:debug`). A typo becomes a harmless
 //     junk-channel level with nothing logging to it — never an error.
@@ -518,7 +518,7 @@ export function initLogControls(): void {
       // LITERAL key at the write site — NOT `LOG_STORAGE_KEY`. Sanitized-
       // bundle consumers statically prove every `localStorage.setItem`
       // targets a literal `__airo_*` key; a const survives minification as
-      // a variable and fails that proof (dotter rsp_mryxzvt0). Reads are
+      // a variable and fails that proof (consumer rsp_mryxzvt0). Reads are
       // unrestricted, so the getItem calls above keep the const. Keep the
       // string in sync with LOG_STORAGE_KEY (one write site — low risk).
       localStorage.setItem('__airo_log', directive);

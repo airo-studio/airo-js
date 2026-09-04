@@ -91,7 +91,7 @@ export type {
 } from './breadcrumb.js';
 export { buildCrumbs } from './breadcrumb.js';
 
-export type { PageManagerOptions } from './page-manager.js';
+export type { PageManagerOptions, PostRenderHook } from './page-manager.js';
 export { PageManager, findEntryPage, resolveEntryPage } from './page-manager.js';
 
 export type {

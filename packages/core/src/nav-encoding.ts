@@ -178,6 +178,53 @@ export function extractPathTail(pathname: string, basePath: string): string | nu
   return tail.length > 0 ? tail : null;
 }
 
+/**
+ * Join a `basePath` and an encoded fragment into a path-mode URL — the
+ * single encoder shared by `PathRouter.stateToUrl` and `routerHrefFor`, so
+ * the two can never disagree about what URL a `RouteState` has.
+ *
+ * ## Why `entryPageId` exists
+ *
+ * `extractPathTail` returns `null` for a bare `basePath` (rows 1-2 of the
+ * table above), and the SSR runner treats a null nav hint as "render the
+ * default entry page". So the DECODER already accepts `basePath` as the
+ * entry page. Without `entryPageId` the ENCODER never emits it — it emits
+ * `basePath + '/' + entryPageId` — and the same page answers on two URLs:
+ *
+ *   basePath = '/'              → '/' AND '/home'
+ *   basePath = '/campaign/xyz'  → '/campaign/xyz' AND '/campaign/xyz/home'
+ *
+ * Both 200, byte-identical. Since `routerHrefFor` is what the docs tell you
+ * to build hrefs, canonicals and sitemap entries with, that asymmetry ships
+ * as duplicate content with nothing erroring or warning. Passing
+ * `entryPageId` collapses the bare entry state onto `basePath`, making the
+ * encoder agree with the decoder.
+ *
+ * It also stops the entry URL being rewritten on load: `PageManager.initRouter`
+ * calls `router.replace(navState)` when `parseCurrent()` returns null, which
+ * is exactly the bare-`basePath` case — so a visitor landing on `/` used to
+ * watch it silently become `/home`.
+ *
+ * ## Collapse only a BARE entry state
+ *
+ * The fragment must equal `entryPageId` exactly. `{ page: 'home', filter: 'x' }`
+ * encodes to `home?filter=x` and stays `/home?filter=x`, because `/?filter=x`
+ * would decode to a null tail and lose the filter — the collapse has to be
+ * round-trip-safe, not merely shorter.
+ *
+ * Path mode only. Hash never reaches a server so there is no duplicate-content
+ * harm, and query mode has the same shape but no consumer has hit it.
+ */
+export function joinPathFragment(
+  basePath: string,
+  fragment: string,
+  entryPageId?: string,
+): string {
+  const normalizedBase = basePath.replace(/\/+$/, '');
+  if (!fragment || fragment === entryPageId) return normalizedBase || '/';
+  return `${normalizedBase}/${fragment}`;
+}
+
 function normalizeValidPages(
   validPages: ReadonlySet<string> | ReadonlyArray<string> | null | undefined,
 ): ReadonlySet<string> | null {

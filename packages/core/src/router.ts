@@ -26,7 +26,7 @@ export interface RouteState {
 }
 
 import { logger } from '@airo-js/log';
-import { fragmentToState, stateToFragment } from './nav-encoding.js';
+import { fragmentToState, joinPathFragment, stateToFragment } from './nav-encoding.js';
 
 const log = logger('core');
 
@@ -59,15 +59,18 @@ export type IHashRouter = IRouter;
  *   `false`               — no router (default; widget runs in memory only)
  *   `true`                — back-compat alias for `{ mode: 'hash' }`
  *   `{ mode: 'hash' }`    — HashRouter (`#fragment`)
- *   `{ mode: 'path', basePath: string }` — PathRouter (`/basePath/fragment`)
+ *   `{ mode: 'path', basePath, entryPageId? }` — PathRouter (`/basePath/fragment`)
  *   `{ mode: 'query', paramPrefix? }`    — QueryRouter (discrete prefix-
  *                                          namespaced params)
  *
  * Picked:
  *   - `mode: 'hash'`  — customer-page embeds (widget claims `#fragment`
  *     without colliding with host's path/query routing).
- *   - `mode: 'path'`  — widget owns the URL space (Campaign Pages,
- *     framework-controlled SSR routes — `basePath` carves out the prefix).
+ *   - `mode: 'path'`  — the app owns real URLs on a domain you control.
+ *     `basePath: '/'` root-mounts a whole multi-page site (`/`, `/roster`,
+ *     `/article/abc`); a non-empty `basePath` carves out a prefix instead
+ *     (`/campaign/xyz/product/abc`) for an app sharing a host's URL space.
+ *     Set `entryPageId` either way — see `joinPathFragment`.
  *   - `mode: 'query'` — customer-edge SSR (the worker SEES
  *     `?<prefix>nav=...&<prefix><field>=...` because the HTTP spec sends
  *     query strings to the server but never the URL fragment). Discrete-
@@ -80,7 +83,7 @@ export type RouterOption =
   | false
   | true
   | { mode: 'hash'; pathContextKey?: string }
-  | { mode: 'path'; basePath: string; pathContextKey?: string }
+  | { mode: 'path'; basePath: string; pathContextKey?: string; entryPageId?: string }
   | { mode: 'query'; paramPrefix?: string };
 
 export interface HashRouterOptions {
@@ -497,8 +500,7 @@ export function routerHrefFor(
       const fragment = stateToFragment(state, {
         pathContextKey: normalized.pathContextKey,
       });
-      const base = normalized.basePath.replace(/\/+$/, '');
-      return base + '/' + fragment;
+      return joinPathFragment(normalized.basePath, fragment, normalized.entryPageId);
     }
     case 'query': {
       const prefix = normalized.paramPrefix ?? 'airo_';

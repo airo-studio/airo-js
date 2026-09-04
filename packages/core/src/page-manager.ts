@@ -79,6 +79,20 @@ export function resolveEntryPage<TPageType extends string>(
   return requested ?? findEntryPage(pages, isGate);
 }
 
+/**
+ * Post-render side-effect hook. Receives the three things only PageManager
+ * holds — the live container, the current nav state, and the event bus —
+ * and returns an optional teardown.
+ *
+ * Deliberately NOT generic over cartridge data: this is the mechanism half
+ * of the seam. The caller closes over whatever else it needs.
+ */
+export type PostRenderHook = (ctx: {
+  container: HTMLElement;
+  navState: NavigationState;
+  events: IEventBus;
+}) => (() => void) | void;
+
 export interface PageManagerOptions<
   TPageType extends string = string,
   TAppContext = unknown,
@@ -143,6 +157,25 @@ export interface PageManagerOptions<
    * `@airo-js/cartridge-kit`.
    */
   hostUpdate?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
+  /**
+   * Side-effect hook invoked after EVERY successful render — fresh mount,
+   * navigation swap, hydrate, and appContext re-render alike. Returns an
+   * optional teardown, which PageManager fires before the next render and
+   * on `destroy()`.
+   *
+   * Pure mechanism: PageManager knows nothing about pipelines or
+   * cartridges. `@airo-js/runtime` supplies a closure that forwards to
+   * `RuntimePipeline.runPostProcessors`, adding the `config` and `data`
+   * halves of `PostProcessorContext` that only it holds.
+   *
+   * Per RENDER, not per mount, because that is the only cadence a
+   * DOM-owning hook can be written against: a swap or a re-render
+   * destroys the subtree the previous invocation decorated, so a
+   * mount-scoped hook silently stops applying the moment anyone
+   * navigates. Teardown fires BEFORE the DOM it owns is torn down, so a
+   * hook can observe its own nodes while unwinding.
+   */
+  postRender?: PostRenderHook;
 }
 
 export class PageManager<
@@ -166,6 +199,8 @@ export class PageManager<
   private router: IRouter | null = null;
   private suppressRouterPush = false;
   private destroyed = false;
+  /** Teardown returned by the most recent `postRender` invocation, if any. */
+  private postRenderTeardown: (() => void) | null = null;
 
   constructor(opts: PageManagerOptions<TPageType, TAppContext>) {
     this.opts = opts;
@@ -183,6 +218,52 @@ export class PageManager<
 
     if (opts.enableRouter) {
       this.initRouter();
+    }
+  }
+
+  /**
+   * Unwind the previous post-render effects. Idempotent — safe to call at
+   * every point a render is about to be replaced, and again from
+   * `destroy()`. Throwing teardowns are logged and swallowed: a hook that
+   * fails while unwinding must not abort the render that follows it.
+   */
+  private firePostRenderTeardown(): void {
+    const teardown = this.postRenderTeardown;
+    if (!teardown) return;
+    this.postRenderTeardown = null;
+    try {
+      teardown();
+    } catch (err) {
+      log.error('postRender teardown threw; continuing.', err, {
+        phase: 'post-render-teardown',
+      });
+    }
+  }
+
+  /**
+   * Run the post-render hook for the render that just completed. Called
+   * from every path that puts a renderer on screen.
+   *
+   * A throwing hook is logged and swallowed — post-render effects are
+   * decoration (analytics, ARIA live regions, focus, scroll). Letting one
+   * escape would unwind a render that already succeeded and leave the DOM
+   * on screen with `activeRenderer` bookkeeping half-applied.
+   */
+  private runPostRender(): void {
+    if (!this.opts.postRender) return;
+    this.firePostRenderTeardown();
+    try {
+      const teardown = this.opts.postRender({
+        container: this.opts.container,
+        navState: this.navState,
+        events: this.opts.events,
+      });
+      this.postRenderTeardown = typeof teardown === 'function' ? teardown : null;
+    } catch (err) {
+      log.error('postRender hook threw; render is unaffected.', err, {
+        phase: 'post-render',
+      });
+      this.postRenderTeardown = null;
     }
   }
 
@@ -342,6 +423,10 @@ export class PageManager<
       return;
     }
 
+    // Same ordering rule as swapRenderer: unwind before the incoming
+    // render touches the tree.
+    this.firePostRenderTeardown();
+
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
@@ -371,6 +456,7 @@ export class PageManager<
       pageType: targetPage.type,
       phase: 'hydrate',
     });
+    this.runPostRender();
     this.opts.events.emit('navigation:changed', this.navState);
   }
 
@@ -391,6 +477,7 @@ export class PageManager<
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.firePostRenderTeardown();
     if (this.activeRenderer) {
       this.activeRenderer.destroy();
       this.activeRenderer = null;
@@ -452,11 +539,21 @@ export class PageManager<
         });
       } else if (mode === 'path') {
         // TS narrows `opt` to the path variant here.
-        const pathOpt = opt as { mode: 'path'; basePath: string; pathContextKey?: string };
+        const pathOpt = opt as {
+          mode: 'path';
+          basePath: string;
+          pathContextKey?: string;
+          entryPageId?: string;
+        };
         this.router = new PathRouter(onRouterNavigate, {
           basePath: pathOpt.basePath,
           validPages,
           pathContextKey: pathOpt.pathContextKey,
+          // Opt-in, NOT defaulted to the template's entry page. Turning it
+          // on changes which url the entry page canonicalises to, which is
+          // an SEO event for anyone with `basePath/<entryPageId>` already
+          // indexed — their call to make, not a side effect of upgrading.
+          entryPageId: pathOpt.entryPageId,
         });
       } else {
         // mode === 'query' — `paramPrefix` optional, defaults inside
@@ -483,6 +580,9 @@ export class PageManager<
   }
 
   private swapRenderer(targetPage: Page<TPageType>): void {
+    // Unwind post-render effects BEFORE the subtree they decorate is
+    // destroyed, so a hook holding DOM can still see its own nodes.
+    this.firePostRenderTeardown();
     if (this.activeRenderer) {
       this.activeRenderer.destroy();
       this.activeRenderer = null;
@@ -515,6 +615,7 @@ export class PageManager<
 
     this.activeRenderer = renderer;
     this.activeRendererPageId = targetPage.id;
+    this.runPostRender();
   }
 
   /**

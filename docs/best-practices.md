@@ -76,7 +76,15 @@ const retailerFilter: Transformer<MyData, MyConfig> = {
 
 **Side-effect hooks only.** Analytics emit, ARIA live regions, scroll restoration, focus management. **Not** data shaping (use `Transformer`) and **not** content gating (use `Gate`).
 
-**Return optional teardown.** The pipeline's `runPostProcessors` collects teardowns into a stack; LIFO unwind on page unmount.
+**Browser-only, by contract.** Post-processors run against a DOM, after render. `@airo-js/ssr` never builds a pipeline and never will — this is a contract statement, not a "not implemented yet", so you can rely on it. `renderAppWithPublication` warns when a cartridge it renders declares post-processors. Anything load-bearing for a crawler, a feed or an agent belongs in a `Transformer` (pre-render, snapshot-shaped, seen by every surface).
+
+**Runs after EVERY render, not once per mount** (0.9.0). Fresh mount, navigation swap, hydrate, and `update()` remount all invoke the chain. Per-mount would be unwritable for the hooks this primitive exists for: a swap destroys the subtree your hook decorated, so a mount-scoped hook silently stops applying the moment anyone navigates.
+
+Two consequences for authors: `apply` must be **re-entrant** — it will run again on the next render — and your teardown will fire often, so keep both cheap.
+
+**Return optional teardown.** The pipeline's `runPostProcessors` collects teardowns into a stack and unwinds LIFO, so destruction mirrors construction. The framework fires that unwind **before the next `apply`, and before the renderer whose DOM you decorated is destroyed** — so a hook that owns nodes can still see them while cleaning up. It also fires on app destroy. A throwing `apply` or teardown is logged and swallowed: one bad hook must not take down its siblings or the render around them.
+
+> **Before 0.9.0 this chain never ran.** `mountCartridge` built the pipeline with your `postProcessors` and then only called `runTransformers`; a declared post-processor typechecked, mounted clean, and did nothing, with no throw and no warning. If you shipped one against 0.8.x, it is executing for the first time on 0.9.0 — check that `apply` is re-entrant and that its teardown is correct before upgrading.
 
 ```ts
 // ✅
@@ -610,7 +618,7 @@ import { runPublicationAdapters } from '@airo-js/ssr';
 app.get('/api/widget-data', async (req, res) => {
   const raw      = await cartridge.dataSource.fetch(cfg, { signal });        // upstream fetch
   const pipeline = createPipeline(cartridge.transformers, cartridge.postProcessors);
-  const snapshot = await pipeline.run(raw, ctx);                             // TData → TData
+  const snapshot = await pipeline.runTransformers(raw, ctx);                 // TData → TData
   const adapters = await runPublicationAdapters(cartridge, snapshot, ctx);   // optional: feeds / MCP tools
   res.json({ snapshot, adapters });                                         // single structured payload
 });
@@ -1062,7 +1070,7 @@ Three URL surfaces; three router modes; one shared encoding. Pick based on wheth
 | Owned domain (a dedicated landing page — `shop.example.com/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
 | Customer-edge SSR (worker on customer's CDN — Lambda@Edge / CF Workers / Shopify Oxygen) | **Query** | Customer owns the path; HTTP spec strips the fragment client-side before the request; only `?paramName=` reaches the worker |
 
-All three share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter or `?paramName=...` for QueryRouter — round-trip-compatible across modes.
+Hash and path modes share one encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`): the fragment inside `#...` is exactly the fragment inside `/basePath/...`. **Query mode deliberately does not** — it uses discrete prefix-namespaced params so each filter dimension stays independently visible to crawlers and agents. No encoding is round-trip-compatible across those two families; pick one mode per app for its lifetime (see the caveats below).
 
 **`RouterOption` discriminated union:**
 
@@ -1273,7 +1281,6 @@ const validPages = appConfig.pages
 const navState = decodeNavHint(req.query.nav, validPages);
 ```
 
-**Why drop Query mode** (the path-not-taken). An earlier framework rev considered `mode: 'query'` (`?nav=products/abc`) as a third option. Hash + Path covers every named use case (embed vs owned domain); Query mode was the awkward middle — SSR-readable like Path but with messier URLs. No concrete consumer needed it. Drop. If a future case surfaces, the `RouterOption` union is openly extensible — `mode: 'query'` is a single variant add, not a third consumer-side implementation.
 
 ### 5.11 Three audiences — humans, search engines, AI agents (AIO vs LLMO/SEO)
 

@@ -198,7 +198,7 @@ describe('initLogControls', () => {
   });
 });
 
-describe('sanitizer-compat: setItem key is a literal (dotter rsp_mryxzvt0 blocker)', () => {
+describe('sanitizer-compat: setItem key is a literal (consumer rsp_mryxzvt0 blocker)', () => {
   // Sanitized-bundle consumers statically prove every localStorage.setItem
   // targets a literal `__airo_*` key. A const (LOG_STORAGE_KEY) survives
   // minification as a variable and fails that proof — so the WRITE site must

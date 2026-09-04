@@ -30,6 +30,7 @@ import { logger } from '@airo-js/log';
 import {
   extractPathTail,
   fragmentToState,
+  joinPathFragment,
   stateToFragment,
 } from './nav-encoding.js';
 import type { IRouter, RouterOnNavigate, RouteState } from './router.js';
@@ -53,6 +54,17 @@ export interface PathRouterOptions {
    * Default `'productId'`. See HashRouterOptions.pathContextKey.
    */
   pathContextKey?: string;
+  /**
+   * Page id the bare `basePath` resolves to. Set it to the template's entry
+   * page and that page gets ONE url (`basePath`) instead of two
+   * (`basePath` and `basePath/<entryPageId>`). See `joinPathFragment` in
+   * `nav-encoding.ts` for the full argument — short version: the decoder
+   * already accepts the bare `basePath` as the entry page, so an encoder
+   * that never emits it ships duplicate content.
+   *
+   * Omit it and the pre-0.9 behaviour is unchanged.
+   */
+  entryPageId?: string;
 }
 
 export class PathRouter implements IRouter {
@@ -60,6 +72,7 @@ export class PathRouter implements IRouter {
   private basePath: string;
   private validPages: ReadonlySet<string> | null;
   private pathContextKey: string;
+  private entryPageId: string | undefined;
   private boundHandler: () => void;
 
   constructor(onNavigate: RouterOnNavigate, options: PathRouterOptions) {
@@ -67,6 +80,7 @@ export class PathRouter implements IRouter {
     this.basePath = options.basePath.replace(/\/+$/, '');
     this.validPages = options.validPages ? new Set(options.validPages) : null;
     this.pathContextKey = options.pathContextKey ?? 'productId';
+    this.entryPageId = options.entryPageId;
     this.boundHandler = this.handlePopState.bind(this);
   }
 
@@ -113,7 +127,7 @@ export class PathRouter implements IRouter {
 
   private stateToUrl(state: RouteState): string {
     const fragment = stateToFragment(state, { pathContextKey: this.pathContextKey });
-    return fragment ? `${this.basePath}/${fragment}` : this.basePath || '/';
+    return joinPathFragment(this.basePath, fragment, this.entryPageId);
   }
 
   private handlePopState(): void {

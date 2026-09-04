@@ -143,6 +143,20 @@ export async function renderAppWithPublication<
 >(
   opts: RenderWithPublicationOptions<TData, TConfig, TPageType>,
 ): Promise<RenderWithPublicationResult> {
+  // PostProcessors are browser-only BY CONTRACT — they run after render,
+  // against a DOM, and this path builds a string. There is no pipeline
+  // here and there never will be. Warn rather than stay silent: a
+  // cartridge author who puts something load-bearing in a post-processor
+  // and then renders it server-side gets no DOM, no error and no output,
+  // which is exactly the silent class of failure the 0.9.0 wiring fixed
+  // on the client. See best-practices §1.4.
+  if ((opts.cartridge.postProcessors?.length ?? 0) > 0) {
+    log.warn(
+      `cartridge "${opts.cartridge.id}" declares ${opts.cartridge.postProcessors!.length} postProcessor(s); they are browser-only and do NOT run on the SSR path. Anything load-bearing belongs in a Transformer (pre-render, snapshot-shaped) instead.`,
+      { cartridgeId: opts.cartridge.id, phase: 'publication' },
+    );
+  }
+
   // Default filter: inline JSON-LD only. Host apps that want everything
   // pass an empty filter or explicit overrides.
   const filter: RunPublicationOptions = opts.publicationFilter ?? {

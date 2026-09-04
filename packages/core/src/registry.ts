@@ -48,8 +48,26 @@ export interface Registry<T> {
  * draining, not deleted, so late-loaded plugin chunks doing
  * `(globalThis.X = globalThis.X || []).push(entry)` see a truthy value
  * and call .push on it — which goes straight to live registration.
+ *
+ * Throws on a missing or empty `mailboxName`. `Cartridge.mailboxName` is a
+ * required field, so this only fires when a cartridge was built past the
+ * type system (a cast, a JS consumer, a hand-rolled fixture) — but the
+ * failure it replaces is genuinely hard to read: the name is used as a
+ * property key, so `undefined` stringifies and the write lands on
+ * `globalThis['undefined']`, which throws `Cannot assign to read only
+ * property 'undefined'` three frames deep inside cartridge-kit under a
+ * DOM shim, and silently pollutes a global under bare Node. Name the
+ * actual problem instead.
  */
 export function createRegistry<T>(mailboxName: string): Registry<T> {
+  if (typeof mailboxName !== 'string' || mailboxName.length === 0) {
+    throw new Error(
+      `[@airo-js/core] createRegistry: mailboxName must be a non-empty string, received ${
+        typeof mailboxName === 'string' ? "''" : String(mailboxName)
+      }. It keys the global chunk mailbox — see \`Cartridge.mailboxName\` (convention: '__AIRO_<CARTRIDGE_ID_UPPER>_PAGES__').`,
+    );
+  }
+
   const map = new Map<string, T>();
 
   const pending = (globalThis as Record<string, unknown>)[mailboxName];
