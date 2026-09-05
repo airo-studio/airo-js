@@ -536,20 +536,36 @@ Airo is a good fit when:
 - You need SSR, hydration, JSON-LD, feeds, `llms.txt`, or MCP tools to stay consistent with what the UI renders.
 - You are building a studio or marketplace where cartridges are authored by one team and configured by another.
 - You care about search and AI discoverability, but do not want every cartridge to hand-maintain structured data in parallel.
+- **You are building a whole site** — real urls, per-URL SSR, deep links, `<head>` metadata — and you want to keep your own server. See [`examples/full-site`](./examples/full-site/README.md).
 
 Airo is probably not the right fit when:
 
 - You only need a single hard-coded component in one app.
 - You want the framework to own auth, drafts, tenancy, storage, scheduling, or CMS data modeling.
 - You do not need a cartridge contract, studio metadata, SSR, publication outputs, or multi-surface consistency.
+- You want the framework to ship an HTTP server, file-based routing, a bundler, a dev server, or a font pipeline. Those stay yours — see **Hosting** below.
 
 ## Examples
 
 | Example | What it proves |
 |---|---|
+| [`examples/full-site`](./examples/full-site/README.md) | A whole multi-page website from one cartridge, root-mounted on Express. Real urls, per-URL SSR, per-page canonicals, host-assembled sitemap, `llms.txt`, MCP tools — every surface off one snapshot. Swap the server for Hono or a Worker and nothing else changes. |
 | [`examples/publication-adapter-skeleton`](./examples/publication-adapter-skeleton/src/index.ts) | Two publication adapters sharing one product snapshot. |
 | [`examples/shopify-edge-worker`](./examples/shopify-edge-worker/README.md) | A Cloudflare Worker serving Shopify and WordPress cartridges as HTML, JSON-LD, feeds, and MCP tools from live data. |
 | [`examples/llms-txt-adapter`](./examples/llms-txt-adapter/README.md) | `llms.txt` as a generated `PublicationAdapter`, not a hand-maintained file. |
+
+## Hosting
+
+**There is no hosting requirement, and no preferred server.** `@airo-js/ssr` is pure functions: hand it a `Document` from `linkedom` or `deno-dom` and it hands back an HTML string. It opens no sockets, reads no environment, and imports nothing Node-specific.
+
+So Express, Hono, Fastify, bare `node:http`, Cloudflare Workers, Deno and Lambda@Edge are all equally supported, and switching between them is roughly 150 lines of routing that touches nothing else:
+
+| Example | Server |
+|---|---|
+| [`examples/full-site`](./examples/full-site/README.md) | Express on Node, root-mounted at `/` |
+| [`examples/shopify-edge-worker`](./examples/shopify-edge-worker/README.md) | A Cloudflare Worker `fetch` handler |
+
+Same cartridge shape, same framework calls, same surfaces. What the framework does **not** ship — an HTTP server, file-based routing, a bundler, a dev server, a font pipeline — it does not ship deliberately, because those are the parts of a stack teams most often already have and least often want replaced.
 
 ## Best Practices
 
@@ -567,7 +583,9 @@ Start with [`docs/best-practices.md`](./docs/best-practices.md). The high-signal
 Airo owns:
 
 - Rendering lifecycle
-- Page routing
+- Page routing (hash, path, or query; path mode root-mounts a whole site)
+- Document shell and `<head>` assembly
+- Crawler-surface metadata (canonical, OpenGraph, Twitter Card, sitemap entries)
 - Style isolation mechanism
 - Event bus
 - Cartridge registry and view resolution
