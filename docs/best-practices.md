@@ -1269,37 +1269,60 @@ Pure function — no DOM, no globals, no router instance threading required.
 - **Wildcard route conflicts.** Your server's `/campaign/:widgetId/*` route catches everything under the prefix, including static assets. Order it after asset handlers, or pattern-restrict (`/campaign/:widgetId/(products|categories|...)/*`).
 - **Root mount (`basePath: '/'`).** The basePath normalises to `''`, so the app claims the ENTIRE origin — `pathname.startsWith('')` is true for every path, and the only thing keeping `/favicon.ico` from decoding as a page is the `validPages` allowlist. Route static assets before the wildcard, always. Set `entryPageId` so the entry page has one url instead of two (see below).
 
-### 5.10a Answering 404 from a root-mounted app
+### 5.10a Answering 404 — the entry-page fallback
 
-`decodeNavHint` returns `null` for a tail naming no known page, and the SSR runner then falls back to the default entry page. That is correct for an **embedded widget** — a tampered deeplink must never crash a render, and the host page owns the URL and its status code anyway.
+`decodeNavHint` returns `null` for a tail naming no known page, and the SSR runner then falls back to the default entry page rather than erroring. Taken literally that serves your home page at `/does-not-exist` with a `200` and a canonical of `/` — a soft 404, which search engines penalise, and which nothing errors or warns about. **Two independent consumers shipped it without noticing.**
 
-It is a **trap for an app that owns its own URLs**, and the failure is invisible: `/does-not-exist` renders your home page with a `200` and a canonical of `/`. That is a soft 404, search engines penalise it, and nothing errors or warns. A consumer shipped exactly this before noticing.
+**The right answer is not the same on every surface, and it is not the same for every consumer either — it is per SURFACE.** One codebase routinely serves several:
 
-**The framework will not reverse the fallback** — it is right for the embed case. Instead it reports the decision it already made, on `RenderToHTMLResult` and `RenderWithPublicationResult`:
+| Surface | Router | Unknown tail should |
+|---|---|---|
+| Your own domain, crawlable (`/`, `/campaign/:id/*`) | `path` | **404** |
+| Preview / emulation, never indexed | `query` | fall back |
+| Widget embedded on a customer's page | `query` or `hash` | **fall back — mandatory** |
+| Editor / srcdoc preview | off | n/a |
+
+Row three is why the framework cannot decide this and why the fallback will never be reversed. **On a customer's page the URL is not yours.** The path belongs to their router, the tail may be theirs and have nothing to do with your widget, and a widget that errored or refused to render because it did not recognise a path segment would be a vendor breaking a customer's page. There, falling back is a requirement, not a convenience.
+
+So the framework reports the decision it already made and stops. On `RenderToHTMLResult` and `RenderWithPublicationResult`:
 
 ```ts
 fellBack?: { requested: string; reason: 'unknown-page' | 'disabled' | 'subpage' | 'gate-page' }
 ```
 
-Present only when a page was requested AND rejected. Absent for a bare `basePath` (the legitimate entry case) and for a page that resolved. HTTP status is squarely host territory, so the framework reports and stops:
+Present only when a page was requested AND rejected — absent for a bare `basePath` (the legitimate entry case) and for a page that resolved. The host is the only party that knows which surface it is on; the runner is the only party that knows the decode failed.
+
+**Branch on `reason`, never on the presence of `fellBack`.** Only `'unknown-page'` is a 404. A `'disabled'` page is a publisher config state and a `'gate-page'` is a real page in the template — both are legitimate `200`s that happen to have resolved elsewhere. Collapsing the reason to a boolean gets this wrong:
 
 ```ts
 const result = await renderAppWithPublication({ cartridge, appConfig, snapshot, publicationCtx, document, initialNavState });
 
-if (result.fellBack) {
-  // Re-render the template's own notFound page rather than serving the
-  // home page under a wrong url. No framework change needed — the
-  // discriminator is what makes the second call possible.
-  const notFound = await renderAppWithPublication({
-    ..., initialNavState: { page: 'notFound' },
-  });
-  return new Response(renderDocument({ head: { lang, title: 'Not found' }, body: notFound.html }), { status: 404 });
+// ❌ — 404s a disabled page and an age gate
+if (result.fellBack) return new Response(html, { status: 404 });
+
+// ✅ — only an id that names nothing is missing
+if (result.fellBack?.reason === 'unknown-page' && surfaceOwnsItsUrls) {
+  const notFound = await renderAppWithPublication({ ...same, initialNavState: { page: 'notFound' } });
+  return new Response(
+    renderDocument({ head: { lang, title: 'Not found' }, body: notFound.html }),
+    { status: 404 },
+  );
 }
 ```
 
-A template MAY declare a `notFound` page and dispatch to it this way; the runner will never route there on its own, because falling back to an arbitrary page id would be a policy decision. Equally valid — and simpler — is assembling the 404 with `renderDocument` directly. It needs no cartridge and no snapshot, which is exactly why `renderDocument` composes rather than wraps.
+Read `fellBack` rather than re-deriving the decision from the URL. Re-derivation means keeping a second copy of the framework's decode rules in sync with the framework's — and consumers who tried it reached for different primitives (`extractPathTail` vs a hand-rolled tail composer that also strips host-only query params), so there is no one two-step to bless.
 
-**Do not answer `503` for a missing canonical.** A missing canonical is a symptom of two different things: the page does not exist (404), or an adapter broke (503). Telling a crawler to come back for something that is never coming is a subtle, durable SEO bug. Disambiguate against your own route list — the framework cannot, because it does not know which urls you intend to serve.
+**There is no framework-dispatched `notFound` page, and that is deliberate.** A template MAY declare one and a host may dispatch to it by re-rendering with `initialNavState: { page: 'notFound' }`, as above — but the runner will never route there on its own. Picking an arbitrary page id is a policy decision, and on a customer's page a 404 belongs to the customer: a widget rendering its own not-found page inside someone else's article is worse than the soft 404 it replaced. Assembling the 404 with `renderDocument` directly is equally valid and simpler; it needs no cartridge and no snapshot, which is exactly why `renderDocument` composes rather than wraps.
+
+**Do not answer `503` for a missing canonical.** One symptom, at least three causes, and only the host can tell them apart:
+
+| Cause | Correct status |
+|---|---|
+| The page does not exist | `404` |
+| The page is real but an adapter broke | `503` |
+| The page is real and the adapter is fine, but the upstream data fetch failed | `503` + `Retry-After` |
+
+Telling a crawler to come back for something that is never coming is a subtle, durable SEO bug, and so is dropping a page that is merely having a bad minute. The framework cannot disambiguate: at its altitude the three are identical. Only the host has the route list and the upstream health.
 
 
 **Don't ship a parallel runtime allowlist for routable pages.** Same anti-pattern as Section 3.12 — derive valid page ids from the cartridge:

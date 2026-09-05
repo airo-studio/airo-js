@@ -84,11 +84,18 @@ export interface RenderToHTMLResult {
    * substituted the default entry for. Absent when no page was requested,
    * and when the requested page rendered.
    *
-   * The fallback itself is deliberate — a tampered deeplink must never
-   * crash a render. This field exists so an app that owns its URLs can
-   * answer 404 rather than serving its home page at `/does-not-exist`
-   * with a 200 (a soft 404, which search engines penalise). The framework
-   * reports what it did; the status code is entirely yours.
+   * The fallback itself is deliberate and will never be reversed — on a
+   * customer's page the URL belongs to the customer's router, so a widget
+   * that refused to render an unrecognised tail would break their page.
+   * This field exists so a surface that DOES own its urls can answer 404
+   * rather than serving its home page at `/does-not-exist` with a 200 (a
+   * soft 404, which search engines penalise).
+   *
+   * Branch on `reason`, not on the presence of this field: only
+   * `'unknown-page'` is a 404. `'disabled'` is a config state and
+   * `'gate-page'` is a real page in the template — both legitimate 200s.
+   *
+   * The framework reports what it did; the status code is entirely yours.
    */
   fellBack?: { requested: string; reason: EntryFallbackReason };
 }

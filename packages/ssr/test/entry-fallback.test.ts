@@ -3,13 +3,16 @@
  *
  * The entry resolver deliberately substitutes the default entry for a
  * requested page it rejects, so a tampered or stale deeplink can never
- * crash a render. That is correct for an embedded widget whose HOST owns
- * the URL and its status code.
+ * crash a render. Taken literally that renders the home page at
+ * `/does-not-exist` with a 200 and a canonical of `/` — a soft 404, which
+ * search engines penalise and which nothing errors about. TWO independent
+ * consumers shipped it without noticing.
  *
- * It is a trap for an app that owns its own URLs: `/does-not-exist` renders
- * the home page with a 200 and a canonical of `/`. Search engines penalise
- * that, and nothing errors or warns — a consumer shipped it without
- * noticing. The fallback stays; the decision stops being discarded.
+ * The right answer is per SURFACE, not per consumer: the same codebase
+ * serves a crawlable domain (404) and a widget embedded on a customer's
+ * page (fall back — mandatory, because the URL is the customer's and a
+ * widget refusing to render an unrecognised tail would break their page).
+ * So the fallback stays and the decision stops being discarded.
  *
  * The framework has no opinion about status codes. It reports what it did.
  */
@@ -166,5 +169,28 @@ describe('renderAppWithPublication — fellBack', () => {
     });
     expect(result.skipped).toEqual({ pageType: 'home', reason: 'csr-only' });
     expect(result.fellBack).toEqual({ requested: 'nope', reason: 'unknown-page' });
+  });
+});
+
+describe('the reason is load-bearing — do not collapse it to a boolean', () => {
+  // A second consumer serves all of these from ONE codebase across four
+  // surfaces. On their crawlable campaign domain a disabled page and an
+  // age gate are legitimate 200s (a publisher config state, and a real
+  // page in the template); only an id naming nothing is a 404. A boolean
+  // `fellBack` would 404 all three.
+  test('only unknown-page indicates a missing url', () => {
+    const reasons = ['does-not-exist', 'draft', 'artist', 'age-gate'].map(
+      (p) => render(p).fellBack?.reason,
+    );
+    expect(reasons).toEqual(['unknown-page', 'disabled', 'subpage', 'gate-page']);
+
+    const is404 = reasons.map((r) => r === 'unknown-page');
+    expect(is404).toEqual([true, false, false, false]);
+  });
+
+  test('every rejection carries the id that was requested, for logging', () => {
+    for (const p of ['does-not-exist', 'draft', 'artist', 'age-gate']) {
+      expect(render(p).fellBack?.requested).toBe(p);
+    }
   });
 });

@@ -100,20 +100,31 @@ export interface EntryResolution<TPageType extends string> {
  *
  * The resolver already validates a requested id against the page graph
  * and silently substitutes the default entry — deliberately, so a
- * tampered or stale deeplink can never crash a render. That is right for
- * an embedded widget, whose host owns the URL and its status code.
- *
- * It is a trap for an app that owns its own URLs. Falling back means
- * `/does-not-exist` renders the home page with a 200 and a canonical of
- * `/` — a soft 404, which search engines penalise, and which nothing
- * errors or warns about. Reported by a consumer who shipped exactly that
+ * tampered or stale deeplink can never crash a render. Taken literally
+ * that serves the home page at `/does-not-exist` with a 200 and a
+ * canonical of `/`: a soft 404, which search engines penalise, and which
+ * nothing errors or warns about. Two independent consumers shipped it
  * without noticing.
  *
- * The fallback stays; the DECISION stops being thrown away. Hosts that
- * own their URLs read `fellBack` and answer 404 instead of re-deriving
- * the same judgement from the URL. HTTP status stays entirely host-side —
- * the framework reports what it did and has no opinion about the response
- * code.
+ * The right answer is PER SURFACE, not per consumer — the same codebase
+ * routinely serves several. On its own crawlable domain an unknown tail
+ * is a 404. On a customer's page, where the URL belongs to the customer's
+ * router and the tail may have nothing to do with this widget at all,
+ * falling back is mandatory: a widget that refused to render because it
+ * did not recognise a path segment would be a vendor breaking a
+ * customer's page. That is why the fallback will never be reversed, and
+ * why the framework cannot pick.
+ *
+ * So the fallback stays and the DECISION stops being thrown away. The
+ * runner is the only party that knows the decode failed; the host is the
+ * only party that knows what that means. HTTP status stays entirely
+ * host-side — this reports what it did and has no opinion about the
+ * response code.
+ *
+ * Callers should branch on `reason`, not on the presence of `fellBack`:
+ * only `'unknown-page'` is a 404. `'disabled'` is a publisher config
+ * state and `'gate-page'` is a real page in the template — both are
+ * legitimate 200s that happened to resolve elsewhere.
  */
 export function describeEntryResolution<TPageType extends string>(
   pages: ReadonlyArray<Page<TPageType>>,
