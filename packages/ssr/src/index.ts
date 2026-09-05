@@ -39,6 +39,7 @@ export { renderAppToHTML } from './render-app.js';
 export type {
   RunPublicationOptions,
   AdapterRunResult,
+  AdapterSkipped,
 } from './run-publication.js';
 export { runPublicationAdapters } from './run-publication.js';
 

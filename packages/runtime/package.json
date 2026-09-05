@@ -53,7 +53,8 @@
   },
   "peerDependencies": {
     "@airo-js/core": "workspace:^",
-    "@airo-js/cartridge-kit": "workspace:^"
+    "@airo-js/cartridge-kit": "workspace:^",
+    "@airo-js/log": "workspace:^"
   },
   "devDependencies": {
     "@airo-js/log": "workspace:^",

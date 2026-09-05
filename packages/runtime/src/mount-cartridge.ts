@@ -333,9 +333,12 @@ export interface MountCartridgeOptions<
 
 // `UpdateResult` moved to `@airo-js/core/page.ts` in 0.7.1 so it can be
 // referenced from `RenderContext.update`'s return type without core taking
-// a circular dep on runtime. Re-exported here for backward compatibility:
-// 0.7.0 consumers importing `UpdateResult` from `@airo-js/runtime` keep
-// working unchanged.
+// a circular dep on runtime. Re-exported here, and forwarded from the barrel
+// in `index.ts`, so it stays importable from `@airo-js/runtime` — where the
+// calls that return it live. Between 0.7.1 and 0.9.0 this re-export existed
+// but the barrel did not forward it, so the back-compat it claimed did not
+// actually hold; `exports` only exposes `.` and `./test-harness`, never this
+// module's path. Caught by knip pre-1.0.
 export type { UpdateResult };
 
 /**

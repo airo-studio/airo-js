@@ -18,10 +18,12 @@
  *      JSON-LD, an XML feed, and any MCP tool all answer the same
  *      question — what the rendered widget shows.
  *   2. **Coverage gating.** Adapters declare `requires` (schema field
- *      paths). Framework can skip an adapter when required fields are
- *      absent rather than emit broken output. Host apps surface
- *      "you can't enable adapter X because data is missing field Y" to
- *      the user via this metadata.
+ *      paths). `runPublicationAdapters` skips an adapter whose
+ *      `required: 'always'` paths are absent from the snapshot rather than
+ *      let it emit broken output, and reports the skip with the missing
+ *      paths. `'preferred'` and `'optional'` are not gated — they are
+ *      metadata for the host app, which surfaces "you can't enable adapter
+ *      X because data is missing field Y" to the user.
  *   3. **Validation as a hard gate.** `validate(output)` runs before the
  *      host app publishes. If `valid: false`, the host app refuses to
  *      serve the output and surfaces errors. The trust layer — never
@@ -98,9 +100,13 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
   /**
    * Required cartridge schema fields. Used by:
    *   (a) host app — to surface coverage gaps to the user;
-   *   (b) framework — to skip the adapter if required fields are absent
-   *       rather than emit broken output;
-   *   (c) validation — to gate `enable()` on coverage threshold.
+   *   (b) `runPublicationAdapters` — to skip the adapter, before it
+   *       generates, when a path marked `required: 'always'` holds no value
+   *       in the snapshot. Only `'always'` gates; see that function's
+   *       docblock for why, and for what counts as present;
+   *   (c) host app — to gate enabling an adapter on a coverage threshold.
+   *
+   * Declare `[]` for an adapter that works off any snapshot shape.
    */
   requires: SchemaFieldRef[];
 

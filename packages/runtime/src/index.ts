@@ -17,6 +17,11 @@ export type {
   SharedLifecycleHooks,
   MountCartridgeOptions,
   MountCartridgeResult,
+  // Defined in `@airo-js/core`; surfaced here because it is the return type of
+  // `MountCartridgeResult.update` / `.updatePages`. Without it on this barrel,
+  // typing the result of a call you made against `@airo-js/runtime` means
+  // importing from a package you never called.
+  UpdateResult,
 } from './mount-cartridge.js';
 export { mountCartridge } from './mount-cartridge.js';
 
