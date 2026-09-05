@@ -291,12 +291,17 @@ for entry in "${PACKAGES[@]}"; do
 done
 
 echo
+# Derived from PACKAGES rather than hand-listed. The hand-listed version had
+# already drifted: it omitted @airo-js/mcp on the release that first published
+# it, so the one package a reader most needed to check was the one missing.
 echo "Done. Verify on npmjs.com:"
-echo "  https://www.npmjs.com/package/@airo-js/log"
-echo "  https://www.npmjs.com/package/@airo-js/core"
-echo "  https://www.npmjs.com/package/@airo-js/cartridge-kit"
-echo "  https://www.npmjs.com/package/@airo-js/runtime"
-echo "  https://www.npmjs.com/package/@airo-js/embed"
-echo "  https://www.npmjs.com/package/@airo-js/ssr"
+for pkg in "${PACKAGES[@]}"; do
+  echo "  https://www.npmjs.com/package/${pkg}"
+done
 echo
-echo "All packages publish to the 'latest' dist-tag (cartridge-kit is GA on the 0.8 line)."
+echo "All packages publish to the 'latest' dist-tag."
+echo
+echo "NOTE: a package's FIRST-ever version can 404 on \`npm view\` for a while"
+echo "after a successful publish — the metadata document lags the tarball."
+echo "Confirm with an install rather than the registry API:"
+echo "  npm install <pkg>@<version> --prefix \"\$(mktemp -d)\""
