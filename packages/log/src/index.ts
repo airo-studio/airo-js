@@ -262,7 +262,33 @@ const LEVEL_RANK: Record<LevelOrSilent, number> = {
   silent: 4,
 };
 
-const DEFAULT_LEVEL: LevelOrSilent = 'error';
+/**
+ * Default threshold: `'warn'`.
+ *
+ * 0.3.0 moved every scattered `console.*` call in the framework behind this
+ * dispatcher and set the default to `'error'`, intending "narration is
+ * opt-in". It overshot by one rank. `debug` and `info` ARE narration and
+ * should stay off — but `warn` is not narration, it is "your configuration
+ * is wrong and we are degrading", and setting the threshold above it
+ * silenced every such message in the framework at once. Among them:
+ * "Router init failed; URL routing disabled", "renderer does not implement
+ * hydrate()", and both warns added in 0.9.0 specifically to stop silent
+ * failures.
+ *
+ * Nothing fails when that happens, which is precisely the failure mode
+ * this package exists to remove. A consumer measured it: the 0.9.0 warns
+ * shipped and could not fire.
+ *
+ * `'warn'` also restores what the README has always claimed — that an app
+ * which never calls `setSink` sees the pre-0.3.0 `console.warn` behaviour.
+ *
+ * Deliberately NOT conditional on `NODE_ENV`. This package runs in
+ * browsers, Workers and Deno, where `process` does not exist; reading it
+ * here would trade a visibility bug for a portability bug. A host that
+ * wants production quiet calls `setLogLevel('error')`, which is one line
+ * and explicit.
+ */
+const DEFAULT_LEVEL: LevelOrSilent = 'warn';
 
 let currentLevel: LevelOrSilent = DEFAULT_LEVEL;
 const channelLevels: Map<LogChannel, LevelOrSilent> = new Map();
@@ -535,4 +561,4 @@ export function resetLogControls(): void {
 }
 
 export const PACKAGE_NAME = '@airo-js/log';
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.1';

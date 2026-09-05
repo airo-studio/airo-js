@@ -63,6 +63,22 @@ Sync rev for `workspace:^` peerDep coherence across the 0.9.0 line. No behaviour
 
 > **Scope note on that measurement.** The new core exports cost this bundle zero bytes because embed imports NAMED symbols and every package sets `"sideEffects": false`. It does **not** generalise to a consumer that re-exposes the framework to code the bundler never sees: `import * as core` on a global pins every export by construction, and one consumer measured **+1.6 KB gzip** on their core this way, with the new exports they will never call inlined in full. If you share a framework instance with lazily-loaded chunks, see best-practices §2.5c — curate a typed allowlist from named imports.
 
+## `@airo-js/log` 0.3.1 — 2026-09-05
+
+### Fixed
+- **Default threshold is `'warn'`, was `'error'`.** 0.3.0 moved every scattered `console.*` call in the framework behind this dispatcher and set the default to `'error'`, intending "narration is opt-in". It overshot by one rank. `debug` and `info` are narration and stay off — but `warn` is not narration, it is *"your configuration is wrong and we are degrading"*, and putting the threshold above it silenced **all eight framework warnings at once**, among them `Router (path) init failed; URL routing disabled`, `renderer does not implement hydrate()`, and both warns added in 0.9.0 specifically to stop silent failures.
+
+  Nothing fails when that happens, which is exactly the failure mode this package exists to remove. A consumer measured it: the 0.9.0 warns shipped and could not fire. `isLevelEnabled('ssr', 'warn')` returned `false` out of the box.
+
+  This also restores what the README has always claimed — that an app which never calls `setSink` sees the pre-0.3.0 `console.warn` behaviour. It did not; it saw strictly less.
+
+  Deliberately **not** conditional on `NODE_ENV`: this package runs in browsers, Workers and Deno where `process` does not exist, so reading it here would trade a visibility bug for a portability bug. A host that wants production quiet calls `setLogLevel('error')` — one line, explicit, and unchanged in behaviour.
+
+  If you pinned `0.3.0` and added a `setLogLevel('warn')` of your own, you can drop it.
+
+### Changed
+- README documents the level threshold as a filter that runs **before** the sink, so "replace the sink" is not confused with "lower the threshold".
+
 ## `@airo-js/log` 0.3.0 — 2026-07-24
 
 The logging upgrade (bridge thread msg_mryrycuf). Four changes, one behavioral default flip.

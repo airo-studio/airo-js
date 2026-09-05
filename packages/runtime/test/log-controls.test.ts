@@ -28,6 +28,7 @@ import {
   getChannelLevel,
   getLogLevel,
   initLogControls,
+  isLevelEnabled,
   logger,
   resetLogControls,
   resetLogLevels,
@@ -52,7 +53,10 @@ afterEach(() => {
 });
 
 describe('default threshold', () => {
-  test("is 'error' — info/warn/debug drop, error flows", () => {
+  test("is 'warn' — debug/info drop as narration, warn/error flow", () => {
+    // Was 'error' in 0.3.0. That silenced every framework warning at
+    // once, including "Router init failed; URL routing disabled" and both
+    // warns added in 0.9.0 to stop silent failures. See 0.3.1.
     const captured: AiroEvent[] = [];
     setSink({ emit: (e) => captured.push(e) });
     const log = logger('app');
@@ -60,8 +64,8 @@ describe('default threshold', () => {
     log.info('i');
     log.warn('w');
     log.error('e');
-    expect(captured.map((e) => e.level)).toEqual(['error']);
-    expect(getLogLevel()).toBe('error');
+    expect(captured.map((e) => e.level)).toEqual(['warn', 'error']);
+    expect(getLogLevel()).toBe('warn');
   });
 });
 
@@ -85,7 +89,7 @@ describe('applyLogDirective grammar', () => {
   test('channel:level applies per-channel — app-defined channels included', () => {
     expect(applyLogDirective('analytics:debug')).toBe(true);
     expect(getChannelLevel('analytics')).toBe('debug');
-    expect(getLogLevel()).toBe('error'); // global untouched
+    expect(getLogLevel()).toBe('warn'); // global untouched — the default
   });
 
   test('channel verbose alias: analytics:v', () => {
@@ -102,7 +106,7 @@ describe('applyLogDirective grammar', () => {
   test('bare non-level token is a channel → debug (the common reflex)', () => {
     expect(applyLogDirective('analytics')).toBe(true);
     expect(getChannelLevel('analytics')).toBe('debug');
-    expect(getLogLevel()).toBe('error'); // global untouched
+    expect(getLogLevel()).toBe('warn'); // global untouched — the default
   });
 
   test('bare level alias still applies globally, not as a channel', () => {
@@ -194,7 +198,7 @@ describe('initLogControls', () => {
 
   test('no param, no storage: levels untouched', () => {
     initLogControls();
-    expect(getLogLevel()).toBe('error');
+    expect(getLogLevel()).toBe('warn'); // the default, not raised or lowered
   });
 });
 
@@ -210,5 +214,51 @@ describe('sanitizer-compat: setItem key is a literal (consumer rsp_mryxzvt0 bloc
     const src = readFileSync(resolve(process.cwd(), '../log/src/index.ts'), 'utf8');
     expect(src).toContain("localStorage.setItem('__airo_log',");
     expect(src).not.toMatch(/localStorage\.setItem\(LOG_STORAGE_KEY/);
+  });
+});
+
+describe('default threshold (0.3.1)', () => {
+  // 0.3.0 set this to 'error', intending "narration is opt-in". It
+  // overshot by one rank: `debug` and `info` ARE narration, but `warn` is
+  // "your configuration is wrong and we are degrading", and putting the
+  // threshold above it silenced every framework warning at once —
+  // including "Router init failed; URL routing disabled" and both warns
+  // added in 0.9.0 specifically to stop silent failures. A consumer
+  // measured it: the 0.9.0 warns shipped and could not fire.
+  beforeEach(() => {
+    resetLogLevels();
+  });
+
+  test('warn is ON by default — the whole point of the fix', () => {
+    expect(getLogLevel()).toBe('warn');
+    expect(isLevelEnabled('ssr', 'warn')).toBe(true);
+    expect(isLevelEnabled('core', 'warn')).toBe(true);
+  });
+
+  test('error stays on', () => {
+    expect(isLevelEnabled('ssr', 'error')).toBe(true);
+  });
+
+  test('narration stays OFF by default — debug and info are still opt-in', () => {
+    expect(isLevelEnabled('ssr', 'debug')).toBe(false);
+    expect(isLevelEnabled('ssr', 'info')).toBe(false);
+  });
+
+  test('a warn actually reaches the sink with no host configuration', () => {
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+    logger('ssr').warn('configuration problem');
+    expect(captured.map((e) => e.msg)).toContain('configuration problem');
+  });
+
+  test('resetLogLevels returns to warn, not error', () => {
+    setLogLevel('silent');
+    resetLogLevels();
+    expect(getLogLevel()).toBe('warn');
+  });
+
+  test('a host can still opt into production quiet', () => {
+    setLogLevel('error');
+    expect(isLevelEnabled('ssr', 'warn')).toBe(false);
   });
 });
