@@ -1,0 +1,28 @@
+{
+  "name": "@airo-js-examples/full-site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A whole multi-page website from one cartridge, root-mounted on Express. Real urls, per-URL SSR, per-page canonicals, a host-assembled sitemap, llms.txt and MCP tools — every surface off one snapshot. Swap the server for Hono or a Worker and nothing else changes.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "pnpm build && node dist/server.js",
+    "smoke": "node scripts/smoke.mjs",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "@airo-js/runtime": "workspace:*",
+    "@airo-js/ssr": "workspace:*",
+    "express": "^5.1.0",
+    "linkedom": "^0.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
