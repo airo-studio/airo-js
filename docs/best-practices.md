@@ -352,6 +352,49 @@ const result = await mountCartridge({
 
 **`onShellReady` runs before the render phase — guaranteed.** The mount sequence is shell → `onShellReady` → data → pipeline → mount, and `onShellReady` is synchronous. A `shell.events` subscription made inside it observes every emission from the render/hydrate phase, including events components fire during their initial render (auto-fire on mount, hydrate-phase misses). This is documented contract, not observed behavior — build event bridges (analytics, debug observers) on it freely. Equivalent alternative: pre-build the bus and pass it via `options.events` as shown above.
 
+### 2.5c Sharing ONE framework instance with lazily-loaded chunks
+
+A chunked-client runtime (§2.5b) has a second boundary problem beyond page renderers. The mailbox gets your cartridge *pages* across; the framework primitives those pages call — `escapeHtml`, `parseHtmlFragment`, `routerHrefFor`, `resolveStyleRoot` — have no equivalent seam. Each chunk must reach the SAME instance the core mounted, not re-bundle its own copy, or you pay for the framework once per chunk and risk two copies of module-level state.
+
+The obvious answer is to publish the namespace on a global:
+
+```ts
+// ❌ — defeats tree-shaking BY CONSTRUCTION
+import * as airoCore from '@airo-js/core';
+import * as airoCartridgeKit from '@airo-js/cartridge-kit';
+window.__AIRO_CORE__ = airoCore;
+window.__AIRO_CARTRIDGE_KIT__ = airoCartridgeKit;
+```
+
+A namespace import pins **every** export, so `sideEffects: false` cannot help — the bundler is being told, correctly, that the whole module object is reachable. The structural consequence is that your core bundle grows with every framework release whether or not you use the new exports. This is measured, not theoretical: one consumer's shopper-facing core IIFE grew **+1.6 KB gzip on a single minor** this way, with every per-view chunk byte-identical, and a factory they will never call inlined in full next to three helpers they also do not use.
+
+**Publish a curated object built from named imports instead:**
+
+```ts
+// ✅ — the bundler still sees the boundary
+import { escapeHtml, escapeAttr, parseHtmlFragment, resolveStyleRoot, routerHrefFor } from '@airo-js/core';
+
+/** The exact surface per-view chunks may use. Chunks import this TYPE. */
+export interface AiroShared {
+  escapeHtml: typeof escapeHtml;
+  escapeAttr: typeof escapeAttr;
+  parseHtmlFragment: typeof parseHtmlFragment;
+  resolveStyleRoot: typeof resolveStyleRoot;
+  routerHrefFor: typeof routerHrefFor;
+}
+
+const shared: AiroShared = { escapeHtml, escapeAttr, parseHtmlFragment, resolveStyleRoot, routerHrefFor };
+(window as unknown as { __AIRO_SHARED__: AiroShared }).__AIRO_SHARED__ = shared;
+```
+
+Two properties fall out. The framework can add exports forever without touching your bundle — you carry what you named and nothing else. And because chunks consume `AiroShared` as a **type**, a chunk that reaches for a primitive nobody added fails your typecheck instead of failing at a shopper's browser.
+
+That type is the whole trick, and it is what makes the maintenance cost bearable. The allowlist is hand-maintained either way; typing it moves the failure from runtime to build time, which is the only version of hand-maintenance that is safe.
+
+**Why not subpath exports** (`@airo-js/core/nav`)? They would shrink the unit, not change the mechanism — `import * as nav` still pins every export of that subpath, so your bundle still grows whenever that subpath does. Finer-grained coarseness is still coarseness. If you are already curating, curate precisely.
+
+**Two related costs worth knowing, both structural rather than bugs.** Anything on the `Cartridge` declaration ships wherever the declaration ships: `postProcessors` is browser-only and post-render (§1.4), yet declaring it puts it in the core bundle even on SSR and publication paths that can never run it. And `transformers` legitimately earn core residency, because they run before the SSR, edge and publication snapshots and every surface reads that one post-transformer snapshot. When a hook is genuinely per-view — an ARIA announcer for a filter bar, say — the per-view chunk is the honest home for it even though the framework offers a declaration slot.
+
 ### 2.6 Subfolder-per-page beats flat `views/`
 
 **The trap:** flat `views/CategoriesRenderer.ts`, `views/ProductsRenderer.ts`, etc. Works for skeletons; breaks once renderers gain sub-views, page-specific styles, scoped components.

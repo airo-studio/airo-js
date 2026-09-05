@@ -163,6 +163,12 @@ export async function renderAppWithPublication<
   // and then renders it server-side gets no DOM, no error and no output,
   // which is exactly the silent class of failure the 0.9.0 wiring fixed
   // on the client. See best-practices §1.4.
+  //
+  // Test `.length`, NOT truthiness. `postProcessors: []` is a real and
+  // deliberate shape — a consumer ships the declaration slot with an empty
+  // array on purpose — and an empty array is truthy, so `if (postProcessors)`
+  // would warn on every crawler hit to a JSON-LD or feed route. Do not
+  // "simplify" this.
   if ((opts.cartridge.postProcessors?.length ?? 0) > 0) {
     log.warn(
       `cartridge "${opts.cartridge.id}" declares ${opts.cartridge.postProcessors!.length} postProcessor(s); they are browser-only and do NOT run on the SSR path. Anything load-bearing belongs in a Transformer (pre-render, snapshot-shaped) instead.`,
