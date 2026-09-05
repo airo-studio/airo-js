@@ -199,11 +199,19 @@ fi
 # ---- build -----------------------------------------------------------------
 
 echo
-echo "==> Building all packages (typecheck + tsc)"
+echo "==> Building all packages (tsc + typecheck)"
 # Filter to packages only — apps/* are workspace members for local dev (workspace:*
 # linking) but are not published and must not gate the publish flow.
-pnpm -r --filter './packages/*' typecheck >/dev/null
+#
+# BUILD BEFORE TYPECHECK, not after. The packages reference each other through
+# their built `.d.ts`, so `--noEmit` on a tree with no `dist/` fails to resolve
+# a sibling and exits 2. That made this script silently dependent on a previous
+# build having been run — fine on a developer's machine, broken on a fresh
+# clone, which is exactly where CI runs it. `build` is `tsc` without --noEmit
+# and fails on the same type errors, so the typecheck pass after it is a
+# belt-and-braces re-run rather than the only gate.
 pnpm -r --filter './packages/*' build >/dev/null
+pnpm -r --filter './packages/*' typecheck >/dev/null
 echo "    OK"
 
 # ---- dry-run preview -------------------------------------------------------

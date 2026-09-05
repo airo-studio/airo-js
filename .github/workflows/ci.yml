@@ -36,13 +36,13 @@ jobs:
       matrix:
         node: ['20', '24']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         # Version comes from the root package.json `packageManager` field, so
         # it cannot drift from what developers run locally.
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
@@ -73,15 +73,21 @@ jobs:
     name: bundle + shell
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: pnpm
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      # esbuild resolves embed's siblings (`@airo-js/core`, `@airo-js/log`)
+      # through node_modules to their built output, so the budget cannot be
+      # measured on a tree that has never been built.
+      - name: Build
+        run: pnpm build
 
       # The embed budget is load-bearing and has sat within ~40 bytes of its
       # ceiling for several releases. It fails the build, not a comment.
@@ -104,9 +110,9 @@ jobs:
     name: publish dry-run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: pnpm
@@ -125,9 +131,9 @@ jobs:
     name: example smokes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: pnpm
