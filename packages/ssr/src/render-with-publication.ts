@@ -40,6 +40,8 @@ import type {
 import { getDefaultRenderResolver } from '@airo-js/cartridge-kit';
 import { logger } from '@airo-js/log';
 
+import { buildJsonLdScript } from './build-json-ld-script.js';
+
 import {
   renderAppToHTML,
   type RenderToHTMLDeps,
@@ -157,10 +159,17 @@ export async function renderAppWithPublication<
     );
   }
 
-  // Default filter: inline JSON-LD only. Host apps that want everything
-  // pass an empty filter or explicit overrides.
+  // Default filter: the two formats that belong on the render hot path —
+  // JSON-LD (inlined into the returned fragment below) and head-meta
+  // (returned in `adapterResults` for `headFromPublication` to fold into
+  // a document head). Deliberately NOT `'custom'`: llms.txt and feed
+  // adapters declare that, and running them on every page render would
+  // do expensive work whose output this function then discards.
+  //
+  // Behaviour is unchanged for cartridges shipped before 0.9.0, since
+  // nothing declared `'head-meta'` until it existed.
   const filter: RunPublicationOptions = opts.publicationFilter ?? {
-    formats: ['json-ld'],
+    formats: ['json-ld', 'head-meta'],
     deliveries: ['inline-in-host'],
   };
 
@@ -255,18 +264,4 @@ export async function renderAppWithPublication<
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
   return { html, adapterResults };
-}
-
-/**
- * Serialise a JSON-LD payload into a `<script type="application/ld+json">`
- * tag. Escapes the closing-script sequence so an attacker controlling
- * a snapshot field can't break out of the script context.
- *
- * Note: `<` is the JSON-safe encoding for `<`. JSON-LD payloads are
- * data only (no executable JS), so the only XSS surface is the literal
- * `</script>` substring in a string field. Replacing the `<` defeats it.
- */
-function buildJsonLdScript(payload: unknown): string {
-  const safe = JSON.stringify(payload).replace(/</g, '\\u003c');
-  return `<script type="application/ld+json">${safe}</script>`;
 }

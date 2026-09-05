@@ -16,6 +16,7 @@ import {
   decodeNavHint,
   extractPathTail,
   fragmentToState,
+  joinPathFragment,
   stateToFragment,
   type RouteState,
 } from '@airo-js/core';
@@ -140,5 +141,56 @@ describe('extractPathTail (basePath boundary + trailing slash)', () => {
   test('handles deeply nested tails', () => {
     expect(extractPathTail('/campaign/xyz/product/abc?filter=foo', basePath))
       .toBe('product/abc?filter=foo');
+  });
+});
+
+describe('joinPathFragment', () => {
+  // The single encoder behind BOTH PathRouter.stateToUrl and
+  // routerHrefFor. It exists so those two cannot disagree about which url
+  // a RouteState has — the disagreement that shipped an entry page on two
+  // urls with a canonical pointing at the wrong one.
+
+  test('joins a fragment onto a carve-out basePath', () => {
+    expect(joinPathFragment('/campaign/xyz', 'product/abc')).toBe('/campaign/xyz/product/abc');
+  });
+
+  test('root mount emits real top-level urls', () => {
+    expect(joinPathFragment('/', 'roster')).toBe('/roster');
+    expect(joinPathFragment('', 'roster')).toBe('/roster');
+  });
+
+  test('an empty fragment yields the bare basePath', () => {
+    expect(joinPathFragment('/campaign/xyz', '')).toBe('/campaign/xyz');
+    expect(joinPathFragment('/', '')).toBe('/');
+    expect(joinPathFragment('', '')).toBe('/');
+  });
+
+  test('normalises trailing slashes on basePath', () => {
+    expect(joinPathFragment('/campaign/xyz/', 'products')).toBe('/campaign/xyz/products');
+    expect(joinPathFragment('/campaign/xyz///', 'products')).toBe('/campaign/xyz/products');
+  });
+
+  test('collapses a bare entry fragment onto basePath', () => {
+    expect(joinPathFragment('/', 'home', 'home')).toBe('/');
+    expect(joinPathFragment('/campaign/xyz', 'home', 'home')).toBe('/campaign/xyz');
+  });
+
+  test('a non-entry fragment is never collapsed', () => {
+    expect(joinPathFragment('/', 'roster', 'home')).toBe('/roster');
+  });
+
+  test('the entry page WITH extra state keeps its own url — round-trip safety', () => {
+    // '/?filter=live' would decode to a null tail and lose the filter, so
+    // only a fragment that IS exactly the page id may collapse.
+    expect(joinPathFragment('/', 'home?filter=live', 'home')).toBe('/home?filter=live');
+    expect(joinPathFragment('/', 'home/abc', 'home')).toBe('/home/abc');
+  });
+
+  test('omitting entryPageId preserves pre-0.9 behaviour', () => {
+    expect(joinPathFragment('/', 'home')).toBe('/home');
+  });
+
+  test('a fragment that merely starts with the entry id is not collapsed', () => {
+    expect(joinPathFragment('/', 'homepage', 'home')).toBe('/homepage');
   });
 });

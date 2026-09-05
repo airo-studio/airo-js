@@ -83,6 +83,7 @@ export {
   fragmentToState,
   decodeNavHint,
   extractPathTail,
+  joinPathFragment,
 } from './nav-encoding.js';
 
 export type {
@@ -91,6 +92,7 @@ export type {
 } from './breadcrumb.js';
 export { buildCrumbs } from './breadcrumb.js';
 
+export { escapeAttr, escapeHtml } from './escape.js';
 export type { PageManagerOptions, PostRenderHook } from './page-manager.js';
 export { PageManager, findEntryPage, resolveEntryPage } from './page-manager.js';
 
@@ -124,4 +126,4 @@ export { parseHtml, parseHtmlFragment } from './parse-html.js';
 
 export const PACKAGE_NAME = '@airo-js/core';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.8.8';
+export const VERSION = '0.9.0';

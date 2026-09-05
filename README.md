@@ -120,6 +120,7 @@ import {
   type ValidationResult,
   type ViewDefinition,
 } from '@airo-js/cartridge-kit';
+import { escapeHtml } from '@airo-js/core';
 
 type HelloData = {
   title: string;
@@ -147,19 +148,6 @@ function parseHelloData(input: unknown): HelloData {
     throw new Error('Expected { title, body, url }');
   }
   return { title: value.title, body: value.body, url: value.url };
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    const escapes: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    };
-    return escapes[char] ?? char;
-  });
 }
 
 const schema: SchemaDefinition<HelloData> = {
@@ -344,7 +332,7 @@ Render HTML and JSON-LD on the server, then hydrate the same cartridge in the br
 ```ts
 // server/render-hello.ts
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
-import { filterServerSafeCartridge, renderAppWithPublication } from '@airo-js/ssr';
+import { filterServerSafeCartridge, renderAppWithPublication, renderDocument } from '@airo-js/ssr';
 import { parseHTML } from 'linkedom';
 import { helloCartridge } from '../src/hello-cartridge';
 
@@ -378,13 +366,11 @@ const result = await renderAppWithPublication({
   document,
 });
 
-export const html = `<!doctype html>
-<html lang="en">
-  <body>
-    <div id="hello-widget">${result.html}</div>
-    <script type="module" src="/src/hydrate.ts"></script>
-  </body>
-</html>`;
+export const html = renderDocument({
+  head: { lang: 'en' },
+  body: `<div id="hello-widget">${result.html}</div>`,
+  bodyScripts: [{ src: '/src/hydrate.ts', type: 'module' }],
+});
 ```
 
 ```ts
@@ -419,7 +405,7 @@ EdgeRender is the Airo pattern of doing SSR plus publication output at the CDN e
 ```ts
 // worker.ts
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
-import { filterServerSafeCartridge, renderAppWithPublication } from '@airo-js/ssr';
+import { filterServerSafeCartridge, renderAppWithPublication, renderDocument } from '@airo-js/ssr';
 import { parseHTML } from 'linkedom';
 import { helloCartridge } from './hello-cartridge';
 
@@ -457,33 +443,22 @@ export default {
       document,
     });
 
-    return new Response(`<!doctype html>
-<html lang="en">
-  <head>
-    <title>${escapeHtml(snapshot.title)}</title>
-    <meta name="description" content="${escapeHtml(snapshot.body)}">
-  </head>
-  <body>
-    <main id="hello-edge">${result.html}</main>
-  </body>
-</html>`, {
+    // renderDocument owns doctype, charset placement and escaping.
+    // `lang` is required — the framework will not guess a locale — and
+    // there is no viewport unless you ask for one.
+    return new Response(renderDocument({
+      head: {
+        lang: config.locale,
+        title: snapshot.title,
+        meta: [{ name: 'description', content: snapshot.body }],
+      },
+      body: `<main id="hello-edge">${result.html}</main>`,
+    }), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   },
 };
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    const escapes: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    };
-    return escapes[char] ?? char;
-  });
-}
 ```
 
 For a production edge cartridge, add a client embed or hydrate bundle when the UI needs interaction after first paint. For pure content cards, SSR output plus JSON-LD may be enough.

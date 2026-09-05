@@ -15,6 +15,7 @@ import type {
   SchemaDefinition,
 } from '@airo-js/cartridge-kit';
 import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
+import { escapeAttr, escapeHtml } from '@airo-js/core';
 
 import { postJsonLdAdapter } from './adapters.js';
 import { POST_TOOLS } from './mcp.js';
@@ -210,17 +211,4 @@ function formatDate(iso: string): string {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1).trimEnd() + '…';
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function escapeAttr(s: string): string {
-  return escapeHtml(s);
 }

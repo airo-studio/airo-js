@@ -6,6 +6,57 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 (empty — see versioned entries below)
 
+## `@airo-js/core` 0.9.0 — 2026-09-05
+
+### Added
+- **`escapeHtml` / `escapeAttr`** — the string-safety half of the env-agnostic seam whose other half is `parseHtml`. Cartridge templates and `renderDocument` both interpolate snapshot text into markup, and every consumer was re-implementing this: three private copies in the worker example, two more in the README. Both functions escape the same five characters (`& < > " '`), and `escapeAttr` must never be narrowed — attribute context needs the quotes, and an attribute value carrying `"` + `onload=` is a live XSS on the host's own origin. Not a sanitiser: a `javascript:` URL survives untouched, so validate schemes separately.
+- **`PostRenderHook`** on `PageManagerOptions` / `AppDeps` — the seam `@airo-js/runtime` uses to run the post-processor chain. Pure mechanism; core learns nothing about pipelines or cartridges.
+- **`joinPathFragment`** — the single path-mode URL encoder, now shared by `PathRouter.stateToUrl` and `routerHrefFor` so the two cannot disagree about which url a `RouteState` has.
+- **`entryPageId`** on `PathRouterOptions` and the `mode: 'path'` `RouterOption` variant. Opt-in.
+
+### Fixed
+- **PostProcessors now run.** `PageManager` invokes the hook after every successful render — fresh mount, navigation swap, hydrate, and appContext re-render — and fires the returned teardown **before the next apply and before the renderer whose DOM it decorated is destroyed**. Per render rather than per mount, because a swap destroys the subtree a hook decorated: a mount-scoped hook silently stops applying the moment anyone navigates. Throwing hooks and throwing teardowns are logged and swallowed so one bad hook cannot take down its siblings or the render around them.
+- **The entry page no longer answers on two urls.** `routerHrefFor` emitted `basePath + '/' + entryPageId` while the decoder already accepted a bare `basePath` as the entry page — an asymmetric round-trip, so the same page served 200 on both, and since `routerHrefFor` is what the docs steer canonical and sitemap construction at, it shipped as duplicate content. Set `entryPageId` and a **bare** entry state collapses onto `basePath`; `{page:'home', filter:'x'}` deliberately stays `/home?filter=x`, because `/?filter=x` would decode to a null tail and lose the filter. Also stops the `/` → `/home` rewrite on load. **Opt-in, not defaulted** — turning it on changes which url the entry page canonicalises to, which is an SEO event for anyone with `basePath/<entryPageId>` already indexed.
+- `createRegistry` throws a named error on a missing or empty `mailboxName`. The name is used directly as a property key, so `undefined` stringified and the write landed on `globalThis['undefined']` — surfacing as `Cannot assign to read only property 'undefined'` three frames deep inside cartridge-kit under a DOM shim, or silently polluting a global under bare Node.
+
+## `@airo-js/cartridge-kit` 0.9.0 — 2026-09-05
+
+**`CONTRACT_VERSION` 0.6.0 → 0.7.0** — the `PublicationAdapter.format` union gains a member.
+
+### Added
+- **`defineCrawlerSurfaceAdapter()`** — the classic crawler bundle as a `PublicationAdapter`: canonical URL, OpenGraph, Twitter Card and a per-page sitemap entry, all derived from the post-Transformer snapshot, with `validate()` blocking publish on a missing **or relative** canonical. Field mapping is by selector FUNCTIONS, matching `defineSSRSafeRenderer`'s seam — a dot-path map cannot compute, and real canonicals are composed from a site url plus a slug. `requires` is required with no default, because coverage gating is metadata the factory cannot infer from opaque selectors and `[]` would silently disable the guarantee. Deliberately does not lint title/description length: that is content strategy.
+- **`format: 'head-meta'`** on `PublicationAdapter`. It exists as its own union member rather than reusing `'custom'` because the default render filter is now `['json-ld', 'head-meta']` — a crawler bundle declared `'custom'` would silently never run, while widening the default to `'custom'` would drag every `llms.txt` and feed adapter onto the render hot path and then discard the output.
+- Types: `CrawlerSurfaceOutput`, `CrawlerSurfaceSelectors`, `CrawlerSurfaceSelect`, `CrawlerSurfaceAdapterOptions`, `SitemapEntry`, `HreflangAlternate`.
+
+### Changed
+- **`getByPath` / `setByPath` / `hasByPath` descend into arrays by index** (`display.filters.0.layout`). Canonical non-negative integers only: `0` and `27` index; `01`, `-1`, `1e2` and `length` do not — leading zeros are ambiguous and `length` would drag array internals into the path grammar. Not a selector grammar: no `.first`, no by-id, no wildcard. `setByPath` **refuses** an out-of-range or non-index write into an existing array (returns the input unchanged) rather than clobbering it — extending leaves holes that `.map` skips and `JSON.stringify` emits as `null`, and replacing an authored array to hold a string key destroys declared config. `hasByPath` reports the same paths absent, so `validateGlobalConfigKeys` rejects them at registration.
+- **`ViewDefinition.stylesheet` JSDoc corrected.** It claimed "SSR / publish pipelines inline this into the served HTML"; nothing anywhere reads the field. A consumer took it at face value, shipped no host-side CSS handling and got unstyled pages. The framework never injects it — hosts collect and inline it, via `resolveStyleRoot` on a client mount or `renderDocument`'s `head.inlineStyles` on an SSR path.
+
+## `@airo-js/ssr` 0.9.0 — 2026-09-05
+
+`@airo-js/ssr` moves from fragment-only to document-capable.
+
+### Added
+- **`renderDocument(opts)`** — assemble a complete `<!doctype html>` document around a fragment. **Composes with `renderAppWithPublication` rather than wrapping it**, so a document with no cartridge and no snapshot (a landing page, a 404) is served by the same helper, the fragment seam that `airo-ssr="hydrate"` depends on stays intact, and the function remains synchronous, pure and free of any `Document`. Framework-authored defaults are correctness only: doctype always, `<meta charset>` defaulted (the framework produces the byte stream, so a missing encoding declaration would make its own escaping unsound) with `charset: false` to omit — and **no viewport default ever**, because that string is responsive-design policy, and **`inlineStyles` defaults to `[]`**, because the framework authors no CSS. `openGraph` emits `property=` and `twitter` emits `name=`, decided by the field rather than by sniffing the key prefix. Inline `<style>` / `<script>` content is emitted verbatim and **throws** on a `</style` / `</script` sequence — escaping would corrupt the CSS or JS, so loud failure beats silent mangling.
+- **`headFromPublication(results, opts?)`** — fold adapter output into a `DocumentHead` patch. Keys on output **shape**, never on adapter id, so a hand-written adapter works identically to a factory-built one and a rename cannot silently empty a `<head>`. Skips `included: false`, which is where `onValidationFail: 'block-publish'` reaches the document. Excludes `format: 'json-ld'` by default because `renderAppWithPublication` already inlines those into the fragment; `{ includeJsonLd: true }` for the compose-it-yourself path.
+- **`buildJsonLdScript`** exported, and extracted to its own module so the two emitters in the package cannot drift apart — pinned by a byte-identical test.
+- `"sideEffects": false`, ahead of the first consumer importing `renderDocument` into a bundler graph that also produces a client bundle.
+
+### Changed
+- **Default publication filter is now `{ formats: ['json-ld', 'head-meta'], deliveries: ['inline-in-host'] }`.** Behaviour is unchanged for every cartridge shipped before 0.9.0, since nothing declared `'head-meta'` until it existed.
+- `renderAppWithPublication` **warns** when the cartridge it renders declares `postProcessors`. They are browser-only **by contract** — this path builds a string and there is no pipeline — and the alternative is the same silent-nothing the client wiring just fixed.
+
+## `@airo-js/runtime` 0.9.0 — 2026-09-05
+
+### Fixed
+- **`mountCartridge` runs the cartridge's `postProcessors`.** It built the pipeline with them since 0.3 and then only ever called `runTransformers`; the local went out of scope unused, so a declared post-processor typechecked, mounted clean, emitted nothing and did nothing. Independently reproduced by a consumer against the published 0.8.8 tarballs. The runtime now supplies a `postRender` closure carrying the `config` and `data` halves of `PostProcessorContext`; `PageManager` owns the render cadence and the teardown. Cartridges declaring no post-processors wire nothing.
+
+> **Upgrade note.** If you shipped a post-processor against 0.8.x it has never executed, and it starts executing on 0.9.0. Check that `apply` is re-entrant (it runs on every render) and that its teardown is correct.
+
+## `@airo-js/embed` 0.9.0 — 2026-09-05
+
+Sync rev for `workspace:^` peerDep coherence across the 0.9.0 line. No behavioural change; bundle unchanged at 5,081 B minified / 2,211 B gzip.
+
 ## `@airo-js/log` 0.3.0 — 2026-07-24
 
 The logging upgrade (bridge thread msg_mryrycuf). Four changes, one behavioral default flip.

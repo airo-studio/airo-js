@@ -78,8 +78,22 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
   displayName: string;
   description: string;
 
-  /** Output format. Host apps route to the right delivery surface based on this. */
-  format: 'json-ld' | 'xml' | 'tsv' | 'json' | 'mcp-tools' | 'custom';
+  /**
+   * Output format. Host apps route to the right delivery surface based on
+   * this, and `renderAppWithPublication` uses it to decide which adapters
+   * run on the render hot path.
+   *
+   * `'head-meta'` (0.9.0) means "this output belongs in the document
+   * `<head>`" — canonical, OpenGraph, Twitter Card, a sitemap entry. It
+   * exists as its own member rather than reusing `'custom'` because the
+   * default render filter is `formats: ['json-ld', 'head-meta']`: a
+   * crawler bundle declared as `'custom'` would silently never run, while
+   * widening the default to include `'custom'` would drag every `llms.txt`
+   * and feed adapter onto the hot path and then discard the output.
+   * "Goes in the head" is a distinct delivery surface, so it gets a
+   * distinct name.
+   */
+  format: 'json-ld' | 'head-meta' | 'xml' | 'tsv' | 'json' | 'mcp-tools' | 'custom';
 
   /**
    * Required cartridge schema fields. Used by:
