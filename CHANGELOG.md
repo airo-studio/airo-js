@@ -76,6 +76,20 @@ Sync rev for `workspace:^` peerDep coherence across the 0.9.0 line. No behaviour
 
   If you pinned `0.3.0` and added a `setLogLevel('warn')` of your own, you can drop it.
 
+> **Upgrade note — check any compensating workaround you wrote against the quiet default.** The natural shape is to raise your own channels when the global looks untouched:
+>
+> ```ts
+> if (getLogLevel() === 'error') {          // "the framework's untouched default"
+>   for (const ch of APP_CHANNELS) {
+>     if (getChannelLevel(ch) === null) setChannelLevel(ch, 'warn');
+>   }
+> }
+> ```
+>
+> On 0.3.0 that guard was correct but **unenforceable**: `getLogLevel() === 'error'` was true both for the untouched default and for an explicit `error` directive, and nothing could tell them apart. On 0.3.1 the untouched default is `'warn'`, so the condition can now only be true when someone **explicitly asked for `error`** — precisely the page-wide intent such a block is usually written to respect. It inverts from "restore visibility the framework took away" to "override an explicit directive", **without a line changing**.
+>
+> Delete the block rather than retarget it; the visibility it was compensating for is now the default. Reported by a consumer who found it in their own code while validating this release. Note the outcome is usually preserved either way — `effectiveLevelFor` is `channelLevels.get(channel) ?? currentLevel`, so a channel with no override inherits the new global — but a test asserting the *mechanism* (`getChannelLevel('x') === 'warn'`) will fail where one asserting the *outcome* (`isLevelEnabled('x', 'warn')`) will not.
+
 ### Changed
 - README documents the level threshold as a filter that runs **before** the sink, so "replace the sink" is not confused with "lower the threshold".
 
