@@ -194,3 +194,56 @@ describe('the reason is load-bearing — do not collapse it to a boolean', () =>
     }
   });
 });
+
+describe('the runner narrates an unknown-page fallback', () => {
+  // Ask C. This failed silently on a consumer twice — once as the original
+  // soft 404, and again AFTER the fix landed, in the same session, because
+  // the wiring looked right and the page rendered.
+  test('warns on unknown-page, pointing at the docs', async () => {
+    const { setSink, resetSink, setLogLevel, resetLogLevels } = await import('@airo-js/log');
+    const captured: { level: string; msg: string }[] = [];
+    setSink({ emit: (e) => captured.push({ level: e.level, msg: e.msg }) });
+    setLogLevel('debug');
+    try {
+      render('does-not-exist');
+    } finally {
+      resetSink();
+      resetLogLevels();
+    }
+    const warn = captured.find((e) => e.level === 'warn');
+    expect(warn?.msg).toContain('does-not-exist');
+    expect(warn?.msg).toContain('5.10a');
+  });
+
+  test('legitimate rejections narrate at debug, not warn', async () => {
+    const { setSink, resetSink, setLogLevel, resetLogLevels } = await import('@airo-js/log');
+    for (const page of ['draft', 'artist', 'age-gate']) {
+      const captured: { level: string }[] = [];
+      setSink({ emit: (e) => captured.push({ level: e.level }) });
+      setLogLevel('debug');
+      try {
+        render(page);
+      } finally {
+        resetSink();
+        resetLogLevels();
+      }
+      expect(captured.some((e) => e.level === 'warn')).toBe(false);
+      expect(captured.some((e) => e.level === 'debug')).toBe(true);
+    }
+  });
+
+  test('silent when nothing was requested — a gated embed surface never spams', async () => {
+    const { setSink, resetSink, setLogLevel, resetLogLevels } = await import('@airo-js/log');
+    const captured: unknown[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+    setLogLevel('debug');
+    try {
+      render();
+      render('roster');
+    } finally {
+      resetSink();
+      resetLogLevels();
+    }
+    expect(captured).toHaveLength(0);
+  });
+});

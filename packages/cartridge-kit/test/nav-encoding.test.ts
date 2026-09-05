@@ -194,3 +194,47 @@ describe('joinPathFragment', () => {
     expect(joinPathFragment('/', 'homepage', 'home')).toBe('/homepage');
   });
 });
+
+describe('decoder choice — the gate that silences the other gate', () => {
+  // Two consumers wired a root-mounted 404 through `decodeNavHint` and got
+  // a soft 404 back, because the allowlist rejects an unknown page BEFORE
+  // the runner can report it. These pin both behaviours so the guidance in
+  // best-practices §5.10a cannot silently stop being true. A consumer
+  // asserts the same two facts in their own smoke suite.
+  const pages = [
+    { id: 'home', enabled: true },
+    { id: 'roster', enabled: true },
+    { id: 'draft', enabled: false },
+    { id: 'artist', enabled: true, parent: 'roster' },
+    { id: 'age-gate', enabled: true },
+  ];
+  // The derivation the docs show for the embed surface.
+  const validPages = pages.filter((p) => p.enabled && !p.parent).map((p) => p.id);
+
+  test('decodeNavHint FILTERS an unknown page — correct for embed, fatal for owned urls', () => {
+    expect(decodeNavHint('does-not-exist', validPages)).toBeNull();
+  });
+
+  test('fragmentToState decodes without an allowlist, so the runner can gate', () => {
+    expect(fragmentToState('does-not-exist')).toEqual({ page: 'does-not-exist' });
+  });
+
+  test('an allowlist hides three of the four rejection reasons from the runner', () => {
+    // Only `gate-page` survives: it is enabled and not a subpage, so it
+    // passes the allowlist and is rejected by the runner instead.
+    expect(decodeNavHint('does-not-exist', validPages)).toBeNull(); // unknown-page
+    expect(decodeNavHint('draft', validPages)).toBeNull(); // disabled
+    expect(decodeNavHint('artist', validPages)).toBeNull(); // subpage
+    expect(decodeNavHint('age-gate', validPages)).toEqual({ page: 'age-gate' }); // gate-page
+  });
+
+  test('fragmentToState surfaces all four to the runner', () => {
+    for (const id of ['does-not-exist', 'draft', 'artist', 'age-gate']) {
+      expect(fragmentToState(id)).toEqual({ page: id });
+    }
+  });
+
+  test('both decoders agree on a legitimately valid page', () => {
+    expect(decodeNavHint('roster', validPages)).toEqual(fragmentToState('roster'));
+  });
+});

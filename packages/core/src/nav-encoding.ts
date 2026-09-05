@@ -127,6 +127,34 @@ export function fragmentToState(
  * crossing into the framework. The allowlist gate fails closed by
  * default; pass the cartridge's known page-id set or the active
  * cartridge's `template.pages.map(p => p.id)`.
+ *
+ * ## When NOT to use this — surfaces that own their urls
+ *
+ * The allowlist makes this decoder fail closed by returning `null`, and
+ * a `null` hint is indistinguishable from "no page was requested". On a
+ * surface that owns its urls that distinction is the whole ballgame:
+ * `/does-not-exist` and `/` both arrive as "nothing requested", the SSR
+ * runner renders the entry page for both, and the unknown url answers
+ * `200` with a canonical pointing elsewhere — a soft 404.
+ *
+ * Two gates in series, and the outer one silences the inner one. The
+ * runner ALREADY validates the entry page (exists, enabled, not a
+ * subpage, not a gate) and re-derives `navState.page` from the page it
+ * actually resolved, so a page id it rejects can never reach a renderer.
+ * The allowlist here is belt-and-braces over that check — valuable when
+ * the host cannot act on the difference, harmful when it can.
+ *
+ * So on a root-mounted or otherwise owned-url path surface, decode with
+ * `fragmentToState(tail, { pathContextKey })` and let the runner gate.
+ * The requested id then reaches the runner, which reports its judgement
+ * as `fellBack` on the SSR result, and the host answers 404 on
+ * `reason: 'unknown-page'`. See best-practices §5.10a.
+ *
+ * Keep `decodeNavHint` for the embed and query surfaces, where the url
+ * belongs to the customer's page rather than to you: there falling back
+ * silently is mandatory (a widget must not break a host page over an
+ * unrecognised path segment), so failing closed in the decoder is
+ * exactly right and there is nothing for a host to act on.
  */
 export function decodeNavHint(
   hint: string | null | undefined,

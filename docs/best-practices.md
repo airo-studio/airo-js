@@ -1327,6 +1327,39 @@ Pure function — no DOM, no globals, no router instance threading required.
 
 Row three is why the framework cannot decide this and why the fallback will never be reversed. **On a customer's page the URL is not yours.** The path belongs to their router, the tail may be theirs and have nothing to do with your widget, and a widget that errored or refused to render because it did not recognise a path segment would be a vendor breaking a customer's page. There, falling back is a requirement, not a convenience.
 
+### Decode WITHOUT an allowlist on a surface that owns its urls
+
+**This is the step that makes everything below work, and getting it wrong silently undoes the whole section.** Two consumers wired it the other way; one of them shipped the soft 404 a second time *after* the fix landed, because the wiring looked right and the page rendered.
+
+`decodeNavHint(tail, validPages)` fails closed: an unknown page id returns `null`, and a `null` hint is indistinguishable from "no page was requested". The runner is then told nothing was asked for, so it has nothing to report — `fellBack` never fires and the unknown url answers `200`.
+
+Worse, an allowlist derived the usual way (`p.enabled && !p.parent`) filters out three of the four rejection reasons before the runner can see them:
+
+| reason | reaches the runner via `decodeNavHint(tail, validPages)`? |
+|---|---|
+| `unknown-page` | **no** — the allowlist rejects it. This is the one the feature exists for. |
+| `disabled` | **no** — filtered by `p.enabled` |
+| `subpage` | **no** — filtered by `!p.parent` |
+| `gate-page` | yes — enabled and not a subpage, so it passes the allowlist and the runner rejects it |
+
+So on a path surface you own, decode with `fragmentToState` and let the runner be the gate:
+
+```ts
+import { extractPathTail, fragmentToState } from '@airo-js/core';
+
+function navStateFor(pathname: string) {
+  const tail = extractPathTail(pathname, BASE_PATH);
+  if (!tail) return undefined;              // bare basePath — the legitimate entry
+  return fragmentToState(tail, { pathContextKey: PATH_CONTEXT_KEY }) ?? undefined;
+}
+```
+
+**This is not a hole in the tamper gate**, and the reason matters. The runner already validates the entry page — exists, enabled, not a subpage, not a gate — and then re-derives `navState.page` from the page it actually resolved, so an id it rejects can never reach a renderer. The allowlist was belt-and-braces over a check that happens anyway: valuable when the host cannot act on the difference, harmful when it can. Views still own their own params — a page that takes a slug looks it up and renders its own not-found rather than trusting it.
+
+**Keep `decodeNavHint(hint, validPages)` for the embed and query surfaces**, where the url belongs to the customer's page. There, falling back silently is mandatory rather than a convenience, so failing closed in the decoder is exactly right and there is nothing for a host to act on.
+
+The runner also narrates this: an `unknown-page` fallback logs a `warn` (the others log at `debug`, being legitimate states). It fires only when a host actually requested a page, so a correctly-gated embed surface stays silent.
+
 So the framework reports the decision it already made and stops. On `RenderToHTMLResult` and `RenderWithPublicationResult`:
 
 ```ts
@@ -1380,6 +1413,8 @@ const validPages = appConfig.pages
   .map((p) => p.id);
 const navState = decodeNavHint(req.query.nav, validPages);
 ```
+
+**This is the EMBED / query shape.** On a surface that owns its urls, do not gate in the decoder at all — the allowlist makes an unknown page indistinguishable from no page, which reinstates the soft 404. See §5.10a.
 
 
 ### 5.11 Three audiences — humans, search engines, AI agents (AIO vs LLMO/SEO)

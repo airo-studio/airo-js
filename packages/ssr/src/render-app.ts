@@ -137,6 +137,35 @@ export function renderAppToHTML<
   );
   const entry = resolution.page;
   const fellBack = resolution.fellBack ? { fellBack: resolution.fellBack } : {};
+
+  // Narrate the fallback. This fires ONLY when a host explicitly requested
+  // a page and the runner rejected it — a host that gates upstream (the
+  // embed case, where `decodeNavHint`'s allowlist is the gate) requests
+  // nothing and gets no narration, so this cannot become spam on a
+  // customer's page.
+  //
+  // `unknown-page` warns because the requested id names nothing in the
+  // graph: on a surface that owns its urls that is a soft 404 waiting to
+  // ship, and it is invisible otherwise — the page renders, the status is
+  // 200, and nothing is obviously wrong. Two consumers shipped it, one of
+  // them twice. The other three reasons are legitimate states (a config
+  // switch, a subpage, a gate) and only narrate at debug.
+  if (resolution.fellBack) {
+    const { requested, reason } = resolution.fellBack;
+    const detail = { requested, reason, resolved: entry?.id, phase: 'entry-resolution' };
+    if (reason === 'unknown-page') {
+      log.warn(
+        `entry page "${requested}" is not in the page graph; rendered "${entry?.id ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. See best-practices §5.10a.`,
+        detail,
+      );
+    } else {
+      log.debug(
+        `entry page "${requested}" rejected (${reason}); rendered "${entry?.id ?? '<none>'}" instead.`,
+        detail,
+      );
+    }
+  }
+
   if (!entry) {
     return { html: '', ...fellBack };
   }
