@@ -45,7 +45,7 @@ const passthroughSchema = {
   safeParse: (input: unknown) => ({ success: true as const, data: input as TestData }),
 };
 
-export function noopRenderer(): PageRenderer {
+function noopRenderer(): PageRenderer {
   return {
     render() {
       // no-op — tests don't assert on painted DOM

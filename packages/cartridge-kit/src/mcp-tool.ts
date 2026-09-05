@@ -11,6 +11,7 @@
  */
 
 import type { SchemaDefinition } from './cartridge.js';
+import type { SchemaFieldRef } from './publication-adapter.js';
 
 export interface ToolContext<TData, TConfig> {
   /** POST-transformer data — same data the user sees in the widget. */
@@ -34,6 +35,24 @@ export interface McpToolDefinition<TData, TConfig = unknown> {
   description: string;
   /** JSON Schema for the tool's input. */
   inputSchema: Record<string, unknown>;
+
+  /**
+   * Snapshot fields this tool answers from — the same coverage-gating
+   * metadata `PublicationAdapter.requires` carries, and gated by the same
+   * shared predicate (`missingRequiredPaths`), so a feed and an agent answer
+   * cannot disagree about which snapshots are answerable.
+   *
+   * `dispatchTool` refuses a tool whose `required: 'always'` paths hold no
+   * value, returning `code: 'missing-required-fields'` rather than letting
+   * the handler invent an answer from absent data. `'preferred'` and
+   * `'optional'` do not gate — a tool that can answer partially should say
+   * so in its own handler.
+   *
+   * Optional, unlike the adapter's, because most tools read the snapshot
+   * broadly rather than depending on named leaves. Omitting it means "runs
+   * against any snapshot", which is also what `[]` means.
+   */
+  requires?: readonly SchemaFieldRef[];
 
   handler(input: unknown, ctx: ToolContext<TData, TConfig>): Promise<unknown>;
 }

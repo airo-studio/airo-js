@@ -91,7 +91,7 @@ export function defineSSRSafeRenderer<
   opts: SSRSafeRendererOptions<TPageType, TAppContext>,
 ): PageRendererFactory<TPageType, TAppContext> {
   return (): PageRenderer<TPageType, TAppContext> => {
-    let cleanup: HydrateCleanup | void = undefined;
+    let cleanup: HydrateCleanup | void;
     const wireListeners = (
       root: HTMLElement,
       ctx: RenderContext<TPageType, TAppContext>,

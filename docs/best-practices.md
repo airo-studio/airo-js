@@ -180,7 +180,15 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 **Validation is a hard gate (default).** `onValidationFail: 'block-publish'` is correct for almost all cases. `'publish-with-warnings'` only when downstream consumers (Google Merchant Center, Amazon Listings) have a "warnings allowed" mode.
 
-**`requires` enforces coverage.** Declare every schema field path the adapter needs; the framework can skip the adapter when fields are absent rather than emit broken output. Studio shells surface coverage gaps to users via this metadata.
+**`requires` enforces coverage — actually, as of 1.0.** Declare every schema field path the adapter needs. `runPublicationAdapters` checks the entries marked `required: 'always'` **before** calling `generate()`; if any hold no value in the snapshot the adapter does not run, and its result carries `included: false` plus `skipped: { reason: 'missing-required-fields', missing }` naming the absent paths.
+
+Three things to know before you declare one:
+
+- **Only `'always'` gates.** `'preferred'` and `'optional'` stay metadata for a host's coverage UI. Whether a missing *preferred* field should stop publication is a judgment your adapter makes in `validate()`, where it can see the output it produced.
+- **Present means non-nullish.** `''`, `0`, `false` and `[]` all count as present; only `undefined` and `null` are absent. If an empty string is unusable for your feed, say so in `validate()`.
+- **A skip is not a validation failure.** It ignores `onValidationFail` entirely — including `'fail-loud'` — because a skipped adapter produced no output to have an opinion about. The caller sees the same `included: false` that `'block-publish'` yields.
+
+Watch the blast radius on upgrade: `renderAppWithPublication` builds its inline JSON-LD from `included` results, so an adapter declaring an `'always'` path its snapshot does not populate will silently stop emitting markup into the `<head>`. Audit your `requires` declarations against a real snapshot before adopting.
 
 **Server-only.** Same envelope split as MCP tools.
 
@@ -196,7 +204,7 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 ```
 wrong:                     right:
-storeplus.js (96 KB)       categories.js  (~25 KB)
+shop-layout.js (96 KB)     categories.js  (~25 KB)
 └─ all 4 sub-pages         products.js    (~50 KB)
    bundled together        product.js     (~40 KB)
                            quickview.js   (~25 KB)
@@ -374,11 +382,11 @@ A namespace import pins **every** export, so `sideEffects: false` cannot help �
 |---|---|---|---|
 | Framework 0.8.8, namespace publish | 94.2 KB | 28.5 KB | 2.0 KB |
 | Framework 0.9.0, namespace publish | 98.8 KB | **30.2 KB** | 0.3 KB |
-| Framework 0.9.0, **curated allowlist** | 90.7 KB | **27.5 KB** | 3.0 KB |
+| Framework 0.9.0, **curated allowlist** | 91.3 KB | **27.7 KB** | 2.8 KB |
 
-Read the last row against the *first*, not the second. Curating recovered **2.7 KB gzip** and left them **1.0 KB below their 0.8.8 baseline while running a larger framework version** — so the ratchet had been running for releases before anyone noticed, and 0.9.0 only made it visible. Every per-view chunk stayed byte-identical, so the externals contract is unaffected either way.
+Read the last row against the *first*, not the second. Curating recovered **2.5 KB gzip** and left them **0.8 KB below their 0.8.8 baseline while running a larger framework version** — so the ratchet had been running for releases before anyone noticed, and 0.9.0 only made it visible. Every per-view chunk stayed byte-identical, so the externals contract is unaffected either way.
 
-The size of the gap is worth sitting with: two entire package namespaces were shipped to every shopper in order to expose **five functions** to the chunks. That is the normal outcome of this shape, not an unusually bad case.
+The size of the gap is worth sitting with: two entire package namespaces were shipped to every shopper in order to expose **eight functions** to the chunks. That is the normal outcome of this shape, not an unusually bad case.
 
 **Publish a curated object built from named imports instead:**
 
@@ -399,9 +407,60 @@ const shared: AiroShared = { escapeHtml, escapeAttr, parseHtmlFragment, resolveS
 (window as unknown as { __AIRO_SHARED__: AiroShared }).__AIRO_SHARED__ = shared;
 ```
 
-Two properties fall out. The framework can add exports forever without touching your bundle — you carry what you named and nothing else. And because chunks consume `AiroShared` as a **type**, a chunk that reaches for a primitive nobody added fails your typecheck instead of failing at a shopper's browser.
+The framework can now add exports forever without touching your bundle — you carry what you named and nothing else.
 
-That type is the whole trick, and it is what makes the maintenance cost bearable. The allowlist is hand-maintained either way; typing it moves the failure from runtime to build time, which is the only version of hand-maintenance that is safe.
+**Do not expect the type to catch a missing symbol.** Whether it can depends entirely on how chunks reach the shared object, and for the more natural delivery style it cannot.
+
+It works when a chunk reads the global explicitly, because then the chunk mentions the type:
+
+```ts
+// chunk source — names AiroShared, so a missing symbol fails tsc
+const { parseHtmlFragment } = (window as unknown as { __AIRO_SHARED__: AiroShared }).__AIRO_SHARED__;
+```
+
+It does **not** work when you map the packages to globals at bundle time — Rollup's `output.globals`, the natural pairing with this pattern. There the chunk never mentions the global or its type:
+
+```ts
+// chunk source — an ordinary import. The BUILD rewrites it to
+// __AIRO_CARTRIDGE_KIT__.getByPath; nothing here ever sees AiroShared.
+import { getByPath } from '@airo-js/cartridge-kit';
+```
+
+That typechecks clean, because `getByPath` genuinely is exported by the real package. `AiroShared` constrains only the core's own assignment — one side of a two-sided contract. A consumer adopting this pattern shipped an allowlist missing three symbols: it passed `tsc --noEmit`, passed 2,179 unit and server tests, and built inside budget, then died at render on every chunked page with `t.getByPath is not a function`. A pre-merge Playwright run was the only thing that caught it; without that gate it ships.
+
+**The guard that does work asks the bundler, which is the only component that actually knows.** Rollup records the exact bindings each chunk took from each external in `importedBindings`, so the check needs no source scanning and no guessing — about 40 lines in your chunk build:
+
+```js
+function allowlistGuardPlugin() {
+  return {
+    name: 'airo-shared-allowlist-guard',
+    generateBundle(_options, bundle) {
+      const allow = readSharedAllowlist();   // parsed from the interfaces
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'chunk') continue;
+        for (const [pkg, names] of Object.entries(output.importedBindings ?? {})) {
+          const permitted = allow[pkg];
+          if (!permitted) continue;
+          const missing = names.filter((n) => !permitted.has(n));
+          if (missing.length > 0) this.error(/* name chunk, symbols, both files to edit */);
+        }
+      }
+    },
+  };
+}
+```
+
+Deleting a symbol from the allowlist and rebuilding should produce something like:
+
+```
+[chunks] product-detail imports `getByPath` from @airo-js/cartridge-kit,
+which the core IIFE does not publish on the shared global.
+  Add them to BOTH the matching interface and the object literal.
+```
+
+That is the version of hand-maintenance that is safe: exact rather than heuristic, at build time rather than render time, and it names the chunk, the symbol, and both files to edit.
+
+The general lesson transfers beyond this pattern: **a source scan is the wrong tool, because a silent-empty result reads exactly like a confirmed-none.** The same consumer's enumeration script reported "no value imports" for the one directory that held all three missing symbols, and they believed it.
 
 **Why not subpath exports** (`@airo-js/core/nav`)? They would shrink the unit, not change the mechanism — `import * as nav` still pins every export of that subpath, so your bundle still grows whenever that subpath does. Finer-grained coarseness is still coarseness. If you are already curating, curate precisely.
 

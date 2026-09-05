@@ -1,0 +1,77 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+
+	// Biome over ESLint: one binary, no plugin graph. This repo carried exactly
+	// one devDependency (typescript) before the pre-1.0 pass, and keeping the
+	// toolchain small is worth something to a framework people vendor into
+	// their own builds.
+	"files": {
+		"includes": [
+			"packages/*/src/**/*.ts",
+			"packages/*/test/**/*.ts",
+			"examples/*/src/**/*.ts"
+		]
+	},
+
+	// Linter only. Turning the formatter on would rewrite every file in the
+	// repo, burying real changes in whitespace churn and destroying hand-laid
+	// alignment in table-shaped comments and JSDoc. Adopting it is a separate
+	// decision that deserves its own commit, not a side effect of adding a
+	// linter.
+	"formatter": { "enabled": false },
+
+	"assist": {
+		"actions": {
+			"source": {
+				// Import order here is deliberate and grouped: external packages,
+				// then @airo-js/*, then local, separated by blank lines. Alphabetical
+				// reordering flattens that grouping and makes the dependency
+				// direction of a file harder to read at a glance.
+				"organizeImports": "off"
+			}
+		}
+	},
+
+	// The split below is deliberate: correctness and suspicious-code rules stay
+	// on and their findings get FIXED, while pure-style rules that fight either
+	// the tsconfig or the house style are turned off with a reason. A linter
+	// that is 90% style noise trains people to stop reading its output, which
+	// costs more than the style ever gains.
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"complexity": {
+				// Three findings, all of which Biome itself marks as an UNSAFE fix,
+				// and two of which read `(globalThis as Record<string, unknown>)['…']`
+				// — a deliberately explicit lookup of a global by key string, where
+				// dot access would obscure that that is what is happening. The third
+				// is `dataset['airoTheme']`, bracket access on a DOM index signature.
+				"useLiteralKeys": "off"
+			},
+			"style": {
+				// Contradicts `noUncheckedIndexedAccess: true` in tsconfig.base.json,
+				// which is the stronger guarantee and the one we keep. That setting
+				// types every indexed access as `T | undefined`, so at a site the
+				// surrounding loop bounds already prove safe, `keys[i]!` IS the
+				// idiomatic answer. Banning it would push code toward either a
+				// redundant runtime check or a wider type — both worse.
+				"noNonNullAssertion": "off",
+
+				// Pure preference with no correctness content, and the rewrite is
+				// often worse: `s.slice(0, max - 1).trimEnd() + '…'` does not become
+				// clearer as a template literal. Enforcing it would churn 11 sites
+				// across src and examples to no end.
+				"useTemplate": "off"
+			},
+			"suspicious": {
+				// `HydrateCleanup | void` is the deliberate shape of the
+				// cleanup-callback contract (see define-ssr-safe-renderer.ts), and it
+				// is public API. `| void` lets a handler tail-call a void function;
+				// `| undefined` would force an explicit return at every call site.
+				// Same choice React makes for useEffect's return type.
+				"noConfusingVoidType": "off"
+			}
+		}
+	}
+}

@@ -333,9 +333,12 @@ export interface MountCartridgeOptions<
 
 // `UpdateResult` moved to `@airo-js/core/page.ts` in 0.7.1 so it can be
 // referenced from `RenderContext.update`'s return type without core taking
-// a circular dep on runtime. Re-exported here for backward compatibility:
-// 0.7.0 consumers importing `UpdateResult` from `@airo-js/runtime` keep
-// working unchanged.
+// a circular dep on runtime. Re-exported here, and forwarded from the barrel
+// in `index.ts`, so it stays importable from `@airo-js/runtime` — where the
+// calls that return it live. Between 0.7.1 and 0.9.0 this re-export existed
+// but the barrel did not forward it, so the back-compat it claimed did not
+// actually hold; `exports` only exposes `.` and `./test-harness`, never this
+// module's path. Caught by knip pre-1.0.
 export type { UpdateResult };
 
 /**
@@ -533,7 +536,7 @@ export async function mountCartridge<
   // hydration markers + analytics).
   const widgetId = opts.widgetId ?? `${opts.cartridge.id}-${Date.now()}`;
   let currentApp: App | null = null;
-  let currentSnapshot: TData | undefined = undefined;
+  let currentSnapshot: TData | undefined;
   let currentConfig: TConfig = opts.config;
   let currentPages: Page<TPageType>[] = templateToAppConfig<TConfig, TPageType>(
     opts.template,
@@ -1215,7 +1218,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
     const kb = Object.keys(b);
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
-      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!Object.hasOwn(b, k)) return false;
       if (
         !deepEqual(
           (a as Record<string, unknown>)[k],

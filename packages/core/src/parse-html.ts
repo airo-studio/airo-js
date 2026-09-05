@@ -11,6 +11,16 @@
  * in the input don't execute. Safer than assigning `innerHTML` to a
  * generic element when the input contains feed data.
  *
+ * ## What this is NOT
+ *
+ * **Not a sanitiser.** Blocking `<script>` execution is the only safety
+ * property here. Event-handler attributes (`onerror`, `onload`) and
+ * `javascript:` URLs pass through completely intact, and a real browser fires
+ * them the moment the parsed node is appended to a live document — so
+ * `parseHtml(untrustedFeedHtml)` is a live XSS on the host's own origin.
+ * Sanitise before you parse. Both behaviours are pinned in `parse-html.test.ts`
+ * so the distinction cannot quietly erode.
+ *
  * Env resolution order:
  *   1. explicit `doc` parameter
  *   2. `globalThis.document` (browser, or polyfill assigned globally)

@@ -161,6 +161,11 @@ function formatPayload(value: unknown): unknown {
       } catch {
         return value;
       }
+    // `'clean'` IS the default, so this case is redundant to the compiler.
+    // It stays because it keeps all three `ConsoleFormat` members visible at
+    // the switch; without it a reader sees two named formats and a
+    // fallthrough, and has to go read the type to learn the third exists.
+    // biome-ignore lint/complexity/noUselessSwitchCase: names the union member it handles
     case 'clean':
     default:
       return cleanClone(value);

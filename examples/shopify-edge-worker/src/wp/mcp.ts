@@ -1,32 +1,19 @@
 /**
- * MCP tools for the WordPress blog-post cartridge.
+ * MCP tool declarations for the WordPress blog-post cartridge.
  *
- * Mirrors the Shopify cartridge's mcp.ts in shape. Three tools, all
- * answering from the same post-Transformer snapshot the HTML + JSON-LD
- * see. snapshotId stamped on every response so agents can verify
- * cross-surface consistency.
+ * Declarations only — `@airo-js/mcp` supplies the manifest and the
+ * dispatcher. This file and its Shopify sibling used to carry a private copy
+ * of both, in one example, differing only in the types they closed over:
+ * `buildToolManifest as buildWpManifest` next to `buildToolManifest as
+ * buildShopifyManifest` in the worker's imports was the tell.
+ *
+ * Three tools, all answering from the same post-Transformer snapshot the
+ * HTML + JSON-LD see. snapshotId stamped on every response so agents can
+ * verify cross-surface consistency.
  */
 
 import type { McpToolDefinition } from '@airo-js/cartridge-kit';
 import type { PostSnapshot, WpConfig } from './types.js';
-
-export interface McpToolManifestEntry {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export function buildToolManifest(
-  tools: McpToolDefinition<PostSnapshot, WpConfig>[],
-): { tools: McpToolManifestEntry[] } {
-  return {
-    tools: tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    })),
-  };
-}
 
 export const POST_TOOLS: McpToolDefinition<PostSnapshot, WpConfig>[] = [
   {
@@ -67,28 +54,3 @@ export const POST_TOOLS: McpToolDefinition<PostSnapshot, WpConfig>[] = [
   },
 ];
 
-const POST_SCHEMA_STUB = {
-  parse(input: unknown): PostSnapshot {
-    return input as PostSnapshot;
-  },
-  safeParse(input: unknown) {
-    return { success: true as const, data: input as PostSnapshot };
-  },
-};
-
-export async function dispatchTool(
-  toolName: string,
-  input: unknown,
-  ctx: { data: PostSnapshot; config: WpConfig },
-): Promise<{ result: unknown; snapshotId: string }> {
-  const tool = POST_TOOLS.find((t) => t.name === toolName);
-  if (!tool) {
-    throw new Error(`Unknown WP MCP tool: ${toolName}`);
-  }
-  const result = await tool.handler(input, {
-    data: ctx.data,
-    config: ctx.config,
-    schema: POST_SCHEMA_STUB,
-  });
-  return { result, snapshotId: ctx.data.snapshotId };
-}

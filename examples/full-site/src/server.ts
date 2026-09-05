@@ -42,6 +42,7 @@ import { parseHTML } from 'linkedom';
 import { extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
 import { renderAppWithPublication, renderDocument, runPublicationAdapters, headFromPublication } from '@airo-js/ssr';
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
+import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 
 import { DOCS, SITE } from './content.js';
 import { SITE_CSS, docSiteCartridge, docSiteTemplate, type DocSiteConfig, type DocSiteData } from './cartridge.js';
@@ -103,6 +104,8 @@ function documentFor(head: HeadPatch, body: string): string {
 
 // 1 ── static assets FIRST. See note 1.
 app.use('/assets', express.static('public'));
+// For POST /mcp/call. Nothing else on this server takes a body.
+app.use(express.json());
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 // 2 ── machine surfaces, all off the same snapshot the humans get.
@@ -186,13 +189,40 @@ app.get('/microdata/:slug', async (req, res) => {
   res.type('text/html').send((micro.output as { fragment: string }).fragment);
 });
 
+/**
+ * The agent surface. Same cartridge, same snapshot, third audience.
+ *
+ * This used to map `mcpTools` by hand, with a cast per field because no
+ * typed helper existed. `buildToolManifest` emits MCP's `tools/list` shape
+ * from the cartridge directly, and `dispatchTool` answers a call against the
+ * same `snapshotFor(slug)` the HTML route renders — which is the whole
+ * snapshot-fidelity claim, made checkable on one page.
+ */
 app.get('/mcp/tools', (_req, res) => {
-  res.json({
-    tools: (docSiteCartridge.mcpTools ?? []).map((t) => ({
-      name: (t as { name: string }).name,
-      description: (t as { description: string }).description,
-    })),
+  res.json(buildToolManifest(docSiteCartridge));
+});
+
+app.post('/mcp/call', async (req, res) => {
+  const { name, arguments: args, slug } = req.body ?? {};
+  if (typeof name !== 'string') { res.status(400).json({ error: 'missing tool name' }); return; }
+
+  const snapshot = await snapshotFor(typeof slug === 'string' ? slug : undefined);
+  const out = await dispatchTool(docSiteCartridge, name, args ?? {}, snapshot, {
+    config: docSiteCartridge.defaultConfig,
   });
+
+  // A tool the agent got wrong is a 400, not a 500 — the dispatcher returns
+  // a verdict rather than throwing, so the distinction survives to the wire.
+  //
+  // Note what is NOT sent: `error.cause` carries whatever the cartridge's
+  // handler threw, and handlers routinely close over server credentials.
+  // Log it, never return it.
+  if (!out.ok) {
+    console.error('[mcp] dispatch failed', out.error.code, out.error.cause ?? '');
+    res.status(400).json({ ok: false, toolName: out.toolName, error: { code: out.error.code, message: out.error.message } });
+    return;
+  }
+  res.status(200).json(out);
 });
 
 // 3 ── every human-facing url lands here.

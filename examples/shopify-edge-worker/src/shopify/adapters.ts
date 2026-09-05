@@ -66,7 +66,7 @@ function validateProductJsonLd(output: ProductJsonLd): {
       message: 'Product must have a name',
     });
   }
-  if (!output.offers.price || isNaN(Number(output.offers.price))) {
+  if (!output.offers.price || Number.isNaN(Number(output.offers.price))) {
     errors.push({
       code: 'invalid-price',
       path: 'offers.price',

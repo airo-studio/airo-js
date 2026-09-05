@@ -4,10 +4,10 @@
  * deltas from inside listener handlers without holding the mount handle.
  *
  * Closes the bridge thread (msg_mp58z77m_65d9ed) that surfaced this gap
- * during D5 planning: stateless renderers with selection state in
- * `WtbConfig.display.*` need to dispatch updates from `hydrate` event
- * handlers; the host's `update()` lives on the mount result, not on
- * `RenderContext`.
+ * during D5 planning: stateless renderers whose selection state lives in
+ * a config branch (`config.display.*`) need to dispatch updates from
+ * `hydrate` event handlers; the host's `update()` lives on the mount
+ * result, not on `RenderContext`.
  *
  * Three things being verified:
  *   1. `ctx.update` is wired through the framework — every render call

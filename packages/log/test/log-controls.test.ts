@@ -210,8 +210,9 @@ describe('sanitizer-compat: setItem key is a literal (consumer rsp_mryxzvt0 bloc
   // inlining; this guards the source against a refactor that reverts to the
   // const. Runtime behaviour (persistence under __airo_log) is covered above.
   test("localStorage.setItem uses the literal '__airo_log', not a variable", () => {
-    // cwd is the runtime package root under vitest; log is a sibling package.
-    const src = readFileSync(resolve(process.cwd(), '../log/src/index.ts'), 'utf8');
+    // cwd is this package's root under vitest, so the source is a local path.
+    // (Was '../log/src/index.ts' while these tests lived in @airo-js/runtime.)
+    const src = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
     expect(src).toContain("localStorage.setItem('__airo_log',");
     expect(src).not.toMatch(/localStorage\.setItem\(LOG_STORAGE_KEY/);
   });

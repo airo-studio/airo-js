@@ -15,6 +15,7 @@
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
     "@airo-js/core": "workspace:*",
+    "@airo-js/mcp": "workspace:*",
     "@airo-js/runtime": "workspace:*",
     "@airo-js/ssr": "workspace:*",
     "express": "^5.1.0",

@@ -670,13 +670,3 @@ function emitError(
   }
   log.error(`${phase} failed`, err, { phase });
 }
-
-/**
- * Test-only escape hatch — clears the registered-elements memo so a
- * single test process can call defineAiroApp many times with the same
- * element name without the idempotency warning. NOT exported from the
- * package barrel; tests import directly from this file.
- */
-export function __resetRegisteredElementsForTesting(): void {
-  REGISTERED_ELEMENTS.clear();
-}

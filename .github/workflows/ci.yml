@@ -1,0 +1,190 @@
+name: CI
+
+# Until this existed, every gate in the repo ran only when someone typed it.
+# `pnpm lint`, `pnpm knip` and `pnpm test` were documented as gates in
+# CLAUDE.md's Health Stack and enforced by nothing, and `scripts/publish.sh`
+# ran neither the tests nor the linters — so a release could go out green on a
+# suite nobody had run since the last time a human remembered to.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the old run. `main` is exempt:
+# cancelling a push to the default branch would leave the last green commit
+# ambiguous.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ── The Health Stack, on both ends of the supported Node range ────────────
+  #
+  # `engines.node` is ">=20", and a published library does not get to choose
+  # which of those its consumers run. 20 is the floor; 24 is current. A break
+  # that only shows on one of them is a break we ship.
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '24']
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        # Version comes from the root package.json `packageManager` field, so
+        # it cannot drift from what developers run locally.
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build first: several packages' `typecheck` resolve their siblings
+      # through `dist`. The test run does NOT need this (vitest.shared.ts
+      # aliases every @airo-js/* to src), but typecheck and the examples do.
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Dead code
+        run: pnpm knip
+
+      - name: Test
+        run: pnpm test
+
+  # ── Everything that only needs to run once ────────────────────────────────
+  checks:
+    name: bundle + shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # esbuild resolves embed's siblings (`@airo-js/core`, `@airo-js/log`)
+      # through node_modules to their built output, so the budget cannot be
+      # measured on a tree that has never been built.
+      - name: Build
+        run: pnpm build
+
+      # The embed budget is load-bearing and has sat within ~40 bytes of its
+      # ceiling for several releases. It fails the build, not a comment.
+      - name: Embed bundle budget
+        run: pnpm --filter @airo-js/embed size:check
+
+      - name: Shellcheck
+        run: |
+          shellcheck --version >/dev/null 2>&1 || sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+
+  # ── The release gates, run on every PR rather than at publish time ────────
+  #
+  # `scripts/publish.sh` with no arguments is a dry run: it enforces the
+  # changelog gate (every to-be-published version needs its `## `<pkg>`
+  # <version>` heading) and the VERSION-const gate (`export const VERSION`
+  # must equal package.json). Both are hand-maintained, so both drift, and
+  # discovering that at publish time means discovering it under pressure.
+  publish-gates:
+    name: publish dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # No NODE_AUTH_TOKEN: the dry run only reads public registry metadata
+      # to decide which versions are already published. It cannot publish.
+      - name: Publish preflight (dry run)
+        run: ./scripts/publish.sh
+
+  # ── The examples, which are the only end-to-end coverage we have ──────────
+  examples:
+    name: example smokes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # The shopify smoke imports `.ts` sources directly (see its import of
+      # `../src/wp/cartridge.ts`), which node cannot do without a loader.
+      # That script is bun-run by design; this is not an extra toolchain we
+      # chose, it is the one the example already requires.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      # Fixture-based — no network, no credentials. Asserts snapshot fidelity
+      # across HTML, JSON-LD, the XML feed and MCP dispatch for two cartridges.
+      - name: Smoke — shopify-edge-worker
+        run: pnpm --filter @airo-js-examples/shopify-edge-worker smoke
+
+      - name: Build full-site
+        run: pnpm --filter @airo-js-examples/full-site build
+
+      # This smoke drives a live server over HTTP and has no retry of its own,
+      # so readiness is polled here rather than slept on — a fixed sleep is
+      # either flaky or slow, and on a cold runner it is usually both.
+      - name: Smoke — full-site
+        working-directory: examples/full-site
+        run: |
+          PORT=4317 node dist/server.js &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 40); do
+            if curl -fsS -o /dev/null http://localhost:4317/; then
+              echo "server up after ${i} attempt(s)"
+              break
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::full-site server exited before becoming ready"
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          curl -fsS -o /dev/null http://localhost:4317/ || {
+            echo "::error::full-site server never became ready on :4317"
+            exit 1
+          }
+
+          node scripts/smoke.mjs

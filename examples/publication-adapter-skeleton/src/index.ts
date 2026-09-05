@@ -21,7 +21,7 @@ import type {
   ValidationResult,
 } from '@airo-js/cartridge-kit';
 
-// ─── Shared schema (mirrors a slice of WtbData) ────────────────────
+// ─── Shared schema (a slice of a product-catalogue snapshot) ───────
 
 interface ProductSnapshot {
   products: Array<{

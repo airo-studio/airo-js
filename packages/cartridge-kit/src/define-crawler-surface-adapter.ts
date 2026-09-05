@@ -154,10 +154,14 @@ export interface CrawlerSurfaceAdapterOptions<TData, TConfig> {
    *     { path: 'ogImage',     required: 'preferred' },
    *   ]
    *
-   * NOTE `requires` is not enforced by the runner today — `runPublicationAdapters`
-   * does not read it. It is honest declared metadata for hosts and studios;
-   * enforcement needs schema-space→snapshot-space path resolution and is
-   * its own piece of work.
+   * `runPublicationAdapters` gates on the `required: 'always'` entries as of
+   * 1.0: an adapter whose always-paths hold no value in the snapshot is
+   * skipped before `generate()` and reported with the missing paths.
+   * `'preferred'` and `'optional'` remain declared metadata for hosts and
+   * studios. The schema-space→snapshot-space resolution this note once
+   * called blocking turned out not to be: `SchemaDefinition<TData>.parse`
+   * returns `TData`, so a schema path and a snapshot path name the same
+   * place, and `getByPath` resolves both.
    */
   requires: readonly SchemaFieldRef[];
   select: CrawlerSurfaceSelectors<TData, TConfig>;

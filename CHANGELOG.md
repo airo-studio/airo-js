@@ -2,9 +2,80 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
-## [Unreleased]
+## Why this line is `0.10.0` and not `0.9.1`
 
-(empty — see versioned entries below)
+The `requires` coverage gate below is a **behaviour change**, not a fix: an adapter whose `required: 'always'` paths are absent now yields no output where it previously yielded some, and `renderAppWithPublication` builds its inline JSON-LD from non-skipped adapters — so a page whose adapter over-declares `requires` silently loses its structured data from the `<head>`. No throw, no warning.
+
+Under 0.x semver a `^0.9.0` range accepts `0.9.1` automatically but rejects `0.10.0`. Shipping this as a patch would have pushed a silent markup regression to every consumer without them choosing it, which is the exact failure the gate exists to prevent, arriving through the gate itself. The minor slot makes the upgrade deliberate.
+
+The whole line moves together so 1.0.0 lands on every package at once. `@airo-js/log` keeps its independent `0.3.x` line.
+
+**Upgrading:** audit your `PublicationAdapter.requires` declarations against a real snapshot before bumping. Any `required: 'always'` path your data does not actually populate now stops that adapter publishing.
+
+## `@airo-js/ssr` 0.10.0 — 2026-09-05
+
+### Changed
+- **BREAKING (behaviour): `requires` is now enforced — contract guarantee #2 was documented from the start and never implemented.** `runPublicationAdapters` checks each adapter's `required: 'always'` paths against the snapshot before calling `generate()`. A starved adapter does not run; its result carries `included: false` plus `skipped: { reason, missing }`. Two deliberate narrowings. Only `'always'` gates — whether a missing `'preferred'` field should stop publication is a judgment the adapter makes in `validate()`, where it can see the output it produced. And **present means non-nullish**, not `hasByPath`'s declared-key semantic: `''`, `0`, `false` and `[]` count as present, because a feed cannot emit `undefined` either way. The gate ignores `onValidationFail` — that policy governs output that failed `validate()`, and a skipped adapter produced none — so a skip never throws even under `'fail-loud'`. **Blast radius:** `renderAppWithPublication` filters on `included`, so a skipped adapter's JSON-LD disappears from the rendered `<head>` silently.
+- **`RunPublicationOptions` filter docs corrected — the JSDoc never matched the code.** All three filters said "Empty/undefined = include all"; the implementation is `opts.adapterIds ? new Set(...) : null`, and `[]` is truthy, so an empty array has always matched *nothing*. Behaviour is unchanged and deliberate — a caller whose filter produced nothing means "publish nothing", and widening that to "publish everything" could push adapters the host meant to exclude. Only the documentation was wrong. Same semantic now documented on `BuildToolManifestOptions.toolNames`.
+
+### Added
+- **`AdapterSkipped`** and **`AdapterRunResult.skipped`** — present only on an adapter coverage gating stopped, so a caller can tell "ran and failed validation" from "never ran", which `included: false` alone cannot. `reason` is an open union (`| (string & {})`) so future skip reasons are additive rather than a major bump.
+
+## `@airo-js/cartridge-kit` 0.10.0 — 2026-09-05
+
+**`CONTRACT_VERSION` 0.7.0 → 0.8.0** — `McpToolDefinition` gains a field.
+
+### Added
+- **`missingRequiredPaths(requires, snapshot)`** — the coverage predicate itself, extracted so `runPublicationAdapters` and `dispatchTool` cannot drift on what `'always'` and "present" mean. That drift is precisely what the snapshot-fidelity guarantee exists to prevent, so it is one function rather than one per consumer.
+- **`McpToolDefinition.requires`** — optional coverage metadata, gated by the same shared predicate, so a feed and an agent answer reading the same field cannot reach opposite verdicts. Optional rather than required because most tools read the snapshot broadly, and because adding a required field to a published interface would be breaking. Typed `readonly SchemaFieldRef[]` to match the predicate's own parameter and `CrawlerSurfaceAdapterOptions.requires`.
+
+### Fixed
+- **`getByPath` walked the prototype chain.** Its record branch was a bare `cur[key]`, so `constructor`, `toString` and `valueOf` all resolved non-nullish against *any* object. With coverage gating now load-bearing, a cartridge declaring one of those as a `required: 'always'` path would have reported full coverage for a completely starved snapshot — the gate passing precisely when it should fire. Now an own-property read. Also hardens `hasByPath` and `resolveComponentProp`.
+- Docstrings for guarantee #2 in `publication-adapter.ts`, `define-crawler-surface-adapter.ts` and the package README no longer say the framework "can" skip. The note claiming enforcement was blocked on schema-space→snapshot-space path resolution is retired: `SchemaDefinition<TData>.parse` returns `TData`, so both name the same place.
+
+## `@airo-js/mcp` 0.10.0 — 2026-09-05
+
+**First publish.** Previously a private 11-line stub.
+
+### Added
+- **The agent leg of the three-audience thesis, which was a 39-line interface.** `McpToolDefinition` shipped in cartridge-kit from the start and nothing in the framework ever read it — no manifest emitter, no dispatcher, no tests. So all three cartridges in this repo's own examples hand-rolled the missing runner; `examples/shopify-edge-worker` carried two near-identical private copies, and `examples/full-site` a third with a cast per field. That is the placeholder-package trap, shipped as the reference material people copy.
+- **`buildToolManifest(cartridge, opts?)`** — MCP's `tools/list` payload and nothing more. `opts.snapshot` can filter on coverage but is **off by default**: MCP clients cache tool lists, and a tool that appears and disappears as data changes is worse for an agent than one always listed that sometimes answers `missing-required-fields`, which at least names what is absent.
+- **`dispatchTool(cartridge, name, input, snapshot, opts)`** — resolve, gate on coverage, optionally validate, invoke. Returns a discriminated union and **never throws**: every outcome becomes a protocol response, and an agent calling a stale tool name is ordinary rather than exceptional. Both hand-rolls threw, so a stale name reached the edge worker as an unhandled rejection and a 500. `McpErrorCode` is an open union so new codes are additive.
+- Input validation is a **seam** (`validateInput`), not a bundled JSON Schema validator — ajv is ~30 KB and the choice belongs to a host that already has one.
+
+### Security
+- **`error.message` never carries the thrown text.** A handler closing over server credentials is the normal case for this package, and every host wiring in our own docs forwards the error object to the caller — so a driver error carrying a connection string would have reached an agent. The detail lives on `cause`, documented as host-side-only, and both examples now log it rather than returning it.
+
+## `@airo-js/runtime` 0.10.0 — 2026-09-05
+
+### Fixed
+- **`@airo-js/log` was a devDependency while `dist/mount-cartridge.js` imports it at module scope.** npm does not install devDependencies for consumers, and runtime was the only package on the line not declaring log as a peer (core, ssr and embed all did), so anyone installing `@airo-js/runtime` without another package resolving log for them hit a module-resolution failure at import. **Present in the published 0.9.0.** Now a peerDependency. *Migration:* consumers on strict peer resolution (pnpm's `strict-peer-dependencies`) should add `@airo-js/log` (`^0.3.1`) to their own dependencies. The peer is intentionally non-optional — the import is unconditional and unguarded.
+- **`UpdateResult`'s back-compat re-export had been inert since 0.7.1.** A comment promised 0.7.0 consumers importing it from `@airo-js/runtime` kept working; the barrel never forwarded it and `exports` exposes only `.` and `./test-harness`, so the module path it lived on was unreachable. Now on the barrel, which also closes an ergonomics gap: `mountCartridge().update()` returns it, so typing your own call no longer means importing from a package you never called.
+
+## `@airo-js/core` 0.10.0 — 2026-09-05
+
+### Fixed
+- A private `escape()` shadowed the deprecated global `escape()`, in the one file where a reader is most likely to wonder which they are looking at. Renamed `escapeEntities`; the exported `escapeHtml` / `escapeAttr` are unchanged in name and behaviour.
+
+### Changed
+- **`parseHtml` documents what it is NOT.** Blocking `<script>` execution is its only safety property; event-handler attributes (`onerror`, `onload`) and `javascript:` URLs pass through intact, and a browser fires them once the node is appended. The docblock previously invited the misreading ("safer than assigning `innerHTML`…") with no disclaimer. Both behaviours are now pinned in tests so the distinction cannot erode.
+- 107 tests added for a package that had none of its own. Its integration paths were covered by 30 test files in other packages, but five public exports had zero mentions anywhere: `parseHtml`/`parseHtmlFragment`, `Theme`, `buildCrumbs`, `createPipeline`/`RuntimePipelineImpl`, plus `wrapInShadow` and `resolveStyleRoot`. Verified non-vacuous by mutation.
+
+## `@airo-js/embed` 0.10.0 — 2026-09-05
+
+### Removed
+- `__resetRegisteredElementsForTesting` — a test-only escape hatch whose docstring said tests import it directly; none ever did (they use `uniqueElementName()`, which avoids the shared mutable state the hatch existed to reset). Never on the package barrel, so not a public-surface change.
+
+## Repo tooling — 2026-09-05
+
+Not published; recorded because it changes what the gates catch.
+
+- **Lint gate.** `pnpm lint` runs Biome (`biome.jsonc`) with `--error-on-warnings`. Linter only — enabling the formatter would rewrite every file and bury real changes in whitespace. Four rules are off, each with its reason in the config; the short version is that correctness rules stay on and pure-style rules that fight `tsconfig.base.json` or the house style do not. It caught six real findings, all fixed.
+- **Dead-code gate.** `pnpm knip` (CI mode) and `pnpm knip:audit` (`--include-entry-exports`, the "what are we freezing at 1.0" review). Added before 1.0 specifically because an accidental export becomes a semver commitment the moment the tag lands.
+- **Tests now compile source, not a stale `dist`.** Cross-package imports in tests resolved through `node_modules` to the target's built output, so editing `cartridge-kit/src/coverage.ts` and running `pnpm test` exercised yesterday's copy — green while the source was broken, and failing outright on a fresh clone with no `dist/`. `vitest.shared.ts` aliases every `@airo-js/*` to its `src`. Proven by mutation: stubbing the source now fails 19 mcp tests where previously only stubbing `dist` did.
+- `@airo-js/log`'s own tests moved into `@airo-js/log`, carrying their jsdom parity run with them.
+- `scripts/publish.sh` now includes `@airo-js/mcp` in `PACKAGES`; it was absent, so the new package would have built, tested, passed both gates and been silently omitted from the release.
+- best-practices §2.5c: the claim that typing a shared allowlist "moves the failure to your typecheck" is false under the `output.globals` externals mapping the section exists to serve, and cost a consumer a red e2e. Scoped, with the `importedBindings` guard that does work. Its measurements were also from that broken build and are corrected.
 
 ## `@airo-js/core` 0.9.0 — 2026-09-05
 
