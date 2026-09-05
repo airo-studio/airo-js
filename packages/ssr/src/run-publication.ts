@@ -64,7 +64,7 @@ import type {
   PublicationContext,
   ValidationResult,
 } from '@airo-js/cartridge-kit';
-import { getByPath } from '@airo-js/cartridge-kit';
+import { missingRequiredPaths } from '@airo-js/cartridge-kit';
 
 export interface RunPublicationOptions {
   /** Allowlist by adapter id. Empty/undefined = include all. */
@@ -134,10 +134,7 @@ export async function runPublicationAdapters<TData, TConfig>(
     const delivery = adapter.delivery ?? 'host-decides';
     if (deliveryAllow && !deliveryAllow.has(delivery)) continue;
 
-    const missing = (adapter.requires ?? [])
-      .filter((ref) => ref.required === 'always')
-      .map((ref) => ref.path)
-      .filter((path) => getByPath(snapshot, path) == null);
+    const missing = missingRequiredPaths(adapter.requires, snapshot);
 
     if (missing.length > 0) {
       results.push({

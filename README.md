@@ -100,7 +100,7 @@ Those numbers are a starting budget, not a ceiling for every real cartridge. Rea
 | [`@airo-js/runtime`](./packages/runtime/README.md) | Browser mount orchestration: shell setup, fetch or preloaded data, transformer pipeline, gates, mount, hydrate, and live update dispatch. |
 | [`@airo-js/ssr`](./packages/ssr/README.md) | Runtime-agnostic SSR and publication helpers: `renderAppToHTML`, `runPublicationAdapters`, and `renderAppWithPublication`. |
 | [`@airo-js/embed`](./packages/embed/README.md) | Tiny custom-element bootstrap for customer pages. Loads config, resolves cartridges, lazy-loads runtime, hydrates SSR HTML when present, and recovers missing view chunks. |
-| [`@airo-js/mcp`](./packages/mcp/src/index.ts) | MCP tool emission helpers for agent-facing cartridge capabilities. |
+| [`@airo-js/mcp`](./packages/mcp/README.md) | MCP tool manifest emission and dispatch: `buildToolManifest`, `dispatchTool`. Agent answers come from the same post-Transformer snapshot the views render. |
 | [`@airo-js/log`](./packages/log/README.md) | Structured sink-based logging across framework packages. |
 
 ## Hello World Cartridge

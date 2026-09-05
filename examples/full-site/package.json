@@ -2,7 +2,7 @@
   "name": "@airo-js-examples/full-site",
   "version": "0.0.0",
   "private": true,
-  "description": "A whole multi-page website from one cartridge, root-mounted on Express. Real urls, per-URL SSR, per-page canonicals, a host-assembled sitemap, llms.txt and MCP tools — every surface off one snapshot. Swap the server for Hono or a Worker and nothing else changes.",
+  "description": "A whole multi-page website from one cartridge, root-mounted on Express. Real urls, per-URL SSR, per-page canonicals, a host-assembled sitemap, llms.txt and MCP tools \u2014 every surface off one snapshot. Swap the server for Hono or a Worker and nothing else changes.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
     "@airo-js/core": "workspace:*",
+    "@airo-js/mcp": "workspace:*",
     "@airo-js/runtime": "workspace:*",
     "@airo-js/ssr": "workspace:*",
     "express": "^5.1.0",

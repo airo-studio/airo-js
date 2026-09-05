@@ -23,6 +23,9 @@ importers:
       '@airo-js/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@airo-js/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@airo-js/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -66,6 +69,9 @@ importers:
       '@airo-js/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@airo-js/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@airo-js/ssr':
         specifier: workspace:*
         version: link:../../packages/ssr
@@ -131,6 +137,10 @@ importers:
       '@airo-js/cartridge-kit':
         specifier: workspace:^
         version: link:../cartridge-kit
+    devDependencies:
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@26.4.1)(happy-dom@15.11.7)(jsdom@25.0.1)
 
   packages/runtime:
     dependencies:

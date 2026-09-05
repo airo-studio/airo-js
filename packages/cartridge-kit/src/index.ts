@@ -145,6 +145,13 @@ export {
 
 export { getByPath, hasByPath, setByPath } from './path-utils.js';
 
+/**
+ * Coverage gating, shared by `@airo-js/ssr`'s adapter runner and
+ * `@airo-js/mcp`'s tool dispatcher so the two cannot disagree about which
+ * snapshots are answerable.
+ */
+export { missingRequiredPaths } from './coverage.js';
+
 export type {
   HydrateCleanup,
   SSRSafeRendererOptions,

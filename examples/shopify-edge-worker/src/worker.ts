@@ -32,24 +32,15 @@
 
 import { parseHTML } from 'linkedom';
 import { renderAppWithPublication, renderDocument, runPublicationAdapters } from '@airo-js/ssr';
+import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 import type { PublicationContext } from '@airo-js/cartridge-kit';
 
 import { shopifyProductCartridge } from './shopify/cartridge.js';
 import { toProductJsonLd } from './shopify/jsonld.js';
-import {
-  PRODUCT_TOOLS,
-  buildToolManifest as buildShopifyManifest,
-  dispatchTool as dispatchShopifyTool,
-} from './shopify/mcp.js';
 import type { ProductSnapshot, ShopifyConfig } from './shopify/types.js';
 
 import { wpPostCartridge } from './wp/cartridge.js';
 import { toArticleJsonLd } from './wp/jsonld.js';
-import {
-  POST_TOOLS,
-  buildToolManifest as buildWpManifest,
-  dispatchTool as dispatchWpTool,
-} from './wp/mcp.js';
 import type { PostSnapshot, WpConfig } from './wp/types.js';
 
 import {
@@ -361,7 +352,7 @@ async function handleShopifyFeedXml(url: URL, req: Request, env: Env): Promise<R
 }
 
 function handleShopifyMcpManifest(): Response {
-  const manifest = buildShopifyManifest(PRODUCT_TOOLS);
+  const manifest = buildToolManifest(shopifyProductCartridge);
   return new Response(
     JSON.stringify({
       ...manifest,
@@ -389,8 +380,15 @@ async function handleShopifyMcpInvoke(url: URL, req: Request, env: Env): Promise
     if (k !== 'product') input[k] = v;
   });
 
-  const { result, snapshotId } = await dispatchShopifyTool(toolName, input, { data: snapshot, config });
-  return new Response(JSON.stringify({ tool: toolName, result, snapshotId }, null, 2), {
+  // The hand-rolled dispatcher this replaces THREW on an unknown tool name,
+  // so an agent calling a stale name produced an unhandled rejection and a
+  // 500. `dispatchTool` returns a verdict, so the same request is now the
+  // 400 it always was.
+  const out = await dispatchTool(shopifyProductCartridge, toolName, input, snapshot, { config });
+  if (!out.ok) return badRequest(`${out.error.code}: ${out.error.message}`);
+
+  const { snapshotId } = snapshot;
+  return new Response(JSON.stringify({ tool: toolName, result: out.result, snapshotId }, null, 2), {
     headers: {
       'content-type': CONTENT_TYPE_JSON,
       'cache-control': 'no-store',
@@ -457,7 +455,7 @@ async function handleWpSchemaJson(url: URL, req: Request, env: Env): Promise<Res
 }
 
 function handleWpMcpManifest(): Response {
-  const manifest = buildWpManifest(POST_TOOLS);
+  const manifest = buildToolManifest(wpPostCartridge);
   return new Response(
     JSON.stringify({
       ...manifest,
@@ -485,8 +483,11 @@ async function handleWpMcpInvoke(url: URL, req: Request, env: Env): Promise<Resp
     if (k !== 'post' && k !== 'site') input[k] = v;
   });
 
-  const { result, snapshotId } = await dispatchWpTool(toolName, input, { data: snapshot, config });
-  return new Response(JSON.stringify({ tool: toolName, result, snapshotId }, null, 2), {
+  const out = await dispatchTool(wpPostCartridge, toolName, input, snapshot, { config });
+  if (!out.ok) return badRequest(`${out.error.code}: ${out.error.message}`);
+
+  const { snapshotId } = snapshot;
+  return new Response(JSON.stringify({ tool: toolName, result: out.result, snapshotId }, null, 2), {
     headers: {
       'content-type': CONTENT_TYPE_JSON,
       'cache-control': 'no-store',

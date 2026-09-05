@@ -29,9 +29,8 @@ import {
   shopifyProductCartridge,
   shopifyProductDataSource,
 } from '../src/shopify/cartridge.ts';
-import { dispatchTool as dispatchShopifyTool } from '../src/shopify/mcp.ts';
+import { dispatchTool } from '@airo-js/mcp';
 import { wpPostCartridge } from '../src/wp/cartridge.ts';
-import { dispatchTool as dispatchWpTool } from '../src/wp/mcp.ts';
 import { SHOPIFY_APP_CONFIG, WP_APP_CONFIG } from '../src/demo-config.ts';
 import { hashSnapshot } from '../src/snapshot-id.ts';
 
@@ -150,9 +149,16 @@ async function smokeShopify() {
   console.log(`[shopify] adapter[merchant-center-xml] valid=${xmlResult.validation.valid} included=${xmlResult.included} itemCount=${xmlOut.itemCount} xml.length=${xmlOut.xml.length}`);
 
   // MCP tool dispatch
-  const { result: priceResult, snapshotId: priceSnapshotId } = await dispatchShopifyTool(
-    'getPrice', {}, { data: snapshot, config: shopifyProductCartridge.defaultConfig },
+  const priceOut = await dispatchTool(
+    shopifyProductCartridge, 'getPrice', {}, snapshot,
+    { config: shopifyProductCartridge.defaultConfig },
   );
+  assert(priceOut.ok, 'shopify', `MCP getPrice dispatch failed`);
+  const priceResult = priceOut.result;
+  // snapshotId is the example's own field, not a framework concept — the
+  // point of the check is that the tool answered from the SAME snapshot the
+  // HTML and the feed were built from.
+  const priceSnapshotId = snapshot.snapshotId;
   assert(priceSnapshotId === snapshotId, 'shopify', `MCP getPrice snapshotId mismatch`);
   assert(priceResult.amount === SHOPIFY_RAW.price.amount, 'shopify', `MCP getPrice amount mismatch`);
   console.log(`[shopify] MCP getPrice ok — ${priceResult.amount} ${priceResult.currencyCode} snapshotId=${priceSnapshotId}`);
@@ -199,9 +205,13 @@ async function smokeWp() {
   assert(attrMatch && attrMatch[1] === snapshotId, 'wp', `data-snapshot-id attr mismatch`);
 
   // MCP tool dispatch
-  const { result: excerptResult, snapshotId: excerptSnapshotId } = await dispatchWpTool(
-    'getExcerpt', {}, { data: snapshot, config: wpPostCartridge.defaultConfig },
+  const excerptOut = await dispatchTool(
+    wpPostCartridge, 'getExcerpt', {}, snapshot,
+    { config: wpPostCartridge.defaultConfig },
   );
+  assert(excerptOut.ok, 'wp', `MCP getExcerpt dispatch failed`);
+  const excerptResult = excerptOut.result;
+  const excerptSnapshotId = snapshot.snapshotId;
   assert(excerptSnapshotId === snapshotId, 'wp', `MCP getExcerpt snapshotId mismatch`);
   assert(excerptResult.title === WP_RAW.title, 'wp', `MCP getExcerpt title mismatch`);
   console.log(`[wp] MCP getExcerpt ok — title="${excerptResult.title.slice(0, 30)}..." snapshotId=${excerptSnapshotId}`);

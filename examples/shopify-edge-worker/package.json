@@ -17,6 +17,7 @@
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
     "@airo-js/core": "workspace:*",
+    "@airo-js/mcp": "workspace:*",
     "@airo-js/ssr": "workspace:*",
     "linkedom": "^0.18.0"
   },
