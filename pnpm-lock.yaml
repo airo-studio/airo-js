@@ -100,10 +100,16 @@ importers:
         version: 2.1.9(@types/node@26.4.1)(happy-dom@15.11.7)(jsdom@25.0.1)
 
   packages/core:
-    dependencies:
+    devDependencies:
       '@airo-js/log':
         specifier: workspace:^
         version: link:../log
+      happy-dom:
+        specifier: ^15.0.0
+        version: 15.11.7
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@26.4.1)(happy-dom@15.11.7)(jsdom@25.0.1)
 
   packages/embed:
     dependencies:
