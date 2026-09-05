@@ -361,7 +361,7 @@ export class PageManager<
       ? this.pages.find((p) => p.id === next.page)
       : undefined;
 
-    if (!targetPage || !targetPage.enabled || this.isGatePage(targetPage.type)) {
+    if (!targetPage?.enabled || this.isGatePage(targetPage.type)) {
       const entry = findEntryPage(this.pages, this.isGatePage);
       if (!entry) return;
       targetPage = entry;
@@ -469,7 +469,7 @@ export class PageManager<
   hydrateEntry(pageId: PageId): void {
     if (this.destroyed) return;
     const targetPage = this.pages.find((p) => p.id === pageId);
-    if (!targetPage || !targetPage.enabled || this.isGatePage(targetPage.type)) return;
+    if (!targetPage?.enabled || this.isGatePage(targetPage.type)) return;
 
     // Idempotency contract — repeat calls for the same already-hydrated
     // page are a no-op. Without this guard, a recovery path that races

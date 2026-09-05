@@ -536,7 +536,7 @@ export async function mountCartridge<
   // hydration markers + analytics).
   const widgetId = opts.widgetId ?? `${opts.cartridge.id}-${Date.now()}`;
   let currentApp: App | null = null;
-  let currentSnapshot: TData | undefined = undefined;
+  let currentSnapshot: TData | undefined;
   let currentConfig: TConfig = opts.config;
   let currentPages: Page<TPageType>[] = templateToAppConfig<TConfig, TPageType>(
     opts.template,
@@ -1218,7 +1218,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
     const kb = Object.keys(b);
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
-      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!Object.hasOwn(b, k)) return false;
       if (
         !deepEqual(
           (a as Record<string, unknown>)[k],

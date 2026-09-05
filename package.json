@@ -22,6 +22,8 @@
     "build": "pnpm -r --filter './packages/*' run build",
     "test": "pnpm -r --filter './packages/*' run test",
     "typecheck": "pnpm -r run typecheck",
+    "lint": "biome check . --error-on-warnings",
+    "lint:fix": "biome check . --write",
     "knip": "knip",
     "knip:audit": "knip --include-entry-exports",
     "clean": "pnpm -r run clean && rm -rf node_modules",
@@ -29,6 +31,7 @@
     "yalc:push": "pnpm build && node scripts/yalc-publish.mjs push"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "knip": "^6.34.0",
     "typescript": "^5.5.0"
   }

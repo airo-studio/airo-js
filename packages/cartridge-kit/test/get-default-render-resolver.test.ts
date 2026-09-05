@@ -9,7 +9,7 @@
  * mountCartridge lives in @airo-js/runtime.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 
 import { createRegistry, pushToMailbox } from '@airo-js/core';
 import type { PageRendererFactory } from '@airo-js/core';

@@ -64,7 +64,7 @@ const ENTITIES: Readonly<Record<string, string>> = Object.freeze(
 // escaping depend on how many times it had been called before.
 const ESCAPE_RE = /[&<>"']/g;
 
-function escape(value: string): string {
+function escapeEntities(value: string): string {
   return value.replace(ESCAPE_RE, (char) => ENTITIES[char] ?? char);
 }
 
@@ -79,7 +79,7 @@ function escape(value: string): string {
  * ```
  */
 export function escapeHtml(value: string): string {
-  return escape(value);
+  return escapeEntities(value);
 }
 
 /**
@@ -95,5 +95,5 @@ export function escapeHtml(value: string): string {
  * ```
  */
 export function escapeAttr(value: string): string {
-  return escape(value);
+  return escapeEntities(value);
 }

@@ -128,7 +128,6 @@ describe('mountCartridge.registry opt-in', () => {
     // same page sharing one registry. Each mount() call resolves via
     // the same registry without interference.
     const lifecycleA: string[] = [];
-    const lifecycleB: string[] = [];
     const cartridgeA = fakeCartridge({
       id: 'shared-cart',
       views: [

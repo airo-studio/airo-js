@@ -50,7 +50,7 @@ describe('defineAiroApp', () => {
 
     defineAiroApp({
       elementName,
-      loadConfig: async (id) => ({
+      loadConfig: async (_id) => ({
         config: {},
         cartridgeId: 'fake',
         templateId: 'main',

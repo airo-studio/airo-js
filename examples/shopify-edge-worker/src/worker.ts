@@ -194,7 +194,9 @@ async function loadWpConfig(env: Env): Promise<WpConfig> {
 async function fetchWpSnapshot(
   url: URL,
   req: Request,
-  env: Env,
+  // Unused: the WP REST API needs no credentials. The parameter stays for
+  // symmetry with fetchShopifySnapshot, which threads Storefront tokens.
+  _env: Env,
   config: WpConfig,
 ): Promise<PostSnapshot> {
   // URL param can override either the site or the slug — useful for
