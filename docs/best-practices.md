@@ -366,7 +366,19 @@ window.__AIRO_CORE__ = airoCore;
 window.__AIRO_CARTRIDGE_KIT__ = airoCartridgeKit;
 ```
 
-A namespace import pins **every** export, so `sideEffects: false` cannot help — the bundler is being told, correctly, that the whole module object is reachable. The structural consequence is that your core bundle grows with every framework release whether or not you use the new exports. This is measured, not theoretical: one consumer's shopper-facing core IIFE grew **+1.6 KB gzip on a single minor** this way, with every per-view chunk byte-identical, and a factory they will never call inlined in full next to three helpers they also do not use.
+A namespace import pins **every** export, so `sideEffects: false` cannot help — the bundler is being told, correctly, that the whole module object is reachable. The structural consequence is that your core bundle grows with every framework release whether or not you use the new exports.
+
+**This is measured, both halves of it.** A consumer's shopper-facing core IIFE, before and after switching from the namespace publish to a curated allowlist:
+
+| Core IIFE | raw | gzip | headroom against their 30.5 KB budget |
+|---|---|---|---|
+| Framework 0.8.8, namespace publish | 94.2 KB | 28.5 KB | 2.0 KB |
+| Framework 0.9.0, namespace publish | 98.8 KB | **30.2 KB** | 0.3 KB |
+| Framework 0.9.0, **curated allowlist** | 90.7 KB | **27.5 KB** | 3.0 KB |
+
+Read the last row against the *first*, not the second. Curating recovered **2.7 KB gzip** and left them **1.0 KB below their 0.8.8 baseline while running a larger framework version** — so the ratchet had been running for releases before anyone noticed, and 0.9.0 only made it visible. Every per-view chunk stayed byte-identical, so the externals contract is unaffected either way.
+
+The size of the gap is worth sitting with: two entire package namespaces were shipped to every shopper in order to expose **five functions** to the chunks. That is the normal outcome of this shape, not an unusually bad case.
 
 **Publish a curated object built from named imports instead:**
 

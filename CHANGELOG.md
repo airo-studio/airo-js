@@ -61,7 +61,7 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 Sync rev for `workspace:^` peerDep coherence across the 0.9.0 line. No behavioural change; bundle unchanged at 5,081 B minified / 2,211 B gzip.
 
-> **Scope note on that measurement.** The new core exports cost this bundle zero bytes because embed imports NAMED symbols and every package sets `"sideEffects": false`. It does **not** generalise to a consumer that re-exposes the framework to code the bundler never sees: `import * as core` on a global pins every export by construction, and one consumer measured **+1.6 KB gzip** on their core this way, with the new exports they will never call inlined in full. If you share a framework instance with lazily-loaded chunks, see best-practices §2.5c — curate a typed allowlist from named imports.
+> **Scope note on that measurement.** The new core exports cost this bundle zero bytes because embed imports NAMED symbols and every package sets `"sideEffects": false`. It does **not** generalise to a consumer that re-exposes the framework to code the bundler never sees: `import * as core` on a global pins every export by construction, and one consumer measured **+1.6 KB gzip** on their core this way, with the new exports they will never call inlined in full. Curating a typed allowlist recovered **2.7 KB gzip** for them — leaving them 1.0 KB *below* their 0.8.8 baseline on a larger framework version, because the ratchet had been running for releases before 0.9.0 made it visible. If you share a framework instance with lazily-loaded chunks, see best-practices §2.5c.
 
 ## `@airo-js/log` 0.3.1 — 2026-09-05
 
