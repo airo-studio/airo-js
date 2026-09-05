@@ -20,8 +20,9 @@
 
 import {
   EventBus,
-  resolveEntryPage,
+  describeEntryResolution,
   type AppConfig,
+  type EntryFallbackReason,
   type NavigationState,
   type PageRendererFactory,
   type RenderContext,
@@ -78,6 +79,18 @@ export interface RenderToHTMLDeps<
 export interface RenderToHTMLResult {
   /** The serialised HTML of the rendered entry page. */
   html: string;
+  /**
+   * Set when `initialNavState.page` named a page the runner REJECTED and
+   * substituted the default entry for. Absent when no page was requested,
+   * and when the requested page rendered.
+   *
+   * The fallback itself is deliberate — a tampered deeplink must never
+   * crash a render. This field exists so an app that owns its URLs can
+   * answer 404 rather than serving its home page at `/does-not-exist`
+   * with a 200 (a soft 404, which search engines penalise). The framework
+   * reports what it did; the status code is entirely yours.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
 }
 
 /**
@@ -110,13 +123,15 @@ export function renderAppToHTML<
   // `initialNavState.page`. Invalid / unknown / disabled / gate /
   // subpage ids fall back to the default entry — keeps SSR safe against
   // tampered or stale deeplinks.
-  const entry = resolveEntryPage(
+  const resolution = describeEntryResolution(
     config.pages,
     isGate,
     deps.initialNavState?.page,
   );
+  const entry = resolution.page;
+  const fellBack = resolution.fellBack ? { fellBack: resolution.fellBack } : {};
   if (!entry) {
-    return { html: '' };
+    return { html: '', ...fellBack };
   }
 
   const factory = deps.resolveRenderer(entry.type);
@@ -155,5 +170,5 @@ export function renderAppToHTML<
     renderer.render(container, ctx);
   }
 
-  return { html: container.innerHTML };
+  return { html: container.innerHTML, ...fellBack };
 }

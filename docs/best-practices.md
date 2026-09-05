@@ -1267,6 +1267,40 @@ Pure function — no DOM, no globals, no router instance threading required.
 - **Trailing-slash normalisation.** `/campaign/xyz`, `/campaign/xyz/`, `/campaign/xyz/products/abc` — all three behave identically. First two return null (no tail); third returns `'products/abc'`.
 - **Hash + path coexistence.** In path mode, a trailing `#anchor` on the URL is treated as a normal page anchor — **not** as a route override. The path is the sole source of truth. If you need both routing AND in-page anchors, use path for route + hash for scroll target.
 - **Wildcard route conflicts.** Your server's `/campaign/:widgetId/*` route catches everything under the prefix, including static assets. Order it after asset handlers, or pattern-restrict (`/campaign/:widgetId/(products|categories|...)/*`).
+- **Root mount (`basePath: '/'`).** The basePath normalises to `''`, so the app claims the ENTIRE origin — `pathname.startsWith('')` is true for every path, and the only thing keeping `/favicon.ico` from decoding as a page is the `validPages` allowlist. Route static assets before the wildcard, always. Set `entryPageId` so the entry page has one url instead of two (see below).
+
+### 5.10a Answering 404 from a root-mounted app
+
+`decodeNavHint` returns `null` for a tail naming no known page, and the SSR runner then falls back to the default entry page. That is correct for an **embedded widget** — a tampered deeplink must never crash a render, and the host page owns the URL and its status code anyway.
+
+It is a **trap for an app that owns its own URLs**, and the failure is invisible: `/does-not-exist` renders your home page with a `200` and a canonical of `/`. That is a soft 404, search engines penalise it, and nothing errors or warns. A consumer shipped exactly this before noticing.
+
+**The framework will not reverse the fallback** — it is right for the embed case. Instead it reports the decision it already made, on `RenderToHTMLResult` and `RenderWithPublicationResult`:
+
+```ts
+fellBack?: { requested: string; reason: 'unknown-page' | 'disabled' | 'subpage' | 'gate-page' }
+```
+
+Present only when a page was requested AND rejected. Absent for a bare `basePath` (the legitimate entry case) and for a page that resolved. HTTP status is squarely host territory, so the framework reports and stops:
+
+```ts
+const result = await renderAppWithPublication({ cartridge, appConfig, snapshot, publicationCtx, document, initialNavState });
+
+if (result.fellBack) {
+  // Re-render the template's own notFound page rather than serving the
+  // home page under a wrong url. No framework change needed — the
+  // discriminator is what makes the second call possible.
+  const notFound = await renderAppWithPublication({
+    ..., initialNavState: { page: 'notFound' },
+  });
+  return new Response(renderDocument({ head: { lang, title: 'Not found' }, body: notFound.html }), { status: 404 });
+}
+```
+
+A template MAY declare a `notFound` page and dispatch to it this way; the runner will never route there on its own, because falling back to an arbitrary page id would be a policy decision. Equally valid — and simpler — is assembling the 404 with `renderDocument` directly. It needs no cartridge and no snapshot, which is exactly why `renderDocument` composes rather than wraps.
+
+**Do not answer `503` for a missing canonical.** A missing canonical is a symptom of two different things: the page does not exist (404), or an adapter broke (503). Telling a crawler to come back for something that is never coming is a subtle, durable SEO bug. Disambiguate against your own route list — the framework cannot, because it does not know which urls you intend to serve.
+
 
 **Don't ship a parallel runtime allowlist for routable pages.** Same anti-pattern as Section 3.12 — derive valid page ids from the cartridge:
 

@@ -71,12 +71,73 @@ export function resolveEntryPage<TPageType extends string>(
   isGate: (type: TPageType) => boolean,
   preferredId?: string,
 ): Page<TPageType> | undefined {
-  const requested = preferredId
-    ? pages.find(
-        (p) => p.id === preferredId && p.enabled && !p.parent && !isGate(p.type),
-      )
-    : undefined;
-  return requested ?? findEntryPage(pages, isGate);
+  return describeEntryResolution(pages, isGate, preferredId).page;
+}
+
+/** Why a requested entry id was rejected in favour of the default entry. */
+export type EntryFallbackReason =
+  /** No page in the graph has this id. */
+  | 'unknown-page'
+  /** The page exists but `enabled` is false. */
+  | 'disabled'
+  /** The page exists but is a subpage — subpages activate through their parent. */
+  | 'subpage'
+  /** The page exists but `isGatePage` claims its type. */
+  | 'gate-page';
+
+export interface EntryResolution<TPageType extends string> {
+  page: Page<TPageType> | undefined;
+  /**
+   * Present ONLY when a preferred id was supplied and rejected. Absent
+   * when no id was requested (a bare `basePath`, the legitimate entry
+   * case) and when the requested id resolved.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
+}
+
+/**
+ * `resolveEntryPage`, plus WHY it fell back.
+ *
+ * The resolver already validates a requested id against the page graph
+ * and silently substitutes the default entry — deliberately, so a
+ * tampered or stale deeplink can never crash a render. That is right for
+ * an embedded widget, whose host owns the URL and its status code.
+ *
+ * It is a trap for an app that owns its own URLs. Falling back means
+ * `/does-not-exist` renders the home page with a 200 and a canonical of
+ * `/` — a soft 404, which search engines penalise, and which nothing
+ * errors or warns about. Reported by a consumer who shipped exactly that
+ * without noticing.
+ *
+ * The fallback stays; the DECISION stops being thrown away. Hosts that
+ * own their URLs read `fellBack` and answer 404 instead of re-deriving
+ * the same judgement from the URL. HTTP status stays entirely host-side —
+ * the framework reports what it did and has no opinion about the response
+ * code.
+ */
+export function describeEntryResolution<TPageType extends string>(
+  pages: ReadonlyArray<Page<TPageType>>,
+  isGate: (type: TPageType) => boolean,
+  preferredId?: string,
+): EntryResolution<TPageType> {
+  if (!preferredId) return { page: findEntryPage(pages, isGate) };
+
+  const match = pages.find((p) => p.id === preferredId);
+  const reason: EntryFallbackReason | undefined = !match
+    ? 'unknown-page'
+    : !match.enabled
+      ? 'disabled'
+      : match.parent
+        ? 'subpage'
+        : isGate(match.type)
+          ? 'gate-page'
+          : undefined;
+
+  if (!reason) return { page: match };
+  return {
+    page: findEntryPage(pages, isGate),
+    fellBack: { requested: preferredId, reason },
+  };
 }
 
 /**

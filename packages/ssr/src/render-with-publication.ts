@@ -28,8 +28,9 @@
  */
 
 import {
-  resolveEntryPage,
+  describeEntryResolution,
   type AppConfig,
+  type EntryFallbackReason,
   type NavigationState,
   type PageRendererFactory,
 } from '@airo-js/core';
@@ -124,6 +125,16 @@ export interface RenderWithPublicationResult {
    * via mountCartridge as usual; this branch is the SEO partial-win.
    */
   skipped?: { pageType: string; reason: 'csr-only' };
+  /**
+   * Set when `initialNavState.page` named a page the runner REJECTED,
+   * substituting the default entry. Forwarded verbatim from
+   * `renderAppToHTML` — see `RenderToHTMLResult.fellBack`.
+   *
+   * A root-mounted app reads this to answer 404. Without it,
+   * `/does-not-exist` serves the home page with a 200 and a canonical of
+   * `/` — a soft 404 that nothing errors about.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
 }
 
 /**
@@ -211,11 +222,16 @@ export async function renderAppWithPublication<
   // the same page for any given `initialNavState.page`. Invalid /
   // unknown / disabled / gate / subpage ids fall back to the default
   // entry — keeps the SSR path safe against tampered or stale deeplinks.
-  const entryPage = resolveEntryPage(
+  const entryResolution = describeEntryResolution(
     opts.appConfig.pages,
     isGate,
     opts.initialNavState?.page,
   );
+  const entryPage = entryResolution.page;
+  // Threaded onto every return path below, including the csr-only skip —
+  // a host answering 404 must not have that decision depend on whether
+  // the fallback page happened to be server-renderable.
+  const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
   if (entryPage) {
     const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
     if (entryView?.capabilities?.includes('csr-only')) {
@@ -227,6 +243,7 @@ export async function renderAppWithPublication<
         html: inlineScripts,
         adapterResults,
         skipped: { pageType: entryPage.type, reason: 'csr-only' },
+        ...fellBack,
       };
     }
   }
@@ -263,5 +280,5 @@ export async function renderAppWithPublication<
   const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
-  return { html, adapterResults };
+  return { html, adapterResults, ...fellBack };
 }

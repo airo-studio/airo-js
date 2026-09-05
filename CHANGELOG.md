@@ -13,6 +13,7 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 - **`PostRenderHook`** on `PageManagerOptions` / `AppDeps` — the seam `@airo-js/runtime` uses to run the post-processor chain. Pure mechanism; core learns nothing about pipelines or cartridges.
 - **`joinPathFragment`** — the single path-mode URL encoder, now shared by `PathRouter.stateToUrl` and `routerHrefFor` so the two cannot disagree about which url a `RouteState` has.
 - **`entryPageId`** on `PathRouterOptions` and the `mode: 'path'` `RouterOption` variant. Opt-in.
+- **`describeEntryResolution()`** plus `EntryResolution` / `EntryFallbackReason` — `resolveEntryPage` with the reason it fell back (`'unknown-page' | 'disabled' | 'subpage' | 'gate-page'`). `resolveEntryPage` is now a thin wrapper over it, so there is one resolution path and the two cannot drift.
 
 ### Fixed
 - **PostProcessors now run.** `PageManager` invokes the hook after every successful render — fresh mount, navigation swap, hydrate, and appContext re-render — and fires the returned teardown **before the next apply and before the renderer whose DOM it decorated is destroyed**. Per render rather than per mount, because a swap destroys the subtree a hook decorated: a mount-scoped hook silently stops applying the moment anyone navigates. Throwing hooks and throwing teardowns are logged and swallowed so one bad hook cannot take down its siblings or the render around them.
@@ -44,6 +45,7 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 ### Changed
 - **Default publication filter is now `{ formats: ['json-ld', 'head-meta'], deliveries: ['inline-in-host'] }`.** Behaviour is unchanged for every cartridge shipped before 0.9.0, since nothing declared `'head-meta'` until it existed.
+- **`fellBack` on `RenderToHTMLResult` and `RenderWithPublicationResult`.** The entry resolver deliberately substitutes the default entry for a rejected page id so a tampered deeplink cannot crash a render — correct for an embedded widget whose host owns the URL and its status code. For an app that owns its own urls it is a trap: `/does-not-exist` renders the home page with a `200` and a canonical of `/`, a soft 404 that search engines penalise and that nothing errors about. The fallback is unchanged; the decision the runner already made is now reported so a host can answer 404. Present only when a page was requested AND rejected; threaded through the `csr-only` skip path too, so a 404 decision does not depend on whether the fallback page happened to be server-renderable. Requested by a consumer who shipped the soft 404 without noticing. HTTP status stays entirely host-side.
 - `renderAppWithPublication` **warns** when the cartridge it renders declares `postProcessors`. They are browser-only **by contract** — this path builds a string and there is no pipeline — and the alternative is the same silent-nothing the client wiring just fixed.
 
 ## `@airo-js/runtime` 0.9.0 — 2026-09-05
