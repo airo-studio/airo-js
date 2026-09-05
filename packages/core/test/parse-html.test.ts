@@ -101,8 +101,8 @@ describe('parseHtml', () => {
     });
   });
 
-  describe('<template> parsing means scripts do not execute', () => {
-    test('a <script> in the input is inert markup, not a running script', () => {
+  describe('a <script> element is inert markup — and that is ALL this guarantees', () => {
+    test('a <script> in the input does not run', () => {
       const doc = freshDocument();
       (globalThis as { __pwned?: boolean }).__pwned = false;
 
@@ -111,6 +111,25 @@ describe('parseHtml', () => {
       expect((globalThis as { __pwned?: boolean }).__pwned).toBe(false);
       expect((node as HTMLElement).querySelector('script')).not.toBeNull();
       delete (globalThis as { __pwned?: boolean }).__pwned;
+    });
+
+    test('event-handler attributes SURVIVE — parseHtml is not a sanitiser', () => {
+      // Pinned deliberately as a negative. The `<script>` case above is easy
+      // to over-read as "parseHtml makes untrusted HTML safe", and it does
+      // not: these attributes come through intact and a real browser fires
+      // them the moment the node is appended to a live document. Untrusted
+      // feed HTML must be sanitised BEFORE it reaches this function.
+      const doc = freshDocument();
+      const node = parseHtml('<img src="x" onerror="globalThis.__x=1">', doc) as HTMLElement;
+
+      expect(node.getAttribute('onerror')).toBe('globalThis.__x=1');
+    });
+
+    test('a javascript: URL survives untouched', () => {
+      const doc = freshDocument();
+      const node = parseHtml('<a href="javascript:alert(1)">x</a>', doc) as HTMLElement;
+
+      expect(node.getAttribute('href')).toBe('javascript:alert(1)');
     });
   });
 });

@@ -71,6 +71,8 @@ done
 #   - embed depends on log + cartridge-kit (type-only) + runtime (peer; not bundled).
 #   - ssr depends on core + cartridge-kit + log.
 # Each entry: "<filter> [extra-flags]"
+# Dependency order: a package's peers appear above it. `@airo-js/mcp` peers on
+# cartridge-kit only, so it sits at the end.
 PACKAGES=(
   "@airo-js/log"
   "@airo-js/core"
@@ -78,6 +80,7 @@ PACKAGES=(
   "@airo-js/runtime"
   "@airo-js/embed"
   "@airo-js/ssr"
+  "@airo-js/mcp"
 )
 
 # Flags applied to every `pnpm publish`. Drop --no-git-checks once the repo

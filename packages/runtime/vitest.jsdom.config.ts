@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+import { airoAliases } from '../../vitest.shared.js';
+
 // Parity run against jsdom — runs the same test files as vitest.config.ts but
 // under jsdom's DOM implementation. Catches consumer-env regressions that the
 // happy-dom-only run misses (jsdom omits several DOM globals happy-dom exposes:
@@ -11,4 +13,6 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     name: 'jsdom-parity',
   },
+  // Resolve @airo-js/* to source, not a stale dist. See vitest.shared.ts.
+  resolve: { alias: airoAliases },
 });

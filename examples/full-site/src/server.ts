@@ -213,7 +213,16 @@ app.post('/mcp/call', async (req, res) => {
 
   // A tool the agent got wrong is a 400, not a 500 — the dispatcher returns
   // a verdict rather than throwing, so the distinction survives to the wire.
-  res.status(out.ok ? 200 : 400).json(out);
+  //
+  // Note what is NOT sent: `error.cause` carries whatever the cartridge's
+  // handler threw, and handlers routinely close over server credentials.
+  // Log it, never return it.
+  if (!out.ok) {
+    console.error('[mcp] dispatch failed', out.error.code, out.error.cause ?? '');
+    res.status(400).json({ ok: false, toolName: out.toolName, error: { code: out.error.code, message: out.error.message } });
+    return;
+  }
+  res.status(200).json(out);
 });
 
 // 3 ── every human-facing url lands here.

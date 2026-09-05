@@ -67,11 +67,17 @@ import type {
 import { missingRequiredPaths } from '@airo-js/cartridge-kit';
 
 export interface RunPublicationOptions {
-  /** Allowlist by adapter id. Empty/undefined = include all. */
+  /**
+   * Allowlist by adapter id. **Omit** to include all; an EMPTY array is a real
+   * allowlist that matches nothing, so `adapterIds: []` runs no adapter at all.
+   * That is deliberate — a caller computing the list from a filter that
+   * returned nothing means "publish nothing", and silently widening it to
+   * "publish everything" could push adapters the host meant to exclude.
+   */
   adapterIds?: string[];
-  /** Include only these formats. Empty/undefined = include all. */
+  /** Include only these formats. Omit to include all; `[]` matches nothing. */
   formats?: PublicationAdapter<unknown, unknown, unknown>['format'][];
-  /** Include only these delivery modes. Empty/undefined = include all. */
+  /** Include only these delivery modes. Omit to include all; `[]` matches nothing. */
   deliveries?: NonNullable<PublicationAdapter<unknown, unknown, unknown>['delivery']>[];
 }
 
@@ -81,7 +87,8 @@ export interface RunPublicationOptions {
  * ran", which `included: false` alone cannot distinguish.
  */
 export interface AdapterSkipped {
-  reason: 'missing-required-fields';
+  /** Open union — new skip reasons are additive; branch with a default. */
+  reason: 'missing-required-fields' | (string & {});
   /** The `required: 'always'` schema paths that were absent from the snapshot. */
   missing: string[];
 }

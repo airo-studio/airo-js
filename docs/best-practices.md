@@ -180,7 +180,15 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 **Validation is a hard gate (default).** `onValidationFail: 'block-publish'` is correct for almost all cases. `'publish-with-warnings'` only when downstream consumers (Google Merchant Center, Amazon Listings) have a "warnings allowed" mode.
 
-**`requires` enforces coverage.** Declare every schema field path the adapter needs; the framework can skip the adapter when fields are absent rather than emit broken output. Studio shells surface coverage gaps to users via this metadata.
+**`requires` enforces coverage — actually, as of 1.0.** Declare every schema field path the adapter needs. `runPublicationAdapters` checks the entries marked `required: 'always'` **before** calling `generate()`; if any hold no value in the snapshot the adapter does not run, and its result carries `included: false` plus `skipped: { reason: 'missing-required-fields', missing }` naming the absent paths.
+
+Three things to know before you declare one:
+
+- **Only `'always'` gates.** `'preferred'` and `'optional'` stay metadata for a host's coverage UI. Whether a missing *preferred* field should stop publication is a judgment your adapter makes in `validate()`, where it can see the output it produced.
+- **Present means non-nullish.** `''`, `0`, `false` and `[]` all count as present; only `undefined` and `null` are absent. If an empty string is unusable for your feed, say so in `validate()`.
+- **A skip is not a validation failure.** It ignores `onValidationFail` entirely — including `'fail-loud'` — because a skipped adapter produced no output to have an opinion about. The caller sees the same `included: false` that `'block-publish'` yields.
+
+Watch the blast radius on upgrade: `renderAppWithPublication` builds its inline JSON-LD from `included` results, so an adapter declaring an `'always'` path its snapshot does not populate will silently stop emitting markup into the `<head>`. Audit your `requires` declarations against a real snapshot before adopting.
 
 **Server-only.** Same envelope split as MCP tools.
 
@@ -196,7 +204,7 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 ```
 wrong:                     right:
-storeplus.js (96 KB)       categories.js  (~25 KB)
+shop-layout.js (96 KB)     categories.js  (~25 KB)
 └─ all 4 sub-pages         products.js    (~50 KB)
    bundled together        product.js     (~40 KB)
                            quickview.js   (~25 KB)

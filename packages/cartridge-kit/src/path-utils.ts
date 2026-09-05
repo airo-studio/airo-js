@@ -76,7 +76,12 @@ function readSegment(cur: Record<string, unknown> | unknown[], key: string): unk
   if (Array.isArray(cur)) {
     return isIndexSegment(key) ? cur[Number(key)] : undefined;
   }
-  return cur[key];
+  // OWN properties only. A plain `cur[key]` walks the prototype chain, so
+  // `constructor`, `toString` and `valueOf` all read non-nullish off any
+  // object — which made `missingRequiredPaths` report full coverage for a
+  // completely starved snapshot when a cartridge declared one of those as a
+  // required path. Inherited members are never cartridge config.
+  return Object.hasOwn(cur, key) ? cur[key] : undefined;
 }
 
 /**

@@ -34,7 +34,7 @@
  * reach handlers unvalidated, which is documented rather than silent.
  */
 
-import type { Cartridge, McpToolDefinition, ToolContext } from '@airo-js/cartridge-kit';
+import type { Cartridge, ToolContext } from '@airo-js/cartridge-kit';
 import { missingRequiredPaths } from '@airo-js/cartridge-kit';
 
 export type McpErrorCode =
@@ -45,7 +45,12 @@ export type McpErrorCode =
   /** `validateInput` rejected the input against the tool's `inputSchema`. */
   | 'invalid-input'
   /** The tool's own handler threw. */
-  | 'handler-threw';
+  | 'handler-threw'
+  // Open on purpose, matching `LogChannel` and `hotSwapKeys` elsewhere in the
+  // framework. A closed union would make every future code a 2.0 change,
+  // because an exhaustive `switch` with a `never` default breaks on the first
+  // addition. Consumers must carry a default branch.
+  | (string & {});
 
 export interface McpDispatchError {
   code: McpErrorCode;
@@ -54,7 +59,16 @@ export interface McpDispatchError {
   missing?: string[];
   /** Set on `invalid-input` — whatever the host's validator reported. */
   validationErrors?: string[];
-  /** Set on `handler-threw` — the value the handler threw, unwrapped. */
+  /**
+   * The value that was thrown, unwrapped. Set on `handler-threw`, and on the
+   * `invalid-input` produced when the host's own validator threw instead of
+   * returning a verdict.
+   *
+   * **Do not serialise this to an untrusted caller.** It is whatever the
+   * cartridge's own code threw, and handlers routinely close over server
+   * credentials — a driver error carrying a connection string is the ordinary
+   * case, not a contrived one. Log it host-side; return `code` and `message`.
+   */
   cause?: unknown;
 }
 
@@ -103,7 +117,7 @@ export async function dispatchTool<TData, TConfig>(
   snapshot: TData,
   opts: DispatchToolOptions<TConfig>,
 ): Promise<McpDispatchResult> {
-  const declared = (cartridge.mcpTools ?? []) as McpToolDefinition<TData, TConfig>[];
+  const declared = cartridge.mcpTools ?? [];
   const tool = declared.find((t) => t.name === toolName);
 
   if (!tool) {
@@ -120,7 +134,25 @@ export async function dispatchTool<TData, TConfig>(
     };
   }
 
-  const missing = missingRequiredPaths(tool.requires, snapshot);
+  // Wrapped for the same reason `validateInput` is: this walks an arbitrary
+  // `TData` by dotted path, and a snapshot carrying a throwing getter or a
+  // revoked Proxy is not exotic when a DataSource returns class instances.
+  // An escape here would be the unhandled rejection this package removes.
+  let missing: string[];
+  try {
+    missing = missingRequiredPaths(tool.requires, snapshot);
+  } catch (err) {
+    return {
+      ok: false,
+      toolName,
+      error: {
+        code: 'missing-required-fields',
+        message: `Could not read the snapshot to check "${toolName}"'s required paths.`,
+        missing: [],
+        cause: err,
+      },
+    };
+  }
   if (missing.length > 0) {
     return {
       ok: false,
@@ -136,7 +168,29 @@ export async function dispatchTool<TData, TConfig>(
   }
 
   if (opts.validateInput) {
-    const verdict = opts.validateInput(input, tool.inputSchema);
+    // The validator is host code, and the common shape wraps a JSON Schema
+    // library — ajv throws on a malformed schema rather than returning false.
+    // Calling it outside this try would let one bad `inputSchema` become the
+    // unhandled rejection this package exists to remove from a host's request
+    // handler, and would make the "never throws" contract above a lie.
+    let verdict: { valid: boolean; errors?: string[] };
+    try {
+      verdict = opts.validateInput(input, tool.inputSchema);
+    } catch (err) {
+      return {
+        ok: false,
+        toolName,
+        error: {
+          code: 'invalid-input',
+          message:
+            `The validator for tool "${toolName}" threw rather than returning a verdict — ` +
+            `usually a malformed inputSchema. ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+          validationErrors: [],
+          cause: err,
+        },
+      };
+    }
     if (!verdict.valid) {
       return {
         ok: false,
@@ -170,7 +224,13 @@ export async function dispatchTool<TData, TConfig>(
       toolName,
       error: {
         code: 'handler-threw',
-        message: `Tool "${toolName}" threw: ${err instanceof Error ? err.message : String(err)}`,
+        // Deliberately does NOT interpolate the thrown message. A handler
+        // closing over server credentials is the normal case for this package
+        // (see the README), and every host wiring in our own docs forwards
+        // this object straight to the caller — so anything folded in here
+        // reaches an agent. The detail lives on `cause`, which a host opts
+        // into logging and must not serialise to an untrusted client.
+        message: `Tool "${toolName}" threw. See \`cause\` for detail; do not return it to the caller.`,
         cause: err,
       },
     };

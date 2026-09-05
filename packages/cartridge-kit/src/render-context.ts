@@ -22,12 +22,12 @@
  * ```ts
  * import type { CartridgeRenderContext } from '@airo-js/cartridge-kit';
  *
- * type WtbCtx = CartridgeRenderContext<WtbPageType, WtbData, WtbConfig>;
+ * type CatalogCtx = CartridgeRenderContext<CatalogPageType, CatalogData, CatalogConfig>;
  *
- * export function quickShopRenderer(): PageRenderer<WtbPageType, CartridgeAppContext<WtbData, WtbConfig>> {
- *   return defineSSRSafeRenderer<WtbPageType, WtbData, WtbConfig>({
- *     template(ctx: WtbCtx) { ... },
- *     hydrate(root, ctx: WtbCtx) {
+ * export function productRenderer(): PageRenderer<CatalogPageType, CartridgeAppContext<CatalogData, CatalogConfig>> {
+ *   return defineSSRSafeRenderer<CatalogPageType, CatalogData, CatalogConfig>({
+ *     template(ctx: CatalogCtx) { ... },
+ *     hydrate(root, ctx: CatalogCtx) {
  *       variantSelector.on('select', (variant) => {
  *         ctx.update?.({ display: { selectedGroupIndex: variant.idx } });
  *       });

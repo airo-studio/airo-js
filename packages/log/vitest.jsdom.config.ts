@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+import { airoAliases } from '../../vitest.shared.js';
+
 // Parity run against jsdom — same files as vitest.config.ts under jsdom's DOM
 // implementation. Carried over when these tests moved here from
 // `@airo-js/runtime`, where they had it: `initLogControls` reads
@@ -13,4 +15,6 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     name: 'jsdom-parity',
   },
+  // Resolve @airo-js/* to source, not a stale dist. See vitest.shared.ts.
+  resolve: { alias: airoAliases },
 });

@@ -1,7 +1,7 @@
 {
   "name": "@airo-js/mcp",
-  "version": "0.9.1",
-  "description": "Airo MCP \u2014 tool manifest emission + dispatch. Cartridges declare MCP tools via @airo-js/cartridge-kit; this package advertises and invokes them against the same post-Transformer snapshot the views render.",
+  "version": "0.10.0",
+  "description": "Airo MCP — tool manifest emission + dispatch. Cartridges declare MCP tools via @airo-js/cartridge-kit; this package advertises and invokes them against the same post-Transformer snapshot the views render.",
   "keywords": [
     "airo",
     "mcp",
@@ -31,11 +31,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "src",
-    "README.md"
-  ],
+  "files": ["dist", "src", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -8,7 +8,7 @@
  * serialisable and `requires` is coverage metadata the client cannot act on.
  */
 
-import type { Cartridge, McpToolDefinition } from '@airo-js/cartridge-kit';
+import type { Cartridge } from '@airo-js/cartridge-kit';
 import { missingRequiredPaths } from '@airo-js/cartridge-kit';
 
 /** One entry in the manifest — MCP's tool descriptor, and only that. */
@@ -39,7 +39,13 @@ export interface BuildToolManifestOptions<TData> {
    * advertising an unanswerable tool is the greater harm.
    */
   snapshot?: TData;
-  /** Restrict to these tool names, in the cartridge's declaration order. */
+  /**
+   * Restrict to these tool names, emitted in the cartridge's declaration
+   * order. **Omit** to include all; an EMPTY array is a real allowlist that
+   * matches nothing, so `toolNames: []` yields `{ tools: [] }`. Matches
+   * `runPublicationAdapters`'s `adapterIds` on the same reasoning: a caller
+   * whose filter produced nothing means nothing, not everything.
+   */
   toolNames?: string[];
 }
 
@@ -55,7 +61,7 @@ export function buildToolManifest<TData, TConfig>(
   cartridge: Cartridge<TData, TConfig>,
   opts: BuildToolManifestOptions<TData> = {},
 ): McpToolManifest {
-  const declared = (cartridge.mcpTools ?? []) as McpToolDefinition<TData, TConfig>[];
+  const declared = cartridge.mcpTools ?? [];
   const allow = opts.toolNames ? new Set(opts.toolNames) : null;
 
   const tools: McpToolManifestEntry[] = [];

@@ -68,4 +68,4 @@ export { filterServerSafeCartridge } from './filter-server-safe-cartridge.js';
 
 export const PACKAGE_NAME = '@airo-js/ssr';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.9.0';
+export const VERSION = '0.10.0';

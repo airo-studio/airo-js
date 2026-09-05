@@ -155,11 +155,18 @@ async function smokeShopify() {
   );
   assert(priceOut.ok, 'shopify', `MCP getPrice dispatch failed`);
   const priceResult = priceOut.result;
-  // snapshotId is the example's own field, not a framework concept — the
-  // point of the check is that the tool answered from the SAME snapshot the
-  // HTML and the feed were built from.
-  const priceSnapshotId = snapshot.snapshotId;
-  assert(priceSnapshotId === snapshotId, 'shopify', `MCP getPrice snapshotId mismatch`);
+
+  // The fidelity check has to route THROUGH the dispatcher, or it proves
+  // nothing. `getProduct` returns ctx.data, so its snapshotId is the one the
+  // tool actually read — reading `snapshot.snapshotId` here instead would
+  // compare a local to itself and pass no matter what dispatchTool did.
+  const productOut = await dispatchTool(
+    shopifyProductCartridge, 'getProduct', {}, snapshot,
+    { config: shopifyProductCartridge.defaultConfig },
+  );
+  assert(productOut.ok, 'shopify', `MCP getProduct dispatch failed`);
+  const priceSnapshotId = productOut.result.snapshotId;
+  assert(priceSnapshotId === snapshotId, 'shopify', `MCP snapshotId mismatch — tool answered from a different snapshot`);
   assert(priceResult.amount === SHOPIFY_RAW.price.amount, 'shopify', `MCP getPrice amount mismatch`);
   console.log(`[shopify] MCP getPrice ok — ${priceResult.amount} ${priceResult.currencyCode} snapshotId=${priceSnapshotId}`);
 
@@ -211,8 +218,16 @@ async function smokeWp() {
   );
   assert(excerptOut.ok, 'wp', `MCP getExcerpt dispatch failed`);
   const excerptResult = excerptOut.result;
-  const excerptSnapshotId = snapshot.snapshotId;
-  assert(excerptSnapshotId === snapshotId, 'wp', `MCP getExcerpt snapshotId mismatch`);
+
+  // Same reasoning as the shopify half: assert on what the DISPATCHER
+  // returned, not on the local snapshot object.
+  const postOut = await dispatchTool(
+    wpPostCartridge, 'getPost', {}, snapshot,
+    { config: wpPostCartridge.defaultConfig },
+  );
+  assert(postOut.ok, 'wp', `MCP getPost dispatch failed`);
+  const excerptSnapshotId = postOut.result.snapshotId;
+  assert(excerptSnapshotId === snapshotId, 'wp', `MCP snapshotId mismatch — tool answered from a different snapshot`);
   assert(excerptResult.title === WP_RAW.title, 'wp', `MCP getExcerpt title mismatch`);
   console.log(`[wp] MCP getExcerpt ok — title="${excerptResult.title.slice(0, 30)}..." snapshotId=${excerptSnapshotId}`);
 

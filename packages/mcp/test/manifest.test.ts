@@ -66,6 +66,35 @@ describe('buildToolManifest', () => {
     expect(buildToolManifest(bare)).toEqual({ tools: [] });
   });
 
+  test('an EMPTY toolNames matches nothing — it is a real allowlist', () => {
+    // `[]` is truthy, so this is not the same as omitting the option. A caller
+    // whose filter produced nothing means nothing; widening to "everything"
+    // would advertise tools they meant to withhold.
+    expect(buildToolManifest(cartridgeWith(tool({ name: 'a' })), { toolNames: [] })).toEqual({
+      tools: [],
+    });
+    expect(buildToolManifest(cartridgeWith(tool({ name: 'a' }))).tools).toHaveLength(1);
+  });
+
+  test('an unknown name in toolNames is simply not matched', () => {
+    const manifest = buildToolManifest(cartridgeWith(tool({ name: 'a' })), {
+      toolNames: ['a', 'does-not-exist'],
+    });
+    expect(manifest.tools.map((t) => t.name)).toEqual(['a']);
+  });
+
+  test('toolNames and snapshot compose — both filters apply', () => {
+    const starved = tool({
+      name: 'needs_gtin',
+      requires: [{ path: 'product.gtin', required: 'always' }],
+    });
+    const manifest = buildToolManifest(cartridgeWith(tool({ name: 'free' }), starved), {
+      toolNames: ['free', 'needs_gtin'],
+      snapshot: {},
+    });
+    expect(manifest.tools.map((t) => t.name)).toEqual(['free']);
+  });
+
   test('toolNames restricts the set, still in declaration order', () => {
     const manifest = buildToolManifest(
       cartridgeWith(tool({ name: 'a' }), tool({ name: 'b' }), tool({ name: 'c' })),

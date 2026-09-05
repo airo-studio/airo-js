@@ -18,7 +18,7 @@ The cartridge contract for the airo framework. Defines the API surface every car
 ## Three contract guarantees
 
 1. **Snapshot fidelity.** Views, MCP tools, and publication adapters all consume the SAME post-Transformer snapshot. No drift between what the rendered widget shows, what an agent answers, and what a downstream indexer consumes.
-2. **Coverage gating.** Adapters declare `requires` (schema field paths). The framework can skip an adapter when required fields are absent rather than emit broken output. Host apps surface "this adapter needs field X" to the user via this metadata.
+2. **Coverage gating.** Adapters and MCP tools declare `requires` (schema field paths). `runPublicationAdapters` and `dispatchTool` both skip a declaration whose `required: 'always'` paths hold no value in the snapshot, rather than emit broken output — sharing one predicate, `missingRequiredPaths`, exported from this package so the two surfaces cannot disagree about which snapshots are answerable. `'preferred'` and `'optional'` do not gate; host apps surface "this adapter needs field X" to the user via that metadata.
 3. **Validation as a hard gate.** `validate(output)` runs before the host app publishes. If `valid: false`, the host app refuses to serve the output. Output trust > publish velocity.
 
 ## Authoring conventions

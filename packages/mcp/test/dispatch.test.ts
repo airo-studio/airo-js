@@ -235,6 +235,36 @@ describe('dispatchTool', () => {
       expect(t.handler).not.toHaveBeenCalled();
     });
 
+    test('a THROWING validator becomes a result, not an exception', async () => {
+      // The common validator wraps a JSON Schema library, and ajv throws on a
+      // malformed schema rather than returning false. If that escaped, one bad
+      // inputSchema would become the unhandled rejection this package exists
+      // to remove from a host's request handler.
+      const boom = new Error('schema is not valid JSON Schema');
+      const t = tool();
+      const out = await dispatchTool(cartridgeWith(t), 'get_product', {}, snapshot, {
+        config,
+        validateInput: () => {
+          throw boom;
+        },
+      });
+
+      expect(out.ok).toBe(false);
+      expect(out.ok === false && out.error.code).toBe('invalid-input');
+      expect(out.ok === false && out.error.cause).toBe(boom);
+      expect(out.ok === false && out.error.message).toContain('malformed inputSchema');
+      expect(t.handler).not.toHaveBeenCalled();
+    });
+
+    test('a validator rejecting without an errors array reports []', async () => {
+      const out = await dispatchTool(cartridgeWith(tool()), 'get_product', {}, snapshot, {
+        config,
+        validateInput: () => ({ valid: false }),
+      });
+
+      expect(out.ok === false && out.error.validationErrors).toEqual([]);
+    });
+
     test("hands the validator the tool's own inputSchema", async () => {
       const inputSchema = { type: 'object', properties: { id: { type: 'string' } } };
       const validateInput = vi.fn(() => ({ valid: true }));
@@ -260,7 +290,11 @@ describe('dispatchTool', () => {
       const out = await dispatchTool(cartridgeWith(t), 'get_product', {}, snapshot, { config });
 
       expect(out.ok === false && out.error.code).toBe('handler-threw');
-      expect(out.ok === false && out.error.message).toContain('upstream 503');
+      // The thrown text must NOT reach `message` — every host wiring in our
+      // own docs forwards that field to the caller, and handlers close over
+      // server credentials. It goes on `cause`, which a host opts into.
+      expect(out.ok === false && out.error.message).not.toContain('upstream 503');
+      expect(out.ok === false && (out.error.cause as Error).message).toBe('upstream 503');
     });
 
     test('preserves the thrown value for the host to log', async () => {
@@ -283,7 +317,9 @@ describe('dispatchTool', () => {
       });
       const out = await dispatchTool(cartridgeWith(t), 'get_product', {}, snapshot, { config });
 
-      expect(out.ok === false && out.error.message).toContain('a string');
+      expect(out.ok === false && out.error.code).toBe('handler-threw');
+      expect(out.ok === false && out.error.cause).toBe('a string');
+      expect(out.ok === false && out.error.message).not.toContain('a string');
     });
   });
 });

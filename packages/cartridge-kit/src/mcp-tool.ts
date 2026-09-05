@@ -52,7 +52,7 @@ export interface McpToolDefinition<TData, TConfig = unknown> {
    * broadly rather than depending on named leaves. Omitting it means "runs
    * against any snapshot", which is also what `[]` means.
    */
-  requires?: SchemaFieldRef[];
+  requires?: readonly SchemaFieldRef[];
 
   handler(input: unknown, ctx: ToolContext<TData, TConfig>): Promise<unknown>;
 }

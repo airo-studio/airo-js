@@ -207,6 +207,33 @@ describe('runPublicationAdapters — coverage gating', () => {
     expect(r!.included).toBe(false);
   });
 
+  test('an EMPTY adapterIds matches nothing — it is a real allowlist', async () => {
+    // `[]` is truthy, so this differs from omitting the option. Documented
+    // deliberately: a caller whose filter produced nothing means "publish
+    // nothing", and widening that to "publish everything" could push adapters
+    // the host meant to exclude to a downstream indexer.
+    const a = adapter({ id: 'x', requires: [] });
+    expect(await runPublicationAdapters(cartridgeWith(a), {}, ctx, { adapterIds: [] })).toEqual([]);
+    expect(await runPublicationAdapters(cartridgeWith(a), {}, ctx)).toHaveLength(1);
+  });
+
+  test('gating runs AFTER the format filter too', async () => {
+    const wanted = adapter({ id: 'json', format: 'json', requires: [] });
+    const starved = adapter({
+      id: 'xml',
+      format: 'xml',
+      requires: [{ path: 'nope', required: 'always' }],
+    });
+
+    const results = await runPublicationAdapters(cartridgeWith(wanted, starved), {}, ctx, {
+      formats: ['json'],
+    });
+
+    // The starved adapter was filtered out by format, so it is not reported as
+    // a skip — never selected is a different thing from selected-but-starved.
+    expect(results.map((r) => r.adapterId)).toEqual(['json']);
+  });
+
   test('gating runs AFTER the id/format/delivery filters', async () => {
     // An adapter filtered out by id should not appear as a skip — it was
     // never selected, which is a different thing from "selected but starved".
