@@ -1,7 +1,7 @@
 /**
  * @airo-js/ssr — runtime-agnostic edge SSR dispatch.
  *
- * Three helpers:
+ * Helpers:
  *
  *   - `renderAppToHTML(config, deps)` — pure App → HTML. No cartridge
  *     awareness. Use when you want the widget markup and nothing else.
@@ -15,6 +15,16 @@
  *     entry page AND inlines the cartridge's `inline-in-host` JSON-LD
  *     outputs as `<script type="application/ld+json">` tags. The SEO
  *     value-prop landing path.
+ *
+ *   - `renderDocument(opts)` — assemble a complete `<!doctype html>`
+ *     document around a fragment. Composes with the above rather than
+ *     wrapping it, so a document with no cartridge (a landing page, a
+ *     404) is served by the same helper. Pure and synchronous — no
+ *     `Document` required.
+ *
+ *   - `headFromPublication(results)` — fold `head-meta` adapter output
+ *     (canonical / OpenGraph / Twitter Card) into a `DocumentHead` patch.
+ *     Keys on output SHAPE, never on adapter id.
  *
  * Schema-specific feed adapters (mapping a particular data source's shape
  * onto a cartridge schema) belong in cartridges or host-app code, not here.
@@ -38,9 +48,23 @@ export type {
 } from './render-with-publication.js';
 export { renderAppWithPublication } from './render-with-publication.js';
 
+export type {
+  DocumentHead,
+  LinkTag,
+  MetaTag,
+  RenderDocumentOptions,
+  ScriptTag,
+} from './render-document.js';
+export { renderDocument } from './render-document.js';
+
+export type { HeadFromPublicationOptions } from './head-from-publication.js';
+export { headFromPublication } from './head-from-publication.js';
+
+export { buildJsonLdScript } from './build-json-ld-script.js';
+
 export type { FilterServerSafeCartridgeOptions } from './filter-server-safe-cartridge.js';
 export { filterServerSafeCartridge } from './filter-server-safe-cartridge.js';
 
 export const PACKAGE_NAME = '@airo-js/ssr';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.8.8';
+export const VERSION = '0.9.0';

@@ -17,6 +17,7 @@ import type {
   UpdateResult,
 } from './page.js';
 import type { RouterOption } from './router.js';
+import type { PostRenderHook } from './page-manager.js';
 import { PageManager } from './page-manager.js';
 
 /**
@@ -90,6 +91,17 @@ export interface AppDeps<
    * renderers fall through their `?.()` guard.
    */
   hostUpdate?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
+  /**
+   * Side-effect hook run after every successful render, returning an
+   * optional teardown that fires before the next render and on destroy.
+   * Forwarded verbatim to `PageManagerOptions.postRender` — see there for
+   * the per-render-not-per-mount argument.
+   *
+   * `mountCartridge` wires this to the cartridge's `postProcessors` via
+   * `RuntimePipeline.runPostProcessors`. Raw `createApp` callers can leave
+   * it undefined.
+   */
+  postRender?: PostRenderHook;
 }
 
 /**
@@ -161,6 +173,7 @@ export function createApp<
     enableRouter: deps.enableRouter,
     initialNavState: deps.initialNavState,
     hostUpdate: deps.hostUpdate,
+    postRender: deps.postRender,
   });
 
   // PageManager owns initial entry resolution from this point — reads

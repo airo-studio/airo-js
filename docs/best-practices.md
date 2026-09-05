@@ -76,7 +76,15 @@ const retailerFilter: Transformer<MyData, MyConfig> = {
 
 **Side-effect hooks only.** Analytics emit, ARIA live regions, scroll restoration, focus management. **Not** data shaping (use `Transformer`) and **not** content gating (use `Gate`).
 
-**Return optional teardown.** The pipeline's `runPostProcessors` collects teardowns into a stack; LIFO unwind on page unmount.
+**Browser-only, by contract.** Post-processors run against a DOM, after render. `@airo-js/ssr` never builds a pipeline and never will — this is a contract statement, not a "not implemented yet", so you can rely on it. `renderAppWithPublication` warns when a cartridge it renders declares post-processors. Anything load-bearing for a crawler, a feed or an agent belongs in a `Transformer` (pre-render, snapshot-shaped, seen by every surface).
+
+**Runs after EVERY render, not once per mount** (0.9.0). Fresh mount, navigation swap, hydrate, and `update()` remount all invoke the chain. Per-mount would be unwritable for the hooks this primitive exists for: a swap destroys the subtree your hook decorated, so a mount-scoped hook silently stops applying the moment anyone navigates.
+
+Two consequences for authors: `apply` must be **re-entrant** — it will run again on the next render — and your teardown will fire often, so keep both cheap.
+
+**Return optional teardown.** The pipeline's `runPostProcessors` collects teardowns into a stack and unwinds LIFO, so destruction mirrors construction. The framework fires that unwind **before the next `apply`, and before the renderer whose DOM you decorated is destroyed** — so a hook that owns nodes can still see them while cleaning up. It also fires on app destroy. A throwing `apply` or teardown is logged and swallowed: one bad hook must not take down its siblings or the render around them.
+
+> **Before 0.9.0 this chain never ran.** `mountCartridge` built the pipeline with your `postProcessors` and then only called `runTransformers`; a declared post-processor typechecked, mounted clean, and did nothing, with no throw and no warning. If you shipped one against 0.8.x, it is executing for the first time on 0.9.0 — check that `apply` is re-entrant and that its teardown is correct before upgrading.
 
 ```ts
 // ✅
@@ -344,6 +352,49 @@ const result = await mountCartridge({
 
 **`onShellReady` runs before the render phase — guaranteed.** The mount sequence is shell → `onShellReady` → data → pipeline → mount, and `onShellReady` is synchronous. A `shell.events` subscription made inside it observes every emission from the render/hydrate phase, including events components fire during their initial render (auto-fire on mount, hydrate-phase misses). This is documented contract, not observed behavior — build event bridges (analytics, debug observers) on it freely. Equivalent alternative: pre-build the bus and pass it via `options.events` as shown above.
 
+### 2.5c Sharing ONE framework instance with lazily-loaded chunks
+
+A chunked-client runtime (§2.5b) has a second boundary problem beyond page renderers. The mailbox gets your cartridge *pages* across; the framework primitives those pages call — `escapeHtml`, `parseHtmlFragment`, `routerHrefFor`, `resolveStyleRoot` — have no equivalent seam. Each chunk must reach the SAME instance the core mounted, not re-bundle its own copy, or you pay for the framework once per chunk and risk two copies of module-level state.
+
+The obvious answer is to publish the namespace on a global:
+
+```ts
+// ❌ — defeats tree-shaking BY CONSTRUCTION
+import * as airoCore from '@airo-js/core';
+import * as airoCartridgeKit from '@airo-js/cartridge-kit';
+window.__AIRO_CORE__ = airoCore;
+window.__AIRO_CARTRIDGE_KIT__ = airoCartridgeKit;
+```
+
+A namespace import pins **every** export, so `sideEffects: false` cannot help — the bundler is being told, correctly, that the whole module object is reachable. The structural consequence is that your core bundle grows with every framework release whether or not you use the new exports. This is measured, not theoretical: one consumer's shopper-facing core IIFE grew **+1.6 KB gzip on a single minor** this way, with every per-view chunk byte-identical, and a factory they will never call inlined in full next to three helpers they also do not use.
+
+**Publish a curated object built from named imports instead:**
+
+```ts
+// ✅ — the bundler still sees the boundary
+import { escapeHtml, escapeAttr, parseHtmlFragment, resolveStyleRoot, routerHrefFor } from '@airo-js/core';
+
+/** The exact surface per-view chunks may use. Chunks import this TYPE. */
+export interface AiroShared {
+  escapeHtml: typeof escapeHtml;
+  escapeAttr: typeof escapeAttr;
+  parseHtmlFragment: typeof parseHtmlFragment;
+  resolveStyleRoot: typeof resolveStyleRoot;
+  routerHrefFor: typeof routerHrefFor;
+}
+
+const shared: AiroShared = { escapeHtml, escapeAttr, parseHtmlFragment, resolveStyleRoot, routerHrefFor };
+(window as unknown as { __AIRO_SHARED__: AiroShared }).__AIRO_SHARED__ = shared;
+```
+
+Two properties fall out. The framework can add exports forever without touching your bundle — you carry what you named and nothing else. And because chunks consume `AiroShared` as a **type**, a chunk that reaches for a primitive nobody added fails your typecheck instead of failing at a shopper's browser.
+
+That type is the whole trick, and it is what makes the maintenance cost bearable. The allowlist is hand-maintained either way; typing it moves the failure from runtime to build time, which is the only version of hand-maintenance that is safe.
+
+**Why not subpath exports** (`@airo-js/core/nav`)? They would shrink the unit, not change the mechanism — `import * as nav` still pins every export of that subpath, so your bundle still grows whenever that subpath does. Finer-grained coarseness is still coarseness. If you are already curating, curate precisely.
+
+**Two related costs worth knowing, both structural rather than bugs.** Anything on the `Cartridge` declaration ships wherever the declaration ships: `postProcessors` is browser-only and post-render (§1.4), yet declaring it puts it in the core bundle even on SSR and publication paths that can never run it. And `transformers` legitimately earn core residency, because they run before the SSR, edge and publication snapshots and every surface reads that one post-transformer snapshot. When a hook is genuinely per-view — an ARIA announcer for a filter bar, say — the per-view chunk is the honest home for it even though the framework offers a declaration slot.
+
 ### 2.6 Subfolder-per-page beats flat `views/`
 
 **The trap:** flat `views/CategoriesRenderer.ts`, `views/ProductsRenderer.ts`, etc. Works for skeletons; breaks once renderers gain sub-views, page-specific styles, scoped components.
@@ -610,7 +661,7 @@ import { runPublicationAdapters } from '@airo-js/ssr';
 app.get('/api/widget-data', async (req, res) => {
   const raw      = await cartridge.dataSource.fetch(cfg, { signal });        // upstream fetch
   const pipeline = createPipeline(cartridge.transformers, cartridge.postProcessors);
-  const snapshot = await pipeline.run(raw, ctx);                             // TData → TData
+  const snapshot = await pipeline.runTransformers(raw, ctx);                 // TData → TData
   const adapters = await runPublicationAdapters(cartridge, snapshot, ctx);   // optional: feeds / MCP tools
   res.json({ snapshot, adapters });                                         // single structured payload
 });
@@ -1062,7 +1113,7 @@ Three URL surfaces; three router modes; one shared encoding. Pick based on wheth
 | Owned domain (a dedicated landing page — `shop.example.com/campaign/:id/...`) | **Path** | Widget owns the URL; path is cleaner, more SEO-friendly, more shareable; server reads route directly |
 | Customer-edge SSR (worker on customer's CDN — Lambda@Edge / CF Workers / Shopify Oxygen) | **Query** | Customer owns the path; HTTP spec strips the fragment client-side before the request; only `?paramName=` reaches the worker |
 
-All three share the same encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`). The fragment that lives inside `#...` for HashRouter is exactly the fragment that lives inside `/basePath/...` for PathRouter or `?paramName=...` for QueryRouter — round-trip-compatible across modes.
+Hash and path modes share one encoding (`stateToFragment` / `fragmentToState` from `@airo-js/core`): the fragment inside `#...` is exactly the fragment inside `/basePath/...`. **Query mode deliberately does not** — it uses discrete prefix-namespaced params so each filter dimension stays independently visible to crawlers and agents. No encoding is round-trip-compatible across those two families; pick one mode per app for its lifetime (see the caveats below).
 
 **`RouterOption` discriminated union:**
 
@@ -1259,6 +1310,96 @@ Pure function — no DOM, no globals, no router instance threading required.
 - **Trailing-slash normalisation.** `/campaign/xyz`, `/campaign/xyz/`, `/campaign/xyz/products/abc` — all three behave identically. First two return null (no tail); third returns `'products/abc'`.
 - **Hash + path coexistence.** In path mode, a trailing `#anchor` on the URL is treated as a normal page anchor — **not** as a route override. The path is the sole source of truth. If you need both routing AND in-page anchors, use path for route + hash for scroll target.
 - **Wildcard route conflicts.** Your server's `/campaign/:widgetId/*` route catches everything under the prefix, including static assets. Order it after asset handlers, or pattern-restrict (`/campaign/:widgetId/(products|categories|...)/*`).
+- **Root mount (`basePath: '/'`).** The basePath normalises to `''`, so the app claims the ENTIRE origin — `pathname.startsWith('')` is true for every path, and the only thing keeping `/favicon.ico` from decoding as a page is the `validPages` allowlist. Route static assets before the wildcard, always. Set `entryPageId` so the entry page has one url instead of two (see below).
+
+### 5.10a Answering 404 — the entry-page fallback
+
+`decodeNavHint` returns `null` for a tail naming no known page, and the SSR runner then falls back to the default entry page rather than erroring. Taken literally that serves your home page at `/does-not-exist` with a `200` and a canonical of `/` — a soft 404, which search engines penalise, and which nothing errors or warns about. **Two independent consumers shipped it without noticing.**
+
+**The right answer is not the same on every surface, and it is not the same for every consumer either — it is per SURFACE.** One codebase routinely serves several:
+
+| Surface | Router | Unknown tail should |
+|---|---|---|
+| Your own domain, crawlable (`/`, `/campaign/:id/*`) | `path` | **404** |
+| Preview / emulation, never indexed | `query` | fall back |
+| Widget embedded on a customer's page | `query` or `hash` | **fall back — mandatory** |
+| Editor / srcdoc preview | off | n/a |
+
+Row three is why the framework cannot decide this and why the fallback will never be reversed. **On a customer's page the URL is not yours.** The path belongs to their router, the tail may be theirs and have nothing to do with your widget, and a widget that errored or refused to render because it did not recognise a path segment would be a vendor breaking a customer's page. There, falling back is a requirement, not a convenience.
+
+### Decode WITHOUT an allowlist on a surface that owns its urls
+
+**This is the step that makes everything below work, and getting it wrong silently undoes the whole section.** Two consumers wired it the other way; one of them shipped the soft 404 a second time *after* the fix landed, because the wiring looked right and the page rendered.
+
+`decodeNavHint(tail, validPages)` fails closed: an unknown page id returns `null`, and a `null` hint is indistinguishable from "no page was requested". The runner is then told nothing was asked for, so it has nothing to report — `fellBack` never fires and the unknown url answers `200`.
+
+Worse, an allowlist derived the usual way (`p.enabled && !p.parent`) filters out three of the four rejection reasons before the runner can see them:
+
+| reason | reaches the runner via `decodeNavHint(tail, validPages)`? |
+|---|---|
+| `unknown-page` | **no** — the allowlist rejects it. This is the one the feature exists for. |
+| `disabled` | **no** — filtered by `p.enabled` |
+| `subpage` | **no** — filtered by `!p.parent` |
+| `gate-page` | yes — enabled and not a subpage, so it passes the allowlist and the runner rejects it |
+
+So on a path surface you own, decode with `fragmentToState` and let the runner be the gate:
+
+```ts
+import { extractPathTail, fragmentToState } from '@airo-js/core';
+
+function navStateFor(pathname: string) {
+  const tail = extractPathTail(pathname, BASE_PATH);
+  if (!tail) return undefined;              // bare basePath — the legitimate entry
+  return fragmentToState(tail, { pathContextKey: PATH_CONTEXT_KEY }) ?? undefined;
+}
+```
+
+**This is not a hole in the tamper gate**, and the reason matters. The runner already validates the entry page — exists, enabled, not a subpage, not a gate — and then re-derives `navState.page` from the page it actually resolved, so an id it rejects can never reach a renderer. The allowlist was belt-and-braces over a check that happens anyway: valuable when the host cannot act on the difference, harmful when it can. Views still own their own params — a page that takes a slug looks it up and renders its own not-found rather than trusting it.
+
+**Keep `decodeNavHint(hint, validPages)` for the embed and query surfaces**, where the url belongs to the customer's page. There, falling back silently is mandatory rather than a convenience, so failing closed in the decoder is exactly right and there is nothing for a host to act on.
+
+The runner also narrates this: an `unknown-page` fallback logs a `warn` (the others log at `debug`, being legitimate states). It fires only when a host actually requested a page, so a correctly-gated embed surface stays silent.
+
+So the framework reports the decision it already made and stops. On `RenderToHTMLResult` and `RenderWithPublicationResult`:
+
+```ts
+fellBack?: { requested: string; reason: 'unknown-page' | 'disabled' | 'subpage' | 'gate-page' }
+```
+
+Present only when a page was requested AND rejected — absent for a bare `basePath` (the legitimate entry case) and for a page that resolved. The host is the only party that knows which surface it is on; the runner is the only party that knows the decode failed.
+
+**Branch on `reason`, never on the presence of `fellBack`.** Only `'unknown-page'` is a 404. A `'disabled'` page is a publisher config state and a `'gate-page'` is a real page in the template — both are legitimate `200`s that happen to have resolved elsewhere. Collapsing the reason to a boolean gets this wrong:
+
+```ts
+const result = await renderAppWithPublication({ cartridge, appConfig, snapshot, publicationCtx, document, initialNavState });
+
+// ❌ — 404s a disabled page and an age gate
+if (result.fellBack) return new Response(html, { status: 404 });
+
+// ✅ — only an id that names nothing is missing
+if (result.fellBack?.reason === 'unknown-page' && surfaceOwnsItsUrls) {
+  const notFound = await renderAppWithPublication({ ...same, initialNavState: { page: 'notFound' } });
+  return new Response(
+    renderDocument({ head: { lang, title: 'Not found' }, body: notFound.html }),
+    { status: 404 },
+  );
+}
+```
+
+Read `fellBack` rather than re-deriving the decision from the URL. Re-derivation means keeping a second copy of the framework's decode rules in sync with the framework's — and consumers who tried it reached for different primitives (`extractPathTail` vs a hand-rolled tail composer that also strips host-only query params), so there is no one two-step to bless.
+
+**There is no framework-dispatched `notFound` page, and that is deliberate.** A template MAY declare one and a host may dispatch to it by re-rendering with `initialNavState: { page: 'notFound' }`, as above — but the runner will never route there on its own. Picking an arbitrary page id is a policy decision, and on a customer's page a 404 belongs to the customer: a widget rendering its own not-found page inside someone else's article is worse than the soft 404 it replaced. Assembling the 404 with `renderDocument` directly is equally valid and simpler; it needs no cartridge and no snapshot, which is exactly why `renderDocument` composes rather than wraps.
+
+**Do not answer `503` for a missing canonical.** One symptom, at least three causes, and only the host can tell them apart:
+
+| Cause | Correct status |
+|---|---|
+| The page does not exist | `404` |
+| The page is real but an adapter broke | `503` |
+| The page is real and the adapter is fine, but the upstream data fetch failed | `503` + `Retry-After` |
+
+Telling a crawler to come back for something that is never coming is a subtle, durable SEO bug, and so is dropping a page that is merely having a bad minute. The framework cannot disambiguate: at its altitude the three are identical. Only the host has the route list and the upstream health.
+
 
 **Don't ship a parallel runtime allowlist for routable pages.** Same anti-pattern as Section 3.12 — derive valid page ids from the cartridge:
 
@@ -1273,7 +1414,8 @@ const validPages = appConfig.pages
 const navState = decodeNavHint(req.query.nav, validPages);
 ```
 
-**Why drop Query mode** (the path-not-taken). An earlier framework rev considered `mode: 'query'` (`?nav=products/abc`) as a third option. Hash + Path covers every named use case (embed vs owned domain); Query mode was the awkward middle — SSR-readable like Path but with messier URLs. No concrete consumer needed it. Drop. If a future case surfaces, the `RouterOption` union is openly extensible — `mode: 'query'` is a single variant add, not a third consumer-side implementation.
+**This is the EMBED / query shape.** On a surface that owns its urls, do not gate in the decoder at all — the allowlist makes an unknown page indistinguishable from no page, which reinstates the soft 404. See §5.10a.
+
 
 ### 5.11 Three audiences — humans, search engines, AI agents (AIO vs LLMO/SEO)
 

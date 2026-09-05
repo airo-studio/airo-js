@@ -20,8 +20,9 @@
 
 import {
   EventBus,
-  resolveEntryPage,
+  describeEntryResolution,
   type AppConfig,
+  type EntryFallbackReason,
   type NavigationState,
   type PageRendererFactory,
   type RenderContext,
@@ -78,6 +79,25 @@ export interface RenderToHTMLDeps<
 export interface RenderToHTMLResult {
   /** The serialised HTML of the rendered entry page. */
   html: string;
+  /**
+   * Set when `initialNavState.page` named a page the runner REJECTED and
+   * substituted the default entry for. Absent when no page was requested,
+   * and when the requested page rendered.
+   *
+   * The fallback itself is deliberate and will never be reversed — on a
+   * customer's page the URL belongs to the customer's router, so a widget
+   * that refused to render an unrecognised tail would break their page.
+   * This field exists so a surface that DOES own its urls can answer 404
+   * rather than serving its home page at `/does-not-exist` with a 200 (a
+   * soft 404, which search engines penalise).
+   *
+   * Branch on `reason`, not on the presence of this field: only
+   * `'unknown-page'` is a 404. `'disabled'` is a config state and
+   * `'gate-page'` is a real page in the template — both legitimate 200s.
+   *
+   * The framework reports what it did; the status code is entirely yours.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
 }
 
 /**
@@ -110,13 +130,44 @@ export function renderAppToHTML<
   // `initialNavState.page`. Invalid / unknown / disabled / gate /
   // subpage ids fall back to the default entry — keeps SSR safe against
   // tampered or stale deeplinks.
-  const entry = resolveEntryPage(
+  const resolution = describeEntryResolution(
     config.pages,
     isGate,
     deps.initialNavState?.page,
   );
+  const entry = resolution.page;
+  const fellBack = resolution.fellBack ? { fellBack: resolution.fellBack } : {};
+
+  // Narrate the fallback. This fires ONLY when a host explicitly requested
+  // a page and the runner rejected it — a host that gates upstream (the
+  // embed case, where `decodeNavHint`'s allowlist is the gate) requests
+  // nothing and gets no narration, so this cannot become spam on a
+  // customer's page.
+  //
+  // `unknown-page` warns because the requested id names nothing in the
+  // graph: on a surface that owns its urls that is a soft 404 waiting to
+  // ship, and it is invisible otherwise — the page renders, the status is
+  // 200, and nothing is obviously wrong. Two consumers shipped it, one of
+  // them twice. The other three reasons are legitimate states (a config
+  // switch, a subpage, a gate) and only narrate at debug.
+  if (resolution.fellBack) {
+    const { requested, reason } = resolution.fellBack;
+    const detail = { requested, reason, resolved: entry?.id, phase: 'entry-resolution' };
+    if (reason === 'unknown-page') {
+      log.warn(
+        `entry page "${requested}" is not in the page graph; rendered "${entry?.id ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. See best-practices §5.10a.`,
+        detail,
+      );
+    } else {
+      log.debug(
+        `entry page "${requested}" rejected (${reason}); rendered "${entry?.id ?? '<none>'}" instead.`,
+        detail,
+      );
+    }
+  }
+
   if (!entry) {
-    return { html: '' };
+    return { html: '', ...fellBack };
   }
 
   const factory = deps.resolveRenderer(entry.type);
@@ -155,5 +206,5 @@ export function renderAppToHTML<
     renderer.render(container, ctx);
   }
 
-  return { html: container.innerHTML };
+  return { html: container.innerHTML, ...fellBack };
 }

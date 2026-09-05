@@ -31,7 +31,7 @@
  */
 
 import { parseHTML } from 'linkedom';
-import { renderAppWithPublication, runPublicationAdapters } from '@airo-js/ssr';
+import { renderAppWithPublication, renderDocument, runPublicationAdapters } from '@airo-js/ssr';
 import type { PublicationContext } from '@airo-js/cartridge-kit';
 
 import { shopifyProductCartridge } from './shopify/cartridge.js';
@@ -231,6 +231,16 @@ function buildWpPublicationCtx(config: WpConfig): PublicationContext<WpConfig> {
 
 // ─── Shared HTML doc shell ─────────────────────────────────────────────────
 
+/**
+ * Document shell. Since 0.9.0 this is `renderDocument` from `@airo-js/ssr`
+ * rather than a hand-written template literal — the framework owns doctype
+ * ordering, charset placement, the OpenGraph `property=` vs Twitter `name=`
+ * distinction, and escaping, and this example stopped keeping its own copy.
+ *
+ * Note what stays here: `DEMO_CSS` and the viewport string. Both are this
+ * example's choices, passed in as caller values. The framework authors no
+ * CSS and has no opinion about viewport policy.
+ */
 function htmlDoc(
   title: string,
   locale: string,
@@ -239,24 +249,18 @@ function htmlDoc(
   widgetHtml: string,
   blockedNote: string,
 ): string {
-  const metaTags = Object.entries(meta)
-    .map(([name, content]) => `  <meta name="${escapeAttr(name)}" content="${escapeAttr(content)}" />`)
-    .join('\n');
-  return `<!DOCTYPE html>
-<html lang="${escapeAttr(locale)}">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-${metaTags}
-  <link rel="canonical" href="${escapeAttr(canonical)}" />
-  <style>${DEMO_CSS}</style>
-  ${blockedNote}
-</head>
-<body>
-${widgetHtml}
-</body>
-</html>`;
+  return renderDocument({
+    head: {
+      lang: locale,
+      title,
+      viewport: 'width=device-width, initial-scale=1',
+      canonical,
+      meta: Object.entries(meta).map(([name, content]) => ({ name, content })),
+      inlineStyles: [DEMO_CSS],
+      raw: blockedNote,
+    },
+    body: widgetHtml,
+  });
 }
 
 // ─── Shopify route handlers ────────────────────────────────────────────────
@@ -494,15 +498,17 @@ async function handleWpMcpInvoke(url: URL, req: Request, env: Env): Promise<Resp
 // ─── Landing index ─────────────────────────────────────────────────────────
 
 function handleLanding(): Response {
-  const doc = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>airo-js edge demo — two cartridges, four audience surfaces</title>
-  <style>${DEMO_CSS}</style>
-</head>
-<body>
+  // The landing page has no cartridge and no snapshot — which is exactly
+  // why `renderDocument` composes with `renderAppWithPublication` rather
+  // than wrapping it. A wrapper could not serve this route at all.
+  const doc = renderDocument({
+    head: {
+      lang: 'en',
+      title: 'airo-js edge demo — two cartridges, four audience surfaces',
+      viewport: 'width=device-width, initial-scale=1',
+      inlineStyles: [DEMO_CSS],
+    },
+    body: `
   <div class="airo-landing">
     <h1>airo-js edge demo</h1>
     <p>One Cloudflare Worker, two cartridges, four surfaces per cartridge — all rendered from one snapshot per request. No cache to bust.</p>
@@ -525,9 +531,8 @@ function handleLanding(): Response {
     </ul>
 
     <p>Same render path, same snapshotId consistency, different data sources. The framework's snapshot-fidelity guarantee applied to commerce and content side-by-side.</p>
-  </div>
-</body>
-</html>`;
+  </div>`,
+  });
   return new Response(doc, { headers: { 'content-type': CONTENT_TYPE_HTML, 'cache-control': 'public, max-age=60' } });
 }
 
@@ -550,17 +555,4 @@ function badRequest(message: string): Response {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1).trimEnd() + '…';
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function escapeAttr(s: string): string {
-  return escapeHtml(s);
 }

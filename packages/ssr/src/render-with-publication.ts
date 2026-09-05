@@ -28,8 +28,9 @@
  */
 
 import {
-  resolveEntryPage,
+  describeEntryResolution,
   type AppConfig,
+  type EntryFallbackReason,
   type NavigationState,
   type PageRendererFactory,
 } from '@airo-js/core';
@@ -39,6 +40,8 @@ import type {
 } from '@airo-js/cartridge-kit';
 import { getDefaultRenderResolver } from '@airo-js/cartridge-kit';
 import { logger } from '@airo-js/log';
+
+import { buildJsonLdScript } from './build-json-ld-script.js';
 
 import {
   renderAppToHTML,
@@ -122,6 +125,16 @@ export interface RenderWithPublicationResult {
    * via mountCartridge as usual; this branch is the SEO partial-win.
    */
   skipped?: { pageType: string; reason: 'csr-only' };
+  /**
+   * Set when `initialNavState.page` named a page the runner REJECTED,
+   * substituting the default entry. Forwarded verbatim from
+   * `renderAppToHTML` — see `RenderToHTMLResult.fellBack`.
+   *
+   * A root-mounted app reads this to answer 404. Without it,
+   * `/does-not-exist` serves the home page with a 200 and a canonical of
+   * `/` — a soft 404 that nothing errors about.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
 }
 
 /**
@@ -143,10 +156,37 @@ export async function renderAppWithPublication<
 >(
   opts: RenderWithPublicationOptions<TData, TConfig, TPageType>,
 ): Promise<RenderWithPublicationResult> {
-  // Default filter: inline JSON-LD only. Host apps that want everything
-  // pass an empty filter or explicit overrides.
+  // PostProcessors are browser-only BY CONTRACT — they run after render,
+  // against a DOM, and this path builds a string. There is no pipeline
+  // here and there never will be. Warn rather than stay silent: a
+  // cartridge author who puts something load-bearing in a post-processor
+  // and then renders it server-side gets no DOM, no error and no output,
+  // which is exactly the silent class of failure the 0.9.0 wiring fixed
+  // on the client. See best-practices §1.4.
+  //
+  // Test `.length`, NOT truthiness. `postProcessors: []` is a real and
+  // deliberate shape — a consumer ships the declaration slot with an empty
+  // array on purpose — and an empty array is truthy, so `if (postProcessors)`
+  // would warn on every crawler hit to a JSON-LD or feed route. Do not
+  // "simplify" this.
+  if ((opts.cartridge.postProcessors?.length ?? 0) > 0) {
+    log.warn(
+      `cartridge "${opts.cartridge.id}" declares ${opts.cartridge.postProcessors!.length} postProcessor(s); they are browser-only and do NOT run on the SSR path. Anything load-bearing belongs in a Transformer (pre-render, snapshot-shaped) instead.`,
+      { cartridgeId: opts.cartridge.id, phase: 'publication' },
+    );
+  }
+
+  // Default filter: the two formats that belong on the render hot path —
+  // JSON-LD (inlined into the returned fragment below) and head-meta
+  // (returned in `adapterResults` for `headFromPublication` to fold into
+  // a document head). Deliberately NOT `'custom'`: llms.txt and feed
+  // adapters declare that, and running them on every page render would
+  // do expensive work whose output this function then discards.
+  //
+  // Behaviour is unchanged for cartridges shipped before 0.9.0, since
+  // nothing declared `'head-meta'` until it existed.
   const filter: RunPublicationOptions = opts.publicationFilter ?? {
-    formats: ['json-ld'],
+    formats: ['json-ld', 'head-meta'],
     deliveries: ['inline-in-host'],
   };
 
@@ -188,11 +228,16 @@ export async function renderAppWithPublication<
   // the same page for any given `initialNavState.page`. Invalid /
   // unknown / disabled / gate / subpage ids fall back to the default
   // entry — keeps the SSR path safe against tampered or stale deeplinks.
-  const entryPage = resolveEntryPage(
+  const entryResolution = describeEntryResolution(
     opts.appConfig.pages,
     isGate,
     opts.initialNavState?.page,
   );
+  const entryPage = entryResolution.page;
+  // Threaded onto every return path below, including the csr-only skip —
+  // a host answering 404 must not have that decision depend on whether
+  // the fallback page happened to be server-renderable.
+  const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
   if (entryPage) {
     const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
     if (entryView?.capabilities?.includes('csr-only')) {
@@ -204,6 +249,7 @@ export async function renderAppWithPublication<
         html: inlineScripts,
         adapterResults,
         skipped: { pageType: entryPage.type, reason: 'csr-only' },
+        ...fellBack,
       };
     }
   }
@@ -240,19 +286,5 @@ export async function renderAppWithPublication<
   const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
-  return { html, adapterResults };
-}
-
-/**
- * Serialise a JSON-LD payload into a `<script type="application/ld+json">`
- * tag. Escapes the closing-script sequence so an attacker controlling
- * a snapshot field can't break out of the script context.
- *
- * Note: `<` is the JSON-safe encoding for `<`. JSON-LD payloads are
- * data only (no executable JS), so the only XSS surface is the literal
- * `</script>` substring in a string field. Replacing the `<` defeats it.
- */
-function buildJsonLdScript(payload: unknown): string {
-  const safe = JSON.stringify(payload).replace(/</g, '\\u003c');
-  return `<script type="application/ld+json">${safe}</script>`;
+  return { html, adapterResults, ...fellBack };
 }

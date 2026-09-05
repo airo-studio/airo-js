@@ -71,13 +71,99 @@ export function resolveEntryPage<TPageType extends string>(
   isGate: (type: TPageType) => boolean,
   preferredId?: string,
 ): Page<TPageType> | undefined {
-  const requested = preferredId
-    ? pages.find(
-        (p) => p.id === preferredId && p.enabled && !p.parent && !isGate(p.type),
-      )
-    : undefined;
-  return requested ?? findEntryPage(pages, isGate);
+  return describeEntryResolution(pages, isGate, preferredId).page;
 }
+
+/** Why a requested entry id was rejected in favour of the default entry. */
+export type EntryFallbackReason =
+  /** No page in the graph has this id. */
+  | 'unknown-page'
+  /** The page exists but `enabled` is false. */
+  | 'disabled'
+  /** The page exists but is a subpage — subpages activate through their parent. */
+  | 'subpage'
+  /** The page exists but `isGatePage` claims its type. */
+  | 'gate-page';
+
+export interface EntryResolution<TPageType extends string> {
+  page: Page<TPageType> | undefined;
+  /**
+   * Present ONLY when a preferred id was supplied and rejected. Absent
+   * when no id was requested (a bare `basePath`, the legitimate entry
+   * case) and when the requested id resolved.
+   */
+  fellBack?: { requested: string; reason: EntryFallbackReason };
+}
+
+/**
+ * `resolveEntryPage`, plus WHY it fell back.
+ *
+ * The resolver already validates a requested id against the page graph
+ * and silently substitutes the default entry — deliberately, so a
+ * tampered or stale deeplink can never crash a render. Taken literally
+ * that serves the home page at `/does-not-exist` with a 200 and a
+ * canonical of `/`: a soft 404, which search engines penalise, and which
+ * nothing errors or warns about. Two independent consumers shipped it
+ * without noticing.
+ *
+ * The right answer is PER SURFACE, not per consumer — the same codebase
+ * routinely serves several. On its own crawlable domain an unknown tail
+ * is a 404. On a customer's page, where the URL belongs to the customer's
+ * router and the tail may have nothing to do with this widget at all,
+ * falling back is mandatory: a widget that refused to render because it
+ * did not recognise a path segment would be a vendor breaking a
+ * customer's page. That is why the fallback will never be reversed, and
+ * why the framework cannot pick.
+ *
+ * So the fallback stays and the DECISION stops being thrown away. The
+ * runner is the only party that knows the decode failed; the host is the
+ * only party that knows what that means. HTTP status stays entirely
+ * host-side — this reports what it did and has no opinion about the
+ * response code.
+ *
+ * Callers should branch on `reason`, not on the presence of `fellBack`:
+ * only `'unknown-page'` is a 404. `'disabled'` is a publisher config
+ * state and `'gate-page'` is a real page in the template — both are
+ * legitimate 200s that happened to resolve elsewhere.
+ */
+export function describeEntryResolution<TPageType extends string>(
+  pages: ReadonlyArray<Page<TPageType>>,
+  isGate: (type: TPageType) => boolean,
+  preferredId?: string,
+): EntryResolution<TPageType> {
+  if (!preferredId) return { page: findEntryPage(pages, isGate) };
+
+  const match = pages.find((p) => p.id === preferredId);
+  const reason: EntryFallbackReason | undefined = !match
+    ? 'unknown-page'
+    : !match.enabled
+      ? 'disabled'
+      : match.parent
+        ? 'subpage'
+        : isGate(match.type)
+          ? 'gate-page'
+          : undefined;
+
+  if (!reason) return { page: match };
+  return {
+    page: findEntryPage(pages, isGate),
+    fellBack: { requested: preferredId, reason },
+  };
+}
+
+/**
+ * Post-render side-effect hook. Receives the three things only PageManager
+ * holds — the live container, the current nav state, and the event bus —
+ * and returns an optional teardown.
+ *
+ * Deliberately NOT generic over cartridge data: this is the mechanism half
+ * of the seam. The caller closes over whatever else it needs.
+ */
+export type PostRenderHook = (ctx: {
+  container: HTMLElement;
+  navState: NavigationState;
+  events: IEventBus;
+}) => (() => void) | void;
 
 export interface PageManagerOptions<
   TPageType extends string = string,
@@ -143,6 +229,25 @@ export interface PageManagerOptions<
    * `@airo-js/cartridge-kit`.
    */
   hostUpdate?: (delta: Record<string, unknown>) => Promise<UpdateResult>;
+  /**
+   * Side-effect hook invoked after EVERY successful render — fresh mount,
+   * navigation swap, hydrate, and appContext re-render alike. Returns an
+   * optional teardown, which PageManager fires before the next render and
+   * on `destroy()`.
+   *
+   * Pure mechanism: PageManager knows nothing about pipelines or
+   * cartridges. `@airo-js/runtime` supplies a closure that forwards to
+   * `RuntimePipeline.runPostProcessors`, adding the `config` and `data`
+   * halves of `PostProcessorContext` that only it holds.
+   *
+   * Per RENDER, not per mount, because that is the only cadence a
+   * DOM-owning hook can be written against: a swap or a re-render
+   * destroys the subtree the previous invocation decorated, so a
+   * mount-scoped hook silently stops applying the moment anyone
+   * navigates. Teardown fires BEFORE the DOM it owns is torn down, so a
+   * hook can observe its own nodes while unwinding.
+   */
+  postRender?: PostRenderHook;
 }
 
 export class PageManager<
@@ -166,6 +271,8 @@ export class PageManager<
   private router: IRouter | null = null;
   private suppressRouterPush = false;
   private destroyed = false;
+  /** Teardown returned by the most recent `postRender` invocation, if any. */
+  private postRenderTeardown: (() => void) | null = null;
 
   constructor(opts: PageManagerOptions<TPageType, TAppContext>) {
     this.opts = opts;
@@ -183,6 +290,52 @@ export class PageManager<
 
     if (opts.enableRouter) {
       this.initRouter();
+    }
+  }
+
+  /**
+   * Unwind the previous post-render effects. Idempotent — safe to call at
+   * every point a render is about to be replaced, and again from
+   * `destroy()`. Throwing teardowns are logged and swallowed: a hook that
+   * fails while unwinding must not abort the render that follows it.
+   */
+  private firePostRenderTeardown(): void {
+    const teardown = this.postRenderTeardown;
+    if (!teardown) return;
+    this.postRenderTeardown = null;
+    try {
+      teardown();
+    } catch (err) {
+      log.error('postRender teardown threw; continuing.', err, {
+        phase: 'post-render-teardown',
+      });
+    }
+  }
+
+  /**
+   * Run the post-render hook for the render that just completed. Called
+   * from every path that puts a renderer on screen.
+   *
+   * A throwing hook is logged and swallowed — post-render effects are
+   * decoration (analytics, ARIA live regions, focus, scroll). Letting one
+   * escape would unwind a render that already succeeded and leave the DOM
+   * on screen with `activeRenderer` bookkeeping half-applied.
+   */
+  private runPostRender(): void {
+    if (!this.opts.postRender) return;
+    this.firePostRenderTeardown();
+    try {
+      const teardown = this.opts.postRender({
+        container: this.opts.container,
+        navState: this.navState,
+        events: this.opts.events,
+      });
+      this.postRenderTeardown = typeof teardown === 'function' ? teardown : null;
+    } catch (err) {
+      log.error('postRender hook threw; render is unaffected.', err, {
+        phase: 'post-render',
+      });
+      this.postRenderTeardown = null;
     }
   }
 
@@ -342,6 +495,10 @@ export class PageManager<
       return;
     }
 
+    // Same ordering rule as swapRenderer: unwind before the incoming
+    // render touches the tree.
+    this.firePostRenderTeardown();
+
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
@@ -371,6 +528,7 @@ export class PageManager<
       pageType: targetPage.type,
       phase: 'hydrate',
     });
+    this.runPostRender();
     this.opts.events.emit('navigation:changed', this.navState);
   }
 
@@ -391,6 +549,7 @@ export class PageManager<
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.firePostRenderTeardown();
     if (this.activeRenderer) {
       this.activeRenderer.destroy();
       this.activeRenderer = null;
@@ -452,11 +611,21 @@ export class PageManager<
         });
       } else if (mode === 'path') {
         // TS narrows `opt` to the path variant here.
-        const pathOpt = opt as { mode: 'path'; basePath: string; pathContextKey?: string };
+        const pathOpt = opt as {
+          mode: 'path';
+          basePath: string;
+          pathContextKey?: string;
+          entryPageId?: string;
+        };
         this.router = new PathRouter(onRouterNavigate, {
           basePath: pathOpt.basePath,
           validPages,
           pathContextKey: pathOpt.pathContextKey,
+          // Opt-in, NOT defaulted to the template's entry page. Turning it
+          // on changes which url the entry page canonicalises to, which is
+          // an SEO event for anyone with `basePath/<entryPageId>` already
+          // indexed — their call to make, not a side effect of upgrading.
+          entryPageId: pathOpt.entryPageId,
         });
       } else {
         // mode === 'query' — `paramPrefix` optional, defaults inside
@@ -483,6 +652,9 @@ export class PageManager<
   }
 
   private swapRenderer(targetPage: Page<TPageType>): void {
+    // Unwind post-render effects BEFORE the subtree they decorate is
+    // destroyed, so a hook holding DOM can still see its own nodes.
+    this.firePostRenderTeardown();
     if (this.activeRenderer) {
       this.activeRenderer.destroy();
       this.activeRenderer = null;
@@ -515,6 +687,7 @@ export class PageManager<
 
     this.activeRenderer = renderer;
     this.activeRendererPageId = targetPage.id;
+    this.runPostRender();
   }
 
   /**

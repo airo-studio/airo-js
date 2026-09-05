@@ -91,6 +91,8 @@ const filterByTenant: Transformer<MyData, MyConfig> = {
 
 ### Default RuntimePipeline implementation
 
+**If you mount through `mountCartridge` you do not need this** — `@airo-js/runtime` builds the pipeline, runs the transformer chain before render, and runs the post-processor chain after every render with teardown wired into its own unmount. The snippet below is for host apps driving `createApp` directly, or implementing their own `RuntimePipeline`.
+
 Host apps that want default semantics use `createPipeline` from `@airo-js/core`:
 
 ```ts
@@ -99,11 +101,13 @@ import { createPipeline } from '@airo-js/core';
 const pipeline = createPipeline(cartridge.transformers ?? [], cartridge.postProcessors ?? []);
 
 // Run on every render:
-const snapshot = pipeline.runTransformers(rawData, { config, navState, locale });
+const snapshot = await pipeline.runTransformers(rawData, { config, navState, locale });
 
-// Mount post-processors after view renders, collect teardown:
+// Run post-processors after EVERY render, collecting the LIFO teardown.
+// Fire the previous teardown before the next render and before the DOM it
+// decorated is destroyed — a hook that owns nodes must still see them.
 const teardown = pipeline.runPostProcessors({ container, config, data: snapshot, events, navState });
-// On unmount:
+// Before the next render, and on unmount:
 teardown();
 ```
 
@@ -195,7 +199,7 @@ const pipeline = createPipeline(
   cartridge.transformers ?? [],
   cartridge.postProcessors ?? [],
 );
-const snapshot = pipeline.runTransformers(rawData, { config, navState: { page: '' } });
+const snapshot = await pipeline.runTransformers(rawData, { config, navState: { page: '' } });
 
 // 5. Mount. createCartridgeApp builds CartridgeAppContext, derives the
 //    resolveRenderer from the cartridge's views[], and delegates to

@@ -16,6 +16,7 @@ import {
   decodeNavHint,
   extractPathTail,
   fragmentToState,
+  joinPathFragment,
   stateToFragment,
   type RouteState,
 } from '@airo-js/core';
@@ -140,5 +141,100 @@ describe('extractPathTail (basePath boundary + trailing slash)', () => {
   test('handles deeply nested tails', () => {
     expect(extractPathTail('/campaign/xyz/product/abc?filter=foo', basePath))
       .toBe('product/abc?filter=foo');
+  });
+});
+
+describe('joinPathFragment', () => {
+  // The single encoder behind BOTH PathRouter.stateToUrl and
+  // routerHrefFor. It exists so those two cannot disagree about which url
+  // a RouteState has — the disagreement that shipped an entry page on two
+  // urls with a canonical pointing at the wrong one.
+
+  test('joins a fragment onto a carve-out basePath', () => {
+    expect(joinPathFragment('/campaign/xyz', 'product/abc')).toBe('/campaign/xyz/product/abc');
+  });
+
+  test('root mount emits real top-level urls', () => {
+    expect(joinPathFragment('/', 'roster')).toBe('/roster');
+    expect(joinPathFragment('', 'roster')).toBe('/roster');
+  });
+
+  test('an empty fragment yields the bare basePath', () => {
+    expect(joinPathFragment('/campaign/xyz', '')).toBe('/campaign/xyz');
+    expect(joinPathFragment('/', '')).toBe('/');
+    expect(joinPathFragment('', '')).toBe('/');
+  });
+
+  test('normalises trailing slashes on basePath', () => {
+    expect(joinPathFragment('/campaign/xyz/', 'products')).toBe('/campaign/xyz/products');
+    expect(joinPathFragment('/campaign/xyz///', 'products')).toBe('/campaign/xyz/products');
+  });
+
+  test('collapses a bare entry fragment onto basePath', () => {
+    expect(joinPathFragment('/', 'home', 'home')).toBe('/');
+    expect(joinPathFragment('/campaign/xyz', 'home', 'home')).toBe('/campaign/xyz');
+  });
+
+  test('a non-entry fragment is never collapsed', () => {
+    expect(joinPathFragment('/', 'roster', 'home')).toBe('/roster');
+  });
+
+  test('the entry page WITH extra state keeps its own url — round-trip safety', () => {
+    // '/?filter=live' would decode to a null tail and lose the filter, so
+    // only a fragment that IS exactly the page id may collapse.
+    expect(joinPathFragment('/', 'home?filter=live', 'home')).toBe('/home?filter=live');
+    expect(joinPathFragment('/', 'home/abc', 'home')).toBe('/home/abc');
+  });
+
+  test('omitting entryPageId preserves pre-0.9 behaviour', () => {
+    expect(joinPathFragment('/', 'home')).toBe('/home');
+  });
+
+  test('a fragment that merely starts with the entry id is not collapsed', () => {
+    expect(joinPathFragment('/', 'homepage', 'home')).toBe('/homepage');
+  });
+});
+
+describe('decoder choice — the gate that silences the other gate', () => {
+  // Two consumers wired a root-mounted 404 through `decodeNavHint` and got
+  // a soft 404 back, because the allowlist rejects an unknown page BEFORE
+  // the runner can report it. These pin both behaviours so the guidance in
+  // best-practices §5.10a cannot silently stop being true. A consumer
+  // asserts the same two facts in their own smoke suite.
+  const pages = [
+    { id: 'home', enabled: true },
+    { id: 'roster', enabled: true },
+    { id: 'draft', enabled: false },
+    { id: 'artist', enabled: true, parent: 'roster' },
+    { id: 'age-gate', enabled: true },
+  ];
+  // The derivation the docs show for the embed surface.
+  const validPages = pages.filter((p) => p.enabled && !p.parent).map((p) => p.id);
+
+  test('decodeNavHint FILTERS an unknown page — correct for embed, fatal for owned urls', () => {
+    expect(decodeNavHint('does-not-exist', validPages)).toBeNull();
+  });
+
+  test('fragmentToState decodes without an allowlist, so the runner can gate', () => {
+    expect(fragmentToState('does-not-exist')).toEqual({ page: 'does-not-exist' });
+  });
+
+  test('an allowlist hides three of the four rejection reasons from the runner', () => {
+    // Only `gate-page` survives: it is enabled and not a subpage, so it
+    // passes the allowlist and is rejected by the runner instead.
+    expect(decodeNavHint('does-not-exist', validPages)).toBeNull(); // unknown-page
+    expect(decodeNavHint('draft', validPages)).toBeNull(); // disabled
+    expect(decodeNavHint('artist', validPages)).toBeNull(); // subpage
+    expect(decodeNavHint('age-gate', validPages)).toEqual({ page: 'age-gate' }); // gate-page
+  });
+
+  test('fragmentToState surfaces all four to the runner', () => {
+    for (const id of ['does-not-exist', 'draft', 'artist', 'age-gate']) {
+      expect(fragmentToState(id)).toEqual({ page: id });
+    }
+  });
+
+  test('both decoders agree on a legitimately valid page', () => {
+    expect(decodeNavHint('roster', validPages)).toEqual(fragmentToState('roster'));
   });
 });

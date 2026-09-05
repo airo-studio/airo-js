@@ -107,7 +107,7 @@ export interface AiroSink {
 //   'json-pretty' (0.3.0) — render payloads as indented JSON.stringify
 //     text INLINE, not a collapsed expandable object. For scanning a
 //     stream of events, click-to-expand per line doesn't scale, and
-//     copy/paste of a payload into a diff/ticket wants text (dotter
+//     copy/paste of a payload into a diff/ticket wants text (consumer
 //     rsp_mryxzvt0 — the use case the initial YAGNI waited for).
 //   'raw' — pass-through references, exactly the pre-0.3.0 behaviour.
 // 'clean' and 'json-pretty' both fall back to the raw reference for any
@@ -262,7 +262,33 @@ const LEVEL_RANK: Record<LevelOrSilent, number> = {
   silent: 4,
 };
 
-const DEFAULT_LEVEL: LevelOrSilent = 'error';
+/**
+ * Default threshold: `'warn'`.
+ *
+ * 0.3.0 moved every scattered `console.*` call in the framework behind this
+ * dispatcher and set the default to `'error'`, intending "narration is
+ * opt-in". It overshot by one rank. `debug` and `info` ARE narration and
+ * should stay off — but `warn` is not narration, it is "your configuration
+ * is wrong and we are degrading", and setting the threshold above it
+ * silenced every such message in the framework at once. Among them:
+ * "Router init failed; URL routing disabled", "renderer does not implement
+ * hydrate()", and both warns added in 0.9.0 specifically to stop silent
+ * failures.
+ *
+ * Nothing fails when that happens, which is precisely the failure mode
+ * this package exists to remove. A consumer measured it: the 0.9.0 warns
+ * shipped and could not fire.
+ *
+ * `'warn'` also restores what the README has always claimed — that an app
+ * which never calls `setSink` sees the pre-0.3.0 `console.warn` behaviour.
+ *
+ * Deliberately NOT conditional on `NODE_ENV`. This package runs in
+ * browsers, Workers and Deno, where `process` does not exist; reading it
+ * here would trade a visibility bug for a portability bug. A host that
+ * wants production quiet calls `setLogLevel('error')`, which is one line
+ * and explicit.
+ */
+const DEFAULT_LEVEL: LevelOrSilent = 'warn';
 
 let currentLevel: LevelOrSilent = DEFAULT_LEVEL;
 const channelLevels: Map<LogChannel, LevelOrSilent> = new Map();
@@ -409,7 +435,7 @@ function normalizeError(err: unknown): ErrorInfo {
 //   ?airo-log=analytics          bare channel token → channel:debug
 //   ?airo-log=warn,app:debug     combos; later directives win on conflict
 // Two ergonomic rules keep the common reflexes from silently no-oping
-// (dotter rsp_mryxzvt0):
+// (consumer rsp_mryxzvt0):
 //   - A bare token that is NOT a level alias is a channel → debug
 //     (`analytics` == `analytics:debug`). A typo becomes a harmless
 //     junk-channel level with nothing logging to it — never an error.
@@ -518,7 +544,7 @@ export function initLogControls(): void {
       // LITERAL key at the write site — NOT `LOG_STORAGE_KEY`. Sanitized-
       // bundle consumers statically prove every `localStorage.setItem`
       // targets a literal `__airo_*` key; a const survives minification as
-      // a variable and fails that proof (dotter rsp_mryxzvt0). Reads are
+      // a variable and fails that proof (consumer rsp_mryxzvt0). Reads are
       // unrestricted, so the getItem calls above keep the const. Keep the
       // string in sync with LOG_STORAGE_KEY (one write site — low risk).
       localStorage.setItem('__airo_log', directive);
@@ -535,4 +561,4 @@ export function resetLogControls(): void {
 }
 
 export const PACKAGE_NAME = '@airo-js/log';
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.1';

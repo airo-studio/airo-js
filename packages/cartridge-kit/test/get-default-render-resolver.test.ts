@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { pushToMailbox } from '@airo-js/core';
+import { createRegistry, pushToMailbox } from '@airo-js/core';
 import type { PageRendererFactory } from '@airo-js/core';
 
 import type { Cartridge } from '../src/cartridge.js';
@@ -185,5 +185,42 @@ describe('getDefaultRenderResolver', () => {
     const cartridge = buildCartridge({ views: [], mailboxName: mailbox });
     const resolve = getDefaultRenderResolver(cartridge);
     expect(resolve('does-not-exist')).toBeUndefined();
+  });
+});
+
+describe('createRegistry — mailboxName guard', () => {
+  // Cartridge.mailboxName is a required field, so these only reach the
+  // runtime past a cast or from a JS consumer. Before the guard the name
+  // was used directly as a property key: `undefined` stringified and the
+  // write landed on `globalThis['undefined']`, surfacing as "Cannot assign
+  // to read only property 'undefined'" three frames deep — or silently
+  // polluting a global where that assignment is permitted.
+  test('rejects a missing mailboxName by name', () => {
+    expect(() => createRegistry(undefined as unknown as string)).toThrow(
+      /mailboxName must be a non-empty string, received undefined/,
+    );
+  });
+
+  test('rejects an empty mailboxName', () => {
+    expect(() => createRegistry('')).toThrow(/must be a non-empty string, received ''/);
+  });
+
+  test('points at the field and its naming convention', () => {
+    expect(() => createRegistry(undefined as unknown as string)).toThrow(
+      /Cartridge\.mailboxName/,
+    );
+  });
+
+  test('a cartridge built past the type system fails at the registry, not on globalThis', () => {
+    const bad = { ...buildCartridge(), mailboxName: undefined } as unknown as Parameters<
+      typeof getDefaultRenderResolver
+    >[0];
+    expect(() => getDefaultRenderResolver(bad)).toThrow(/mailboxName/);
+    expect((globalThis as Record<string, unknown>)['undefined']).toBeUndefined();
+  });
+
+  test('a valid name still works', () => {
+    expect(() => createRegistry('__AIRO_GUARD_OK_PAGES__')).not.toThrow();
+    delete (globalThis as Record<string, unknown>)['__AIRO_GUARD_OK_PAGES__'];
   });
 });

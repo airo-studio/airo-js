@@ -45,8 +45,21 @@ export interface ViewDefinition<TData, TConfig> {
   /**
    * Optional raw CSS string the view declares for its own markup. The
    * cartridge author scopes selectors to their own BEM classes (no
-   * leaking into the host); SSR / publish pipelines inline this into the
-   * served HTML so cartridges render styled without external assets.
+   * leaking into the host).
+   *
+   * **The framework never injects it.** Declaring `stylesheet` styles
+   * nothing on its own — it is metadata the HOST collects and inlines.
+   * The framework is headless: it owns the shadow-boundary mechanism and
+   * authors zero CSS, so every rule that lands inside the boundary comes
+   * from the cartridge by way of the host. Client mount: read this and
+   * inject into `resolveStyleRoot(host)` (`@airo-js/core`), which returns
+   * the shadow root or the light-DOM root as the isolation mode requires.
+   * String-building SSR: collect `cartridge.views[].stylesheet` and pass
+   * the concatenation to `renderDocument`'s `head.inlineStyles`.
+   *
+   * NOTE the SSR path is document-scoped, so those styles do NOT cross a
+   * shadow boundary — a view rendered into declarative shadow DOM needs
+   * its CSS inside the template, not in `<head>`.
    *
    * Use design-token CSS custom properties (`--airo-*`) so host apps can
    * theme by overriding tokens at the document root. Cartridges that

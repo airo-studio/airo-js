@@ -127,6 +127,34 @@ export function fragmentToState(
  * crossing into the framework. The allowlist gate fails closed by
  * default; pass the cartridge's known page-id set or the active
  * cartridge's `template.pages.map(p => p.id)`.
+ *
+ * ## When NOT to use this — surfaces that own their urls
+ *
+ * The allowlist makes this decoder fail closed by returning `null`, and
+ * a `null` hint is indistinguishable from "no page was requested". On a
+ * surface that owns its urls that distinction is the whole ballgame:
+ * `/does-not-exist` and `/` both arrive as "nothing requested", the SSR
+ * runner renders the entry page for both, and the unknown url answers
+ * `200` with a canonical pointing elsewhere — a soft 404.
+ *
+ * Two gates in series, and the outer one silences the inner one. The
+ * runner ALREADY validates the entry page (exists, enabled, not a
+ * subpage, not a gate) and re-derives `navState.page` from the page it
+ * actually resolved, so a page id it rejects can never reach a renderer.
+ * The allowlist here is belt-and-braces over that check — valuable when
+ * the host cannot act on the difference, harmful when it can.
+ *
+ * So on a root-mounted or otherwise owned-url path surface, decode with
+ * `fragmentToState(tail, { pathContextKey })` and let the runner gate.
+ * The requested id then reaches the runner, which reports its judgement
+ * as `fellBack` on the SSR result, and the host answers 404 on
+ * `reason: 'unknown-page'`. See best-practices §5.10a.
+ *
+ * Keep `decodeNavHint` for the embed and query surfaces, where the url
+ * belongs to the customer's page rather than to you: there falling back
+ * silently is mandatory (a widget must not break a host page over an
+ * unrecognised path segment), so failing closed in the decoder is
+ * exactly right and there is nothing for a host to act on.
  */
 export function decodeNavHint(
   hint: string | null | undefined,
@@ -176,6 +204,53 @@ export function extractPathTail(pathname: string, basePath: string): string | nu
 
   const tail = rest.replace(/^\/+/, '');  // strip leading slashes
   return tail.length > 0 ? tail : null;
+}
+
+/**
+ * Join a `basePath` and an encoded fragment into a path-mode URL — the
+ * single encoder shared by `PathRouter.stateToUrl` and `routerHrefFor`, so
+ * the two can never disagree about what URL a `RouteState` has.
+ *
+ * ## Why `entryPageId` exists
+ *
+ * `extractPathTail` returns `null` for a bare `basePath` (rows 1-2 of the
+ * table above), and the SSR runner treats a null nav hint as "render the
+ * default entry page". So the DECODER already accepts `basePath` as the
+ * entry page. Without `entryPageId` the ENCODER never emits it — it emits
+ * `basePath + '/' + entryPageId` — and the same page answers on two URLs:
+ *
+ *   basePath = '/'              → '/' AND '/home'
+ *   basePath = '/campaign/xyz'  → '/campaign/xyz' AND '/campaign/xyz/home'
+ *
+ * Both 200, byte-identical. Since `routerHrefFor` is what the docs tell you
+ * to build hrefs, canonicals and sitemap entries with, that asymmetry ships
+ * as duplicate content with nothing erroring or warning. Passing
+ * `entryPageId` collapses the bare entry state onto `basePath`, making the
+ * encoder agree with the decoder.
+ *
+ * It also stops the entry URL being rewritten on load: `PageManager.initRouter`
+ * calls `router.replace(navState)` when `parseCurrent()` returns null, which
+ * is exactly the bare-`basePath` case — so a visitor landing on `/` used to
+ * watch it silently become `/home`.
+ *
+ * ## Collapse only a BARE entry state
+ *
+ * The fragment must equal `entryPageId` exactly. `{ page: 'home', filter: 'x' }`
+ * encodes to `home?filter=x` and stays `/home?filter=x`, because `/?filter=x`
+ * would decode to a null tail and lose the filter — the collapse has to be
+ * round-trip-safe, not merely shorter.
+ *
+ * Path mode only. Hash never reaches a server so there is no duplicate-content
+ * harm, and query mode has the same shape but no consumer has hit it.
+ */
+export function joinPathFragment(
+  basePath: string,
+  fragment: string,
+  entryPageId?: string,
+): string {
+  const normalizedBase = basePath.replace(/\/+$/, '');
+  if (!fragment || fragment === entryPageId) return normalizedBase || '/';
+  return `${normalizedBase}/${fragment}`;
 }
 
 function normalizeValidPages(

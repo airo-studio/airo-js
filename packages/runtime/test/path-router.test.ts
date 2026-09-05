@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { PathRouter } from '@airo-js/core';
+import { PathRouter, routerHrefFor } from '@airo-js/core';
 
 const BASE = '/campaign/xyz';
 
@@ -190,5 +190,163 @@ describe('PathRouter — push / replace / popstate', () => {
       validPages: ['products'],
     });
     expect(router.parseCurrent()).toEqual({ page: 'products' });
+  });
+});
+
+describe('PathRouter — root mount (basePath: "/")', () => {
+  // Every case above uses a carve-out basePath. Root mount is the shape a
+  // whole site uses, and until 0.9 nothing in the repo exercised it.
+
+  test('emits real top-level urls', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), { basePath: '/', validPages: ['roster'] });
+    router.push({ page: 'roster' });
+    expect(window.location.pathname).toBe('/roster');
+  });
+
+  test('decodes a top-level url', () => {
+    setLocation('/roster');
+    const router = new PathRouter(vi.fn(), { basePath: '/', validPages: ['roster'] });
+    expect(router.parseCurrent()).toEqual({ page: 'roster' });
+  });
+
+  test('parseCurrent at bare "/" is null — the entry-page fallback case', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), { basePath: '/', validPages: ['home'] });
+    expect(router.parseCurrent()).toBeNull();
+  });
+
+  test('the validPages allowlist is what keeps static assets out', () => {
+    // basePath '' makes `pathname.startsWith(base)` true for EVERY path, so
+    // the allowlist is doing all the gating. Hosts must still route assets
+    // before the wildcard, but a stray decode must not invent a page.
+    setLocation('/favicon.ico');
+    const router = new PathRouter(vi.fn(), { basePath: '/', validPages: ['home'] });
+    expect(router.parseCurrent()).toBeNull();
+  });
+
+  test('round-trip with a context key and query state', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), {
+      basePath: '/',
+      validPages: ['article'],
+      pathContextKey: 'slug',
+    });
+    const state = { page: 'article', slug: 'first-post', filter: 'live' };
+    router.push(state);
+    expect(window.location.pathname).toBe('/article/first-post');
+    expect(router.parseCurrent()).toEqual(state);
+  });
+});
+
+describe('PathRouter — entryPageId collapse', () => {
+  test('bare entry state collapses onto basePath instead of basePath/<id>', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), {
+      basePath: '/',
+      validPages: ['home', 'roster'],
+      entryPageId: 'home',
+    });
+    router.push({ page: 'home' });
+    expect(window.location.pathname).toBe('/');
+  });
+
+  test('collapses on a carve-out basePath too', () => {
+    setLocation(BASE);
+    const router = new PathRouter(vi.fn(), {
+      basePath: BASE,
+      validPages: ['home'],
+      entryPageId: 'home',
+    });
+    router.push({ page: 'home' });
+    expect(window.location.pathname).toBe(BASE);
+  });
+
+  test('a non-entry page is unaffected', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), {
+      basePath: '/',
+      validPages: ['home', 'roster'],
+      entryPageId: 'home',
+    });
+    router.push({ page: 'roster' });
+    expect(window.location.pathname).toBe('/roster');
+  });
+
+  test('entry page WITH extra state does not collapse — round-trip safety', () => {
+    // '/?filter=live' would decode to a null tail and lose the filter, so
+    // only a BARE entry state is collapsible.
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), {
+      basePath: '/',
+      validPages: ['home'],
+      entryPageId: 'home',
+    });
+    router.push({ page: 'home', filter: 'live' });
+    expect(window.location.pathname).toBe('/home');
+    expect(router.parseCurrent()).toEqual({ page: 'home', filter: 'live' });
+  });
+
+  test('replace at "/" no longer rewrites the url to /home', () => {
+    // PageManager.initRouter calls replace() when parseCurrent() is null,
+    // which is exactly the bare-basePath case. Without entryPageId a
+    // visitor landing on '/' watched it silently become '/home'.
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), {
+      basePath: '/',
+      validPages: ['home'],
+      entryPageId: 'home',
+    });
+    router.replace({ page: 'home' });
+    expect(window.location.pathname).toBe('/');
+  });
+
+  test('without entryPageId the pre-0.9 behaviour is unchanged', () => {
+    setLocation('/');
+    const router = new PathRouter(vi.fn(), { basePath: '/', validPages: ['home'] });
+    router.replace({ page: 'home' });
+    expect(window.location.pathname).toBe('/home');
+  });
+});
+
+describe('routerHrefFor — path mode agrees with PathRouter', () => {
+  test('collapses the bare entry state', () => {
+    const opt = { mode: 'path' as const, basePath: '/', entryPageId: 'home' };
+    expect(routerHrefFor(opt, { page: 'home' })).toBe('/');
+    expect(routerHrefFor(opt, { page: 'roster' })).toBe('/roster');
+  });
+
+  test('collapses on a carve-out basePath', () => {
+    const opt = { mode: 'path' as const, basePath: BASE, entryPageId: 'home' };
+    expect(routerHrefFor(opt, { page: 'home' })).toBe(BASE);
+    expect(routerHrefFor(opt, { page: 'products' })).toBe(`${BASE}/products`);
+  });
+
+  test('entry page with extra state keeps its own url', () => {
+    const opt = { mode: 'path' as const, basePath: '/', entryPageId: 'home' };
+    expect(routerHrefFor(opt, { page: 'home', filter: 'live' })).toBe('/home?filter=live');
+  });
+
+  test('without entryPageId the entry page still gets its own url', () => {
+    expect(routerHrefFor({ mode: 'path', basePath: '/' }, { page: 'home' })).toBe('/home');
+  });
+
+  test('href matches what PathRouter.push writes — the encoders cannot drift', () => {
+    const opt = { mode: 'path' as const, basePath: BASE, entryPageId: 'home' };
+    for (const state of [
+      { page: 'home' },
+      { page: 'products' },
+      { page: 'product', productId: 'abc' },
+      { page: 'home', filter: 'live' },
+    ]) {
+      setLocation('/somewhere/else');
+      const router = new PathRouter(vi.fn(), {
+        basePath: BASE,
+        validPages: ['home', 'products', 'product'],
+        entryPageId: 'home',
+      });
+      router.push(state);
+      expect(window.location.pathname + window.location.search).toBe(routerHrefFor(opt, state));
+    }
   });
 });

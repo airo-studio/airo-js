@@ -36,6 +36,14 @@ log.warn(`'${elementName}' already registered; skipping.`);
 
 The default `consoleSink` produces output indistinguishable from the previous `console.warn('[@airo-js/embed] ...')` lines. Apps that never call `setSink` see zero behavioural change.
 
+### The default threshold is `'warn'`
+
+Two filters run in order and it is worth knowing which is which: the **level threshold** decides whether an event is dispatched at all, and only then does the **sink** decide how to render it. Replacing the sink does not lower the threshold.
+
+`warn` and `error` are on by default; `debug` and `info` are narration and are off. Turn them on per surface with `setLogLevel('debug')`, per channel with `setChannelLevel('runtime', 'debug')`, or from the URL with `?airo-log=` (see below). A host that wants production quiet calls `setLogLevel('error')`.
+
+> **0.3.0 shipped this as `'error'` and that was a bug**, fixed in 0.3.1. It silenced every framework warning at once — including "Router init failed; URL routing disabled" — while this README claimed the opposite. If you pinned `0.3.0` and added a `setLogLevel('warn')` of your own, you can drop it.
+
 ## Replacing the sink
 
 ```ts
