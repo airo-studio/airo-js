@@ -67,4 +67,4 @@ export { dispatchTool } from './dispatch.js';
 
 export const PACKAGE_NAME = '@airo-js/mcp';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.10.0';
+export const VERSION = '0.10.1';

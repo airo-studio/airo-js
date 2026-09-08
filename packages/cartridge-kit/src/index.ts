@@ -174,7 +174,7 @@ export {
 
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.10.0';
+export const VERSION = '0.10.1';
 /**
  * Cartridge contract surface version. Ticks ONLY when the contract
  * surface changes in a way consumers must adapt to — interface
@@ -187,4 +187,4 @@ export const VERSION = '0.10.0';
  * `package.json` for the package version; this constant is the
  * separate, load-bearing signal that consumers can train on.
  */
-export const CONTRACT_VERSION = '0.8.0';
+export const CONTRACT_VERSION = '0.9.0';

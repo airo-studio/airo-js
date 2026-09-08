@@ -2,25 +2,49 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
-## [Unreleased]
+## Why the fix is `0.10.1` and not `1.0.0`
 
-Lands in 1.0.0. Findings against 0.10.0 from the first two consumers to audit it, plus the three defects in this repo's own examples those findings led to. `CONTRACT_VERSION` ticks at the 1.0.0 cut.
+The typed `requires` below changes a published interface at compile time, which strict semver would call a major. It ships in the patch slot on purpose. `^0.10.0` reaches it automatically, and what it reaches consumers with is **loud**: a declaration the snapshot cannot satisfy stops compiling, naming the offending literal. That is the opposite of the failure 0.10.0's minor slot was guarding against — a silent runtime skip — and it is the check both consumers asked for after their audits. Both had already corrected their declarations against 0.10.0, so for them the bump is a no-op that proves the type agrees with their audit. The one migration a consumer may hit is a hoisted `SchemaFieldRef[]` constant, which now needs its snapshot type.
 
-### `@airo-js/cartridge-kit`
+1.0.0 is next and freezes this surface. A patch first lets every consumer compile against the typed paths before the freeze, which is the whole point of shipping it separately.
 
-#### Changed
+## `@airo-js/cartridge-kit` 0.10.1 — 2026-09-08
+
+**`CONTRACT_VERSION` 0.8.0 → 0.9.0** — `SchemaFieldRef` gains a type parameter and `requires` narrows on three interfaces.
+
+### Changed
 - **BREAKING (compile-time): `requires` paths are typed against the snapshot.** `SchemaFieldRef<TData>` — `path` is now `SnapshotPath<TData>`, the string-literal union of every dot-path `getByPath` can resolve on `TData`, and `PublicationAdapter.requires`, `McpToolDefinition.requires` and `CrawlerSurfaceAdapterOptions.requires` all carry it. A path the snapshot cannot have — `product.name` against `products: Product[]`; `artists.name` where `artists.0.name` was meant — is a compile error at the declaration site instead of a silently skipped adapter at publish time. Both consumers who audited against 0.10.0 found that **every** adapter they ship would have gone quiet, and both bugs were this exact class; a type makes the class unwritable where an upgrade note only describes it. The bare `SchemaFieldRef` (`TData = unknown`) keeps `path: string`. **Migration:** a hoisted constant must carry the type — `const REQUIRES: SchemaFieldRef<MyData>[]` — because an untyped `SchemaFieldRef[]` has `string` paths and no longer assigns into a typed adapter. Six segments are checked exactly; deeper paths are accepted as `string`. `${number}` is looser than the runtime's canonical-integer index grammar (`'01'` and `'-1'` typecheck and resolve absent), so the runtime stays authoritative for that edge.
 - **Variance is structural, and that is load-bearing.** A typed ref widens to the bare ref, so erasure to `Cartridge<unknown, unknown>` — the registry, the default-resolver memo, embed's `resolveCartridge` — keeps compiling. `SchemaFieldRef<{ a }>` assigns to `SchemaFieldRef<{ a; b }>` (every declared path still exists) and the reverse is refused. A first draft with the `unknown` case as the *leading* conditional put `TData` in an extends position, which TypeScript measures as invariant, and cartridge-kit itself stopped building; the `unknown` case is now the fall-through of the last branch, and a comment says why. Pinned by `test/snapshot-path.test-d.ts` — the repo's first compile-time test, run by vitest's typecheck mode against a dedicated `tsconfig.typecheck.json`, because the package tsconfig (`composite`, `rootDir: ./src`) rejects a test file at the config level and vitest reports a config-error-only run as "no errors".
 
-#### Added
+### Added
 - **`SnapshotPath<TData>`** — exported for hosts that build coverage UIs or their own typed path helpers over the same grammar.
 
-### Examples
+## `@airo-js/core` 0.10.1 — 2026-09-08
 
-#### Fixed
+Sync rev; the line moves together. No source change.
+
+## `@airo-js/runtime` 0.10.1 — 2026-09-08
+
+Sync rev; the line moves together. No source change.
+
+## `@airo-js/ssr` 0.10.1 — 2026-09-08
+
+Sync rev; the line moves together. No source change — `runPublicationAdapters` reads `adapter.requires` through the unchanged `missingRequiredPaths` signature.
+
+## `@airo-js/embed` 0.10.1 — 2026-09-08
+
+Sync rev; the line moves together. No source change.
+
+## `@airo-js/mcp` 0.10.1 — 2026-09-08
+
+Sync rev; the line moves together. No source change — `McpToolDefinition.requires` is typed by cartridge-kit; `dispatchTool` is unchanged.
+
+## Examples and docs — 2026-09-08
+
+### Fixed
 - **Three of the five publication adapters in this repo declared `requires` paths their snapshot never had.** `publication-adapter-skeleton` declared `product.gtin`, `offer.price`, … against `products: Array<…>`; `llms-txt-adapter` declared `product.title` and `category.name` against `products` and `categories` arrays; `full-site`'s llms-txt adapter declared `doc.sections` as `'always'`, which gated out the index snapshot whose `!data.doc` branch is the file's `# heading` — `/llms.txt` had been missing its first line since 0.10.0. The skeleton is the shape the first consumer's adapters were modelled on. All three were caught by the type the moment it landed; the full-site smoke now asserts the heading. `shopify-edge-worker`'s hoisted constants are re-typed `SchemaFieldRef<ProductSnapshot>[]` and `SchemaFieldRef<PostSnapshot>[]`.
 
-### Docs
+### Changed
 - **A path segment after an array is an index** — `artists.0.name`, not `artists.name`; if you mean "each", declare the array itself and check items in `validate()`. From the second consumer's finding. Best-practices §1.9 and the `SchemaFieldRef` docblock carry it, and the type enforces it. Also stated there: `'always'` only for what `generate()` genuinely cannot emit without — the collection, not a field of its items.
 
 ## Why this line is `0.10.0` and not `0.9.1`
