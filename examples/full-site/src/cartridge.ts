@@ -357,7 +357,15 @@ const llmsTxt: PublicationAdapter<DocSiteData, unknown, DocSiteConfig> = {
   description: 'Index line for /llms.txt plus a full-text dump for /llms-full.txt.',
   format: 'custom',
   delivery: 'host-decides',
-  requires: [{ path: 'doc.sections', required: 'always' }],
+  // `site` is the only field BOTH branches of generate() read. `doc` is
+  // 'preferred', not 'always': the index snapshot has no doc and still
+  // yields a line — the `!data.doc` branch below is the /llms.txt heading.
+  // An 'always' here made that branch unreachable, so on 0.10.0 the file
+  // silently lost its `# heading`. The smoke now checks for it.
+  requires: [
+    { path: 'site', required: 'always' },
+    { path: 'doc.sections', required: 'preferred' },
+  ],
   refreshCadence: { min: { ms: 0 }, max: { ms: 86_400_000 } },
   async generate(data) {
     if (!data.doc) {

@@ -17,8 +17,9 @@
  *      snapshot that views render and MCP tools answer from. Inline
  *      JSON-LD, an XML feed, and any MCP tool all answer the same
  *      question — what the rendered widget shows.
- *   2. **Coverage gating.** Adapters declare `requires` (schema field
- *      paths). `runPublicationAdapters` skips an adapter whose
+ *   2. **Coverage gating.** Adapters declare `requires` (snapshot field
+ *      paths, typed against `TData` so a path that cannot exist is a
+ *      compile error). `runPublicationAdapters` skips an adapter whose
  *      `required: 'always'` paths are absent from the snapshot rather than
  *      let it emit broken output, and reports the skip with the missing
  *      paths. `'preferred'` and `'optional'` are not gated — they are
@@ -30,12 +31,30 @@
  *      publish a broken feed to a downstream indexer.
  */
 
+import type { SnapshotPath } from './snapshot-path.js';
+
 export type Duration = { ms: number };
 
-export interface SchemaFieldRef {
-  /** Dotted path into the cartridge schema. e.g. 'product.gtin'. */
-  path: string;
-  /** Cardinality requirement. */
+/**
+ * One coverage declaration: a dot-path into the snapshot, and how much the
+ * adapter or tool depends on it.
+ *
+ * `TData` types the path. `SchemaFieldRef<ProductData>` accepts only paths
+ * that exist on `ProductData` — `'products.0.gtin'`, never `'product.gtin'`
+ * — so a declaration that could never resolve is a compile error at the
+ * line that wrote it rather than a silently skipped adapter at publish
+ * time. The bare `SchemaFieldRef` (`TData = unknown`) keeps `path: string`
+ * for code that carries refs without knowing their snapshot.
+ *
+ * **A segment after an array is an index.** `artists.0.name`, not
+ * `artists.name`. If you mean "each artist has a name", declare `artists`
+ * and check names in `validate()`. Full grammar, and its one honest gap, in
+ * `SnapshotPath`.
+ */
+export interface SchemaFieldRef<TData = unknown> {
+  /** Dotted path into the snapshot: `'siteUrl'`, `'price.amount'`, `'products.0.gtin'`. */
+  path: SnapshotPath<TData>;
+  /** Cardinality requirement. Only `'always'` gates; the other two are host metadata. */
   required: 'always' | 'preferred' | 'optional';
 }
 
@@ -98,7 +117,7 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
   format: 'json-ld' | 'head-meta' | 'xml' | 'tsv' | 'json' | 'mcp-tools' | 'custom';
 
   /**
-   * Required cartridge schema fields. Used by:
+   * Required snapshot fields, as paths typed against `TData`. Used by:
    *   (a) host app — to surface coverage gaps to the user;
    *   (b) `runPublicationAdapters` — to skip the adapter, before it
    *       generates, when a path marked `required: 'always'` holds no value
@@ -106,9 +125,18 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
    *       docblock for why, and for what counts as present;
    *   (c) host app — to gate enabling an adapter on a coverage threshold.
    *
+   * Declare `'always'` only for what `generate()` genuinely cannot emit
+   * without. A generator that maps over a collection needs the collection,
+   * not a field of its items — `products`, not `products.0.gtin` — and an
+   * empty collection is a short feed, not a starved one.
+   *
+   * A hoisted constant must carry the type too:
+   * `const REQUIRES: SchemaFieldRef<MyData>[] = [...]`. An untyped
+   * `SchemaFieldRef[]` has `string` paths and will not assign here.
+   *
    * Declare `[]` for an adapter that works off any snapshot shape.
    */
-  requires: SchemaFieldRef[];
+  requires: SchemaFieldRef<TData>[];
 
   /**
    * Generate the surface-specific output from a post-Transformer snapshot.

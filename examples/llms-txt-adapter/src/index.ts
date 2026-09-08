@@ -152,15 +152,25 @@ export const llmsTxtAdapter: PublicationAdapter<StoreSnapshot, LlmsTxtOutput, St
   // the `text` field at the well-known `/llms.txt` path.
   format: 'custom',
 
-  // Coverage gating: the manifest is worthless without titles + the site
-  // base URL. Summaries are 'preferred' — a manifest with bare links still
-  // works, it's just weaker for extraction, so it warns rather than blocks.
+  // Coverage gating: `siteUrl` is the one thing the manifest cannot be built
+  // without — every link derives from it. The two collections are
+  // 'preferred': an empty one is a shorter manifest, not a broken one, and
+  // "zero links in total" is validate()'s call below, where it can see the
+  // output it is judging.
+  //
+  // Why the collections, and not `products.0.title`: a segment after an
+  // array is an INDEX, so there is no path that means "every product has a
+  // title". Per-item completeness is validate()'s job, not the gate's.
+  //
+  // This adapter used to declare `product.title` and `category.name` —
+  // singular, keys StoreSnapshot never had. Before 0.10.0 nothing read the
+  // declaration; on 0.10.0 the gate would have skipped the adapter on every
+  // snapshot. `SchemaFieldRef<StoreSnapshot>` now rejects both at compile
+  // time — try it.
   requires: [
     { path: 'siteUrl', required: 'always' },
-    { path: 'product.title', required: 'always' },
-    { path: 'product.summary', required: 'preferred' },
-    { path: 'category.name', required: 'always' },
-    { path: 'category.summary', required: 'preferred' },
+    { path: 'categories', required: 'preferred' },
+    { path: 'products', required: 'preferred' },
   ],
 
   generate: async (

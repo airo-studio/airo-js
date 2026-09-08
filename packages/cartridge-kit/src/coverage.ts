@@ -35,6 +35,11 @@ import type { SchemaFieldRef } from './publication-adapter.js';
  * `snapshot`, in declaration order. Empty array means fully covered — which
  * is also the answer for an empty or omitted `requires`.
  *
+ * The parameter is the bare `SchemaFieldRef` (`path: string`). A typed
+ * `SchemaFieldRef<T>[]` widens to it structurally for any `T` — see the
+ * variance note in `snapshot-path.ts` — so callers pass `adapter.requires`
+ * straight through.
+ *
  * Pure: same inputs → same output, no I/O.
  */
 export function missingRequiredPaths(

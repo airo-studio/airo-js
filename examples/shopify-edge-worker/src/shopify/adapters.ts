@@ -25,8 +25,12 @@ import { toMerchantCenterXml, type MerchantCenterFeed } from './merchant-center.
  * Field paths the adapter requires from the cartridge schema. Used by
  * (a) the host app to surface coverage gaps, (b) the framework to skip
  * the adapter if a required field is missing, (c) validation gate.
+ *
+ * Typed against `ProductSnapshot`, which is what makes hoisting the list
+ * safe: a bare `SchemaFieldRef[]` has `string` paths and would neither
+ * catch a typo here nor assign into the adapter's `requires` below.
  */
-const REQUIRES: SchemaFieldRef[] = [
+const REQUIRES: SchemaFieldRef<ProductSnapshot>[] = [
   { path: 'id', required: 'always' },
   { path: 'title', required: 'always' },
   { path: 'description', required: 'preferred' },
@@ -150,7 +154,7 @@ export const productJsonLdAdapter: PublicationAdapter<
 // Merchant Center rejects items missing required fields outright. JSON-LD
 // is more forgiving (Google parses what's there and ignores gaps).
 
-const MERCHANT_CENTER_REQUIRES: SchemaFieldRef[] = [
+const MERCHANT_CENTER_REQUIRES: SchemaFieldRef<ProductSnapshot>[] = [
   { path: 'id', required: 'always' },
   { path: 'title', required: 'always' },
   { path: 'description', required: 'always' },

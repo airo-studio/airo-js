@@ -70,6 +70,10 @@ check('sitemap omits the blocked draft', !sitemap.body.includes('unfinished-draf
 check('llms.txt omits the blocked draft', !llms.body.includes('unfinished-draft'));
 check('sitemap lists the published docs', sitemap.body.includes('/doc/why-snapshots') && sitemap.body.includes('/doc/silent-failures'));
 check('llms.txt lists the published docs', llms.body.includes('/doc/why-snapshots') && llms.body.includes('/doc/silent-failures'));
+// The heading comes from the INDEX snapshot, which has no `doc`. An adapter
+// that over-declares `doc.*` as 'always' is gated out for that snapshot and
+// the file silently loses its first line — which is what 0.10.0 did here.
+check('llms.txt opens with the site heading', llms.body.startsWith('# Field Notes'));
 
 // ── machine surfaces ────────────────────────────────────────────────
 const robots = await get('/robots.txt');

@@ -151,6 +151,12 @@ export { getByPath, hasByPath, setByPath } from './path-utils.js';
  * snapshots are answerable.
  */
 export { missingRequiredPaths } from './coverage.js';
+/**
+ * The dot-paths of a snapshot type, as a string-literal union. Backs
+ * `SchemaFieldRef<TData>.path`; exported for hosts that build coverage UIs
+ * or their own typed path helpers over the same grammar.
+ */
+export type { SnapshotPath } from './snapshot-path.js';
 
 export type {
   HydrateCleanup,

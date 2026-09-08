@@ -51,8 +51,10 @@ export interface McpToolDefinition<TData, TConfig = unknown> {
    * Optional, unlike the adapter's, because most tools read the snapshot
    * broadly rather than depending on named leaves. Omitting it means "runs
    * against any snapshot", which is also what `[]` means.
+   *
+   * Paths are typed against `TData` — see `SchemaFieldRef`.
    */
-  requires?: readonly SchemaFieldRef[];
+  requires?: readonly SchemaFieldRef<TData>[];
 
   handler(input: unknown, ctx: ToolContext<TData, TConfig>): Promise<unknown>;
 }

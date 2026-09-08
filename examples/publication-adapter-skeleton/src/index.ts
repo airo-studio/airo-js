@@ -61,14 +61,16 @@ export const jsonLdAdapter: PublicationAdapter<ProductSnapshot, JsonLdGraph, Sha
   displayName: 'Schema.org JSON-LD',
   description: 'Inline structured data for Google Rich Results.',
   format: 'json-ld',
-  requires: [
-    { path: 'product.gtin', required: 'always' },
-    { path: 'product.title', required: 'always' },
-    { path: 'product.images', required: 'always' },
-    { path: 'offer.price', required: 'always' },
-    { path: 'offer.availability', required: 'always' },
-    { path: 'offer.url', required: 'always' },
-  ],
+  // The snapshot is a catalogue: `products` is an array, so the only
+  // coverage path the generator genuinely cannot run without is the array
+  // itself. A segment after an array is an index (`products.0.gtin` means
+  // "the first product's gtin"), and "every product has a gtin" is not a
+  // path at all — it is validate()'s job.
+  //
+  // This used to read `product.gtin`, `offer.price`, … — singular keys
+  // ProductSnapshot never had. `SchemaFieldRef<ProductSnapshot>` rejects
+  // them now; the previous shape was the one consumers copied.
+  requires: [{ path: 'products', required: 'always' }],
   generate: async (
     snapshot: ProductSnapshot,
     _ctx: PublicationContext<SharedConfig>,
@@ -110,15 +112,13 @@ export const merchantCenterAdapter: PublicationAdapter<ProductSnapshot, Merchant
   displayName: 'Google Merchant Center XML feed',
   description: 'Polled-by-Google feed; free Shopping listings derive from this.',
   format: 'xml',
+  // Same reasoning as the JSON-LD adapter above. `'preferred'` on an
+  // indexed path is legal and occasionally useful — "does the first item
+  // carry a category" is a real signal for a host's coverage UI — but it
+  // never gates, and it is not a substitute for per-item validation.
   requires: [
-    { path: 'product.gtin', required: 'always' },
-    { path: 'product.brand', required: 'always' },
-    { path: 'product.images', required: 'always' },
-    { path: 'product.googleProductCategory', required: 'always' },
-    { path: 'offer.price', required: 'always' },
-    { path: 'offer.availability', required: 'always' },
-    { path: 'offer.url', required: 'always' },
-    { path: 'offer.condition', required: 'preferred' },
+    { path: 'products', required: 'always' },
+    { path: 'products.0.googleProductCategory', required: 'preferred' },
   ],
   generate: async (
     snapshot: ProductSnapshot,

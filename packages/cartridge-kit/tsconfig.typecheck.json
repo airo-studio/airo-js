@@ -1,0 +1,20 @@
+{
+  // The tsconfig vitest's typecheck mode uses for `test/**/*.test-d.ts`.
+  //
+  // The package tsconfig cannot be reused: it is `composite` with
+  // `rootDir: ./src`, so a file under test/ is a config-level error before
+  // any type is checked — and vitest reports a run that produced only
+  // config errors as "no errors". This one drops both, includes the
+  // compile-time tests, and emits nothing.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "tsBuildInfoFile": null
+  },
+  "include": ["src/**/*", "test/**/*.test-d.ts"]
+}

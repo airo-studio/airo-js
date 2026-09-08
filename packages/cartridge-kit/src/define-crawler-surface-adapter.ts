@@ -162,8 +162,12 @@ export interface CrawlerSurfaceAdapterOptions<TData, TConfig> {
    * called blocking turned out not to be: `SchemaDefinition<TData>.parse`
    * returns `TData`, so a schema path and a snapshot path name the same
    * place, and `getByPath` resolves both.
+   *
+   * Paths are typed against `TData`, which is one more reason to pass the
+   * type arguments explicitly: with them, a path this snapshot cannot have
+   * is a compile error here rather than a skipped bundle at publish time.
    */
-  requires: readonly SchemaFieldRef[];
+  requires: readonly SchemaFieldRef<TData>[];
   select: CrawlerSurfaceSelectors<TData, TConfig>;
   /** Defaults to `{ min: 0ms, max: 24h }`. */
   refreshCadence?: { min: Duration; max: Duration };

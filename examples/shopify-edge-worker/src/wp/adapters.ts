@@ -12,7 +12,8 @@ import type { PublicationAdapter, SchemaFieldRef } from '@airo-js/cartridge-kit'
 import type { PostJsonLd, PostSnapshot, WpConfig } from './types.js';
 import { toArticleJsonLd } from './jsonld.js';
 
-const REQUIRES: SchemaFieldRef[] = [
+// Typed against the snapshot — see the note on the Shopify adapter's list.
+const REQUIRES: SchemaFieldRef<PostSnapshot>[] = [
   { path: 'id', required: 'always' },
   { path: 'title', required: 'always' },
   { path: 'excerpt', required: 'preferred' },

@@ -190,6 +190,13 @@ Three things to know before you declare one:
 
 Watch the blast radius on upgrade: `renderAppWithPublication` builds its inline JSON-LD from `included` results, so an adapter declaring an `'always'` path its snapshot does not populate will silently stop emitting markup into the `<head>`. Audit your `requires` declarations against a real snapshot before adopting.
 
+**Paths are typed against `TData` (1.0).** `SchemaFieldRef<TData>.path` is `SnapshotPath<TData>` — the union of every dot-path `getByPath` can resolve on your snapshot — so `PublicationAdapter<ProductData, …>` rejects `'product.name'` when the field is `products`, at the line that wrote it. The first two consumers to audit against the gate found every adapter they shipped would have gone quiet, and every bug was one of these two, which prose cannot prevent and a type can:
+
+- **A segment after an array is an index.** `artists.0.name`, not `artists.name` — the latter reads an own property off the array and is always absent. If you mean "each artist has a name", declare `artists` and check names in `validate()`. There is no wildcard.
+- **Declare `'always'` only for what `generate()` genuinely cannot emit without.** A generator that maps over a collection needs the collection, not a field of its items — `products`, not `products.0.gtin` — and an empty collection is a short feed, not a starved one. Everything it merely maps over is `'preferred'`.
+
+Hoisted constants must carry the type: `const REQUIRES: SchemaFieldRef<ProductData>[] = […]`. An untyped `SchemaFieldRef[]` has `string` paths and will not assign into a typed adapter. Six segments are checked exactly and deeper paths pass as `string`. `${number}` accepts `'01'` and `'-1'`, which the runtime treats as absent — the type stops the class that actually ships (a key that does not exist; a name where an index belongs), and the gate's `skipped.missing` names anything it lets through.
+
 **Server-only.** Same envelope split as MCP tools.
 
 ---
