@@ -111,3 +111,62 @@ export const DOCS: Doc[] = [
 export function findDoc(slug: string): Doc | undefined {
   return DOCS.find((d) => d.slug === slug);
 }
+
+// ─────────────────────────── the members area ───────────────────────────
+//
+// Content for one signed-in visitor. It never enters a snapshot built for a
+// machine route (sitemap, llms.txt, MCP) — only `memberSliceFor` in
+// `server.ts` reads it, and only for a private page with a session.
+
+export interface MemberUser {
+  id: string;
+  name: string;
+}
+
+/** The demo provider knows exactly one account: `demo` / `demo`. */
+export const DEMO_USER: MemberUser = { id: 'u_demo', name: 'Demo Member' };
+
+export const MEMBER_NOTES: Doc[] = [
+  {
+    slug: 'roadmap',
+    title: 'What ships next',
+    description: 'The three lines after 1.0, in the order the consumers asked for them.',
+    publishedAt: '2026-09-01T09:00:00.000Z',
+    updatedAt: '2026-09-09T09:00:00.000Z',
+    tags: ['members', 'roadmap'],
+    sections: [
+      {
+        id: '',
+        depth: 2,
+        title: 'The freeze',
+        html: '<p>1.0 freezes the surface. Everything below it is additive by construction.</p>',
+      },
+      {
+        id: '',
+        depth: 2,
+        title: 'After the freeze',
+        html: '<p>A gate-chunking hook once the precheck ratio justifies it; a studio config shape for gate instances; a second example that shares the demo identity provider.</p>',
+      },
+    ],
+  },
+  {
+    slug: 'release-checklist',
+    title: 'The release checklist',
+    description: 'What gets checked before a line is cut, and who checks it.',
+    publishedAt: '2026-08-20T09:00:00.000Z',
+    updatedAt: '2026-09-05T09:00:00.000Z',
+    tags: ['members', 'process'],
+    sections: [
+      {
+        id: '',
+        depth: 2,
+        title: 'Before the cut',
+        html: '<p>Every consumer report has a framework response. The publish preflight is green. Both consumers have run their suites against the branch.</p>',
+      },
+    ],
+  },
+];
+
+export function findNote(slug: string): Doc | undefined {
+  return MEMBER_NOTES.find((d) => d.slug === slug);
+}
