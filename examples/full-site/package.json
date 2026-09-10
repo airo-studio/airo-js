@@ -6,11 +6,13 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && esbuild src/client.ts --bundle --format=esm --target=es2022 --outfile=dist/public/client.js --log-level=warning",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "pnpm build && node dist/server.js",
     "smoke": "node scripts/smoke.mjs",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "test": "vitest run --passWithNoTests",
+    "e2e": "playwright test",
+    "clean": "rm -rf dist *.tsbuildinfo test-results playwright-report"
   },
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",
@@ -22,8 +24,12 @@
     "linkedom": "^0.18.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.47.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
-    "typescript": "^5.5.0"
+    "esbuild": "^0.21.0",
+    "happy-dom": "^15.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
   }
 }

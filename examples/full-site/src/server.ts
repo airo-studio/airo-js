@@ -36,10 +36,13 @@
  *    whole site.
  */
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import express from 'express';
 import { parseHTML } from 'linkedom';
 
-import { extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
+import { escapeHtml, extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
 import { renderAppWithPublication, renderDocument, runPublicationAdapters, headFromPublication } from '@airo-js/ssr';
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
@@ -85,7 +88,18 @@ async function snapshotFor(slug?: string): Promise<DocSiteData> {
 
 type HeadPatch = Partial<Parameters<typeof renderDocument>[0]['head']>;
 
-function documentFor(head: HeadPatch, body: string): string {
+/**
+ * Assemble a full document. `mount` names how the client should treat the
+ * `#app` root — `'hydrate'` adopts the server's markup, `'csr'` paints
+ * fresh into an empty root — or `false` for documents (the 404 page) that
+ * carry no app and therefore no client bundle. The client reads the mode
+ * off the root's `data-airo-mode`, so the two sides never disagree.
+ */
+function documentFor(
+  head: HeadPatch,
+  body: string,
+  mount: 'hydrate' | 'csr' | false = 'hydrate',
+): string {
   return renderDocument({
     head: {
       // Viewport has NO framework default; it is responsive-design policy,
@@ -97,12 +111,20 @@ function documentFor(head: HeadPatch, body: string): string {
       // is pinned last rather than spread over.
       lang: config.locale,
     },
-    body,
-    bodyScripts: [{ src: '/client.js', type: 'module' }],
+    body: mount ? `<div id="app" data-airo-mode="${mount}">${body}</div>` : body,
+    bodyScripts: mount ? [{ src: '/client.js', type: 'module' }] : [],
   });
 }
 
 // 1 ── static assets FIRST. See note 1.
+//
+// `dist/public/client.js` is the esbuild bundle of `src/client.ts`. Until
+// 0.11.0 this file referenced `/client.js` and never served it: the route
+// fell through to the wildcard and the browser was handed an HTML page as
+// a module, so this example's hydrate path had never run in a browser.
+// The Playwright checks in `e2e/` exist so that cannot happen silently
+// again.
+app.use(express.static(join(dirname(fileURLToPath(import.meta.url)), 'public'), { index: false }));
 app.use('/assets', express.static('public'));
 // For POST /mcp/call. Nothing else on this server takes a body.
 app.use(express.json());
@@ -254,18 +276,24 @@ const renderPage: express.RequestHandler = async (req, res) => {
 
   if (unknownUrl) {
     // Assembled directly — no cartridge and no snapshot needed, which is
-    // exactly why renderDocument composes rather than wraps.
+    // exactly why renderDocument composes rather than wraps. No app root
+    // and no client bundle either: there is nothing to mount.
     res.status(404).send(
       documentFor(
         { title: `Not found — ${SITE.name}` },
         `<div class="fs-page"><h1 class="fs-title">Not found</h1>
-         <p class="fs-tagline">No page lives at <code>${req.path}</code>.</p>
+         <p class="fs-tagline">No page lives at <code>${escapeHtml(req.path)}</code>.</p>
          <a class="fs-back" href="/">← index</a></div>`,
+        false,
       ),
     );
     return;
   }
 
+  // Public pages are shared-cacheable: a signed-in visitor's public page is
+  // byte-identical to an anonymous visitor's, which is what makes this
+  // header honest.
+  res.set('Cache-Control', 'public, max-age=60');
   res.status(200).send(
     documentFor(
       {
