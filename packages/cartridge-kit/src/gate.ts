@@ -1,14 +1,32 @@
 /**
  * Gate — pre-render guard primitive.
  *
- * Runs BEFORE any view paints. Used for content-visibility decisions that
- * gate the entire widget — age verification, geo restriction, auth check,
- * paywall, cookie consent, country selector, maintenance mode.
+ * Two sentences the framework signs, and every rule below follows from them:
+ *
+ *   1. **A Gate decides whether to paint; whether to serve is the host's,
+ *      per request.** The gate is UX — the sign-in panel, the age prompt,
+ *      the region notice. The security boundary is the host's API and its
+ *      SSR handler, which refuse data and private pages to any request
+ *      without a session. A stale or bypassed gate can never leak data,
+ *      because the data was never in the page to begin with.
+ *   2. **Bots are never gated.** SSR never runs gates; the server-rendered
+ *      HTML of a public page is un-gated by guarantee, not by accident.
+ *      Private pages (`Page.private`) are the one exception, and they are
+ *      refused by the SSR runner, not gated.
+ *
+ * Runs BEFORE the data fetch and BEFORE any view paints — a blocked mount
+ * costs no network and no pipeline. Used for content-visibility decisions
+ * that guard a mount: age verification, geo restriction, sign-in, paywall,
+ * country selector, maintenance mode. (Cookie consent is NOT a gate: a
+ * widget stays usable without consent and consent never blocks anything;
+ * model it as a consent provider the views read.)
  *
  * Why a primitive (not a Transformer / PostProcessor / View): a Transformer
  * has no DOM access; a PostProcessor runs after views render — too late;
- * a View implies a route in the navigation graph — gates conceptually sit
- * outside it (they apply to ALL pages, not a specific one).
+ * a View implies a route in the navigation graph — gates sit outside it.
+ * A gate guards a MOUNT, never a page. `appliesTo: 'private'` narrows a
+ * gate to mounts whose resolved entry page carries `private: true`; the
+ * default `'all'` runs on every mount.
  *
  * Two-phase contract:
  *
@@ -26,13 +44,43 @@
  *      place (it owns the paint); the framework paints nothing else.
  *
  * Multiple gates run sequentially in declaration order. First `'block'`
- * short-circuits the chain — later gates don't run.
+ * short-circuits the chain — later gates don't run. The runner reports
+ * which gate blocked (`RunGatesResult.blockedBy`) and narrates every
+ * decision on the event bus (`gate:precheck` / `gate:mount` /
+ * `gate:allowed` / `gate:blocked`).
  *
- * SSR: gates are CSR-only by design. Server-rendered HTML is un-gated; the
- * embed loader's hydrate path runs gates BEFORE adopting the SSR DOM.
- * Brief content flash possible — cartridges authoring SSR-critical paths
- * should either accept the flash, hide content with CSS until hydrate
- * completes, or skip SSR for gated entry pages.
+ * ## The redirect round trip
+ *
+ * `mount()` may never settle. A sign-in gate that navigates to an identity
+ * provider unloads the page, and that is by design. Re-entry is `precheck`
+ * on the NEXT mount: the host session now exists, so it returns `'allow'`
+ * and no UI re-shows. The return URL carries the nav state — link to
+ * `/auth/login?next=<pathname+search>` and have the host redirect back to
+ * `next` (same-origin paths only); hosts with no URL router serialise
+ * `app.getNavigationState()` into `next` and re-supply it as
+ * `initialNavState`. Popup and in-page flows (wallet prompts) resolve
+ * `mount()` in place and need none of this. A gate that wants to block AND
+ * send the visitor somewhere calls `location.assign()` itself and returns
+ * `'block'`; no framework channel is needed.
+ *
+ * ## SSR and hydrate
+ *
+ * Gates are CSR-only. On the client, in hydrate mode, the runtime snapshots
+ * the server's markup before the gate phase and restores it when a gate
+ * that painted resolves `'allow'`, so hydration adopts the server's DOM and
+ * not the gate's; on `'block'` the gate's paint stays. Hosts that need zero
+ * painted frames before a gate ship the hide in the initial HTML
+ * (`data-airo-gate="pending"`, from the SSR result's `gates.pending`) and
+ * the runtime flips the attribute to `passed` / `blocked` / `error` when the
+ * phase resolves.
+ *
+ * ## Remounts
+ *
+ * `update()` / `updatePages()` remounts re-run every gate: a remount exists
+ * to get fresh data, and freshness wins over a remembered verdict. The one
+ * hand-off is `mountCartridge({ satisfiedGates })`, for the initial mount of
+ * a page the host's server already rendered privately — those gates are
+ * skipped once and narrated as `gate:allowed { via: 'server' }`.
  */
 
 import type { IEventBus } from '@airo-js/core';
@@ -50,10 +98,44 @@ export interface GateContext<TConfig> {
   scope?: Record<string, string | undefined>;
 }
 
+/**
+ * One storage hint. METADATA ONLY — see `Gate.persist`.
+ */
+export interface PersistHint {
+  /** Storage key prefix, e.g. 'gate:age-verified'. */
+  key: string;
+  /** Time-to-live in milliseconds. Omit for indefinite. */
+  ttl?: number;
+  scope: 'session' | 'persistent';
+  /**
+   * Which outcome this hint describes. Default `'pass'`. A real age gate
+   * needs both: `pass` → persistent (never shown again), `fail` → session
+   * (blocked for this tab; a new tab is a fresh attempt).
+   */
+  outcome?: 'pass' | 'fail';
+}
+
 export interface Gate<TConfig = unknown> {
   /** Stable identifier — used for storage keys, logs, and dev tooling. */
   id: string;
   displayName: string;
+
+  /**
+   * Which mounts this gate guards. Default `'all'`.
+   *
+   *   - `'all'`: every mount of the cartridge (age verification, geo).
+   *   - `'private'`: only mounts whose resolved entry page carries
+   *     `Page.private: true` (a sign-in gate). On a public entry the gate
+   *     is skipped without precheck, mount or narration. When no entry page
+   *     can be resolved at all, the gate runs — the unknowable case fails
+   *     closed.
+   *
+   * Entry-based, not graph-based: a gate guards the mount it runs on. In-app
+   * navigation into a private page does not re-run it; a private view
+   * renders its signed-out state when the snapshot carries no member data,
+   * and the host's API stays the authority.
+   */
+  appliesTo?: 'all' | 'private';
 
   /**
    * Whether this gate is active given the current config. Gates with a
@@ -75,10 +157,14 @@ export interface Gate<TConfig = unknown> {
    * call IP lookup services; cookie gates read storage (sync but typed
    * async for consistency). Default: no precheck → always run mount().
    *
-   * Errors: throws propagate up to `runGates`. Caller's responsibility
-   * to decide retry vs fall-through. Conservative pattern: catch in your
-   * own precheck and return `'gate-required'` — surface the error in the
-   * gate UI so the user can retry.
+   * Runs on every mount and every remount. Keep it cheap: a host-set,
+   * non-HttpOnly marker cookie beside the real session makes it a
+   * synchronous `document.cookie` read, and the API remains the verifier.
+   *
+   * Errors: throws propagate up to `runGates`; the runtime reports them as
+   * `onError('gate')`. Conservative pattern: catch in your own precheck and
+   * return `'gate-required'` — surface the error in the gate UI so the user
+   * can retry.
    */
   precheck?(ctx: GateContext<TConfig>): Promise<'allow' | 'gate-required'>;
 
@@ -90,11 +176,15 @@ export interface Gate<TConfig = unknown> {
    *   - `'block'`: stop rendering. The gate's UI stays in place — the
    *     framework paints NOTHING else into host. Cartridge author owns
    *     the "blocked" UX (e.g. "we don't ship to your region" message,
-   *     "please contact your administrator" auth-fail copy).
+   *     "sign in to continue" panel).
    *
    * The host element is the same `renderRoot` views would paint into —
    * gates and views share the host. Style isolation (shadow DOM) applies
-   * to gate UI the same as view UI.
+   * to gate UI the same as view UI. In hydrate mode the runtime restores
+   * the server's markup after an `'allow'` (see the header).
+   *
+   * May never settle if the gate navigates away (see "The redirect round
+   * trip" in the header).
    */
   mount(host: HTMLElement, ctx: GateContext<TConfig>): Promise<'allow' | 'block'>;
 
@@ -129,20 +219,14 @@ export interface Gate<TConfig = unknown> {
    *   3. **Contract precedent.** `DataSource.cacheTtlMs` is exactly this
    *      shape: cartridge declares the hint, host app implements caching.
    *      `Gate.persist` fits the same envelope — cartridge declares
-   *      `{ key, ttl, scope }`, host app writes whatever storage primitive
-   *      matches its compliance posture.
+   *      `{ key, ttl, scope, outcome }`, host app writes whatever storage
+   *      primitive matches its compliance posture.
    *
-   * Host apps that want a default implementation can opt into a separate
-   * `@airo-js/gate-persist` helper package (when/if it ships). Greenfield
-   * apps get a working default; apps with their own auth/session stack
-   * skip the helper and write the storage primitive themselves. Framework
-   * core stays rendering-only either way.
+   * One hint or several: a real gate often has two lifetimes (a pass that
+   * is remembered across sessions, a fail that is remembered for this tab),
+   * so an array of `PersistHint`s with `outcome` is accepted. Hosts with
+   * their own auth/session stack (a server-set cookie the gate never
+   * touches) ignore this field entirely; that pattern is first-class.
    */
-  persist?: {
-    /** Storage key prefix, e.g. 'gate:age-verified'. */
-    key: string;
-    /** Time-to-live in milliseconds. Omit for indefinite. */
-    ttl?: number;
-    scope: 'session' | 'persistent';
-  };
+  persist?: PersistHint | readonly PersistHint[];
 }

@@ -83,9 +83,11 @@ export function createCartridgeRegistry(
       const cartridge = cartridges.get(cartridgeId);
       if (!cartridge) return undefined;
 
-      // Static views first — known at construction time.
+      // Static views first — known at construction time. A factory-less
+      // entry is a capability-only declaration (0.11.0); fall through to
+      // the mailbox for it rather than letting it shadow the chunk.
       const staticView = cartridge.views.find((v) => v.pageType === pageType);
-      if (staticView) {
+      if (staticView?.factory) {
         // Cast through unknown — the registry is heterogeneous across
         // cartridges. The view's factory was typed against the cartridge's
         // own (TData, TConfig); the registry exposes the unknown-bound
@@ -106,7 +108,8 @@ export function createCartridgeRegistry(
         const cartridge = cartridges.get(cartridgeId);
         if (!cartridge) return undefined;
         const staticView = cartridge.views.find((v) => v.pageType === pageType);
-        if (staticView) return staticView.factory as unknown as ChunkFactory;
+        if (staticView?.factory) return staticView.factory as unknown as ChunkFactory;
+        // Factory-less declaration, or no static view: the mailbox owns it.
         return chunkRegistries.get(cartridgeId)?.resolve(pageType);
       };
     },

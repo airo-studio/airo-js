@@ -142,6 +142,32 @@ describe('getDefaultRenderResolver', () => {
     expect(resolve('home')).toBe(factory);
   });
 
+  test('a factory-less views[] entry (capability-only, 0.11.0) falls through to the mailbox', () => {
+    const mailbox = trackMailbox(uniqueMailbox());
+    const factory = fakeFactory('connect');
+
+    // The browser cartridge declares the page type's capabilities but ships
+    // no factory; the chunk registers itself later. Before 0.11.0 this
+    // entry shadowed the mailbox and the page could never resolve.
+    const cartridge = buildCartridge({
+      mailboxName: mailbox,
+      views: [
+        {
+          id: 'connect-view',
+          displayName: 'Connect',
+          pageType: 'connect',
+          capabilities: ['csr-only'],
+        },
+      ],
+    });
+
+    const resolve = getDefaultRenderResolver(cartridge);
+    expect(resolve('connect')).toBeUndefined();
+
+    pushToMailbox(mailbox, { key: 'connect', factory });
+    expect(resolve('connect')).toBe(factory);
+  });
+
   test('memoizes per-cartridge identity: second call sees chunks pushed between calls', () => {
     const mailbox = trackMailbox(uniqueMailbox());
     const cartridge = buildCartridge({ views: [], mailboxName: mailbox });

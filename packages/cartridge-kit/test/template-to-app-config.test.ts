@@ -207,6 +207,32 @@ describe('templateToAppConfig', () => {
     expect(home.layout.regions.main?.components[0]?.componentId).toBe('productGrid');
   });
 
+  // ---------------------------------------------------------------------
+  // 0.11.0 — the private page flag
+  // ---------------------------------------------------------------------
+
+  test('private — round-trips onto Page.private and is omitted when absent', () => {
+    const template: Template<TestConfig> = {
+      id: 'members',
+      displayName: 'Members',
+      description: 'A public home and a private dashboard.',
+      defaultConfig: {},
+      pages: [
+        { id: 'home', type: 'home', enabled: true },
+        { id: 'members', type: 'members', enabled: true, private: true },
+        { id: 'legacy', type: 'legacy', enabled: true, private: false },
+      ],
+    };
+    const appConfig = templateToAppConfig(template, 'wgt_members');
+    const [home, members, legacy] = appConfig.pages;
+    // Absent stays absent — the runner and the gate phase test `=== true`,
+    // and a phantom `private: undefined` key would break deep-equality in
+    // consumer snapshots.
+    expect(Object.hasOwn(home!, 'private')).toBe(false);
+    expect(members!.private).toBe(true);
+    expect(legacy!.private).toBe(false);
+  });
+
   test('rich fields — omitted fields stay undefined (no empty-object pollution)', () => {
     const template = buildTemplate();
     const appConfig = templateToAppConfig(template, 'wgt_plain');

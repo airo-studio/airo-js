@@ -92,14 +92,22 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
   postProcessors?: PostProcessor<TData, TConfig>[];
 
   /**
-   * Pre-render guards. Run sequentially BEFORE any view paints, in the
-   * order declared. Used for content-visibility decisions: age verification,
-   * geo restriction, auth check, paywall, cookie consent, country selector,
-   * maintenance mode. First gate that resolves `'block'` short-circuits;
-   * the framework refuses to mount any view.
+   * Pre-render guards. Run sequentially BEFORE the data fetch and BEFORE
+   * any view paints, in the order declared. Used for content-visibility
+   * decisions: age verification, geo restriction, sign-in, paywall,
+   * country selector, maintenance mode. First gate that resolves `'block'`
+   * short-circuits; the framework refuses to fetch or mount anything.
    *
-   * Sync precheck path skips visible UI for already-cleared users (cookie,
-   * verified token, IP-based geo). Async by design.
+   * A gate decides whether to paint; whether to serve is the host's, per
+   * request — see `Gate` for the two sentences the framework signs. A gate
+   * declared `appliesTo: 'private'` runs only on mounts whose entry page is
+   * `private: true` (a sign-in gate on a members area); the default runs
+   * on every mount.
+   *
+   * Precheck skips visible UI for already-cleared users (cookie, verified
+   * token, IP-based geo). Async by design. Gates ship in every bundle that
+   * imports the cartridge — keep an SDK behind `await import()` inside
+   * `mount()`.
    */
   gates?: Gate<TConfig>[];
 
@@ -130,14 +138,19 @@ export interface Cartridge<TData = unknown, TConfig = unknown, TStyles = unknown
    * the full views list plus server-only primitives. See
    * `docs/best-practices.md` §2.5b for the canonical write-up.
    *
-   * Do NOT ship placeholder factories on the browser cartridge — the
+   * Do NOT ship placeholder *factories* on the browser cartridge — the
    * resolver checks `views[]` BEFORE consulting the mailbox, so a
-   * placeholder permanently blocks the mailbox path for that
-   * `pageType`. Empty array means "all factories arrive via mailbox."
+   * placeholder factory permanently blocks the mailbox path for that
+   * `pageType`. Since 0.11.0 a `ViewDefinition` **without** a `factory` is
+   * a capability-only declaration: the resolver falls through to the
+   * mailbox for it, so a mailbox-only page type can carry `csr-only`.
+   * Empty array means "all factories arrive via mailbox."
    *
    * `capabilities` (declared per `ViewDefinition`) is consumed by SSR
    * coverage gating + adapter routing — they only matter on the
-   * SERVER cartridge. The browser doesn't need them.
+   * SERVER cartridge. The browser doesn't need them. Private-ness is not
+   * a capability: it is `TemplatePage.private` on the page graph, which
+   * both sides hold.
    *
    * See `getDefaultRenderResolver` and `createCartridgeRegistry` in
    * this package for the resolver order.

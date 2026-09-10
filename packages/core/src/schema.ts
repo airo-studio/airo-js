@@ -66,7 +66,8 @@ export interface PageLayout {
  * A single page in the app. `type` selects which PageRenderer factory
  * paints this page; `layout` is the slot tree the renderer walks; `parent`
  * marks subpages (modals, drawers) that activate over a parent page rather
- * than swap the active renderer.
+ * than swap the active renderer; `private` marks a page that exists for
+ * one signed-in visitor rather than for the public.
  */
 export interface Page<TPageType extends string = string> {
   id: PageId;
@@ -77,6 +78,20 @@ export interface Page<TPageType extends string = string> {
   styles?: Record<string, string | number>;
   componentSettings?: Record<string, ComponentSettings>;
   parent?: PageId;
+  /**
+   * A private page is served to one signed-in visitor, never to the
+   * public: the SSR runner refuses to render or publish it unless the host
+   * asserts it verified a session for the request (`renderPrivate`), no
+   * publication adapter output is produced for it, and hosts serve it
+   * `Cache-Control: private, no-store` with `noindex`. A gate declared
+   * `appliesTo: 'private'` runs only on mounts whose entry page is private.
+   *
+   * A page-graph property rather than a renderer capability so that both
+   * the server and a chunked browser cartridge (`views: []`) read the same
+   * answer off the same `Page` object. Core reads nothing off this flag;
+   * `PageManager` treats a private page like any other.
+   */
+  private?: boolean;
 }
 
 /**

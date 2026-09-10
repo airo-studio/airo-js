@@ -115,12 +115,12 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
         scope: deps.gateScope,
       },
     });
-    if (gateResult === 'block') {
-      // The first gate to block left its UI in `host`. The framework
-      // paints nothing else; caller checks `result.blocked` to decide
-      // whether to surface a "blocked by" message in the host app.
-      const blockedBy = await firstBlockedGateId(cartridge, cartridgeConfig, deps.gateScope);
-      return { app: null, blocked: true, blockedBy };
+    if (gateResult.verdict === 'block') {
+      // The blocking gate left its UI in `host`. The framework paints
+      // nothing else; caller checks `result.blocked` to decide whether to
+      // surface a "blocked by" message in the host app. The runner names
+      // the blocker exactly — no re-walk, no second precheck.
+      return { app: null, blocked: true, blockedBy: gateResult.blockedBy };
     }
   }
 
@@ -160,48 +160,4 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
   });
 
   return { app, blocked: false };
-}
-
-/**
- * Best-effort identification of which gate blocked. Walks the gates again
- * (precheck-only — mount is one-shot and can't be replayed) and returns
- * the first id whose precheck would fail. When precheck isn't implemented
- * for the blocking gate, falls back to a generic id.
- *
- * Used only for the diagnostic `blockedBy` field — not on the hot path.
- */
-async function firstBlockedGateId<TConfig>(
-  cartridge: Cartridge<unknown, TConfig>,
-  config: TConfig,
-  scope: Record<string, string | undefined> | undefined,
-): Promise<string> {
-  for (const gate of cartridge.gates ?? []) {
-    if (!gate.isEnabled(config)) continue;
-    if (!gate.precheck) {
-      // No precheck path; can't distinguish without re-running mount.
-      return gate.id;
-    }
-    // Best effort — replay precheck. Real mount() decisions can't be
-    // re-played idempotently so this is approximate.
-    try {
-      const decision = await gate.precheck({
-        config,
-        events: {
-          on() {},
-          off() {},
-          emit() {},
-          once() {},
-          clear() {},
-          listenerCount() {
-            return 0;
-          },
-        },
-        scope,
-      });
-      if (decision === 'gate-required') return gate.id;
-    } catch {
-      return gate.id;
-    }
-  }
-  return 'unknown';
 }

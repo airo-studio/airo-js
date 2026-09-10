@@ -33,8 +33,17 @@ export interface ViewDefinition<TData, TConfig> {
    * PageRendererFactory from @airo-js/core — unchanged from the framework's
    * existing contract. Cartridge views are PageRenderers with the typed
    * `RenderContext.app` constraint above.
+   *
+   * Optional since 0.11.0: an entry without a factory is a
+   * **capability-only declaration** for a page type whose factory arrives
+   * through the chunk mailbox (`pushToMailbox(cartridge.mailboxName, …)`).
+   * The resolver skips factory-less entries and falls through to the
+   * mailbox, so a mailbox-only page type can declare `csr-only` without a
+   * placeholder shadowing its chunk. Every other consumer of `views[]`
+   * (SSR filtering, capability gates) reads `capabilities` and is
+   * unaffected.
    */
-  factory: PageRendererFactory<string, CartridgeAppContext<TData, TConfig>>;
+  factory?: PageRendererFactory<string, CartridgeAppContext<TData, TConfig>>;
 
   /** Host-app template picker affordance. Optional. */
   preview?: { thumbnail: string; description: string };

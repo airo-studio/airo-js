@@ -73,6 +73,7 @@ export function templateToAppConfig<TConfig, TPageType extends string = string>(
         layout: p.layout ?? { regionOrder: [], regions: {} },
       };
       if (p.parent !== undefined) page.parent = p.parent;
+      if (p.private !== undefined) page.private = p.private;
       if (p.props !== undefined) page.props = p.props;
       if (p.styles !== undefined) page.styles = p.styles;
       if (p.componentSettings !== undefined) {
