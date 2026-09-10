@@ -25,15 +25,22 @@
  *
  * Defaults: excludes views tagged `'csr-only'`. Override via
  * `options.excludeCapabilities` for cartridges that need additional
- * capability gates at the SSR boundary (e.g. `'requires-auth'` views
- * that should never anonymously SSR).
+ * capability gates at the SSR boundary.
+ *
+ * This helper's axis is EXECUTION safety — can this renderer run in Node
+ * at all. It is not the place for publication policy: private pages are
+ * not a capability but `Page.private` on the page graph, and the runner
+ * (`renderAppWithPublication`) refuses or renders them per request from
+ * the host's `renderPrivate`. A private view is perfectly server-safe for
+ * the request that is allowed to see it, so it is never filtered here.
  *
  * Limitations:
  *   - Operates on the static `views[]` array only. Mailbox-registered
  *     factories (`pushToMailbox(cartridge.mailboxName, ...)`) carry no
  *     capability metadata at this layer; cartridges that need the gate
- *     for mailbox-only views must ship a `ViewDefinition` placeholder
- *     in `views[]` with `capabilities` set.
+ *     for mailbox-only views ship a factory-less `ViewDefinition` in
+ *     `views[]` with `capabilities` set (0.11.0 — the resolver falls
+ *     through to the mailbox for it).
  */
 
 import type { Cartridge } from '@airo-js/cartridge-kit';
