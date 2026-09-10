@@ -110,30 +110,61 @@ const ageGate: PostProcessor<MyData, MyConfig> = {
 
 ### 1.5 `Gate<TConfig>`
 
-**Two-phase contract: `precheck` for fast-path skip; `mount` for UI.** Auth gates verify tokens in precheck (returns `'allow'` if valid, `'gate-required'` otherwise — no UI flash for verified users).
+**Two sentences the framework signs.** (1) *A Gate decides whether to paint; whether to serve is the host's, per request.* The gate is UX — the sign-in panel, the age prompt, the region notice. The host's API and SSR handler are the security boundary; they refuse data and private pages to any request without a session, so a stale or bypassed gate can never leak what was never in the page. (2) *Bots are never gated.* SSR never runs gates; the server-rendered HTML of a public page is un-gated by guarantee. Private pages are refused, not gated (Section 4.9).
 
-**`'block'` leaves the gate's UI in place.** The framework paints nothing else. The cartridge author writes the "you're blocked" message inside `mount()`.
+**Gates run BEFORE the data fetch.** `mountCartridge` resolves the entry page, runs the gate phase, and only then fetches and runs the pipeline. A blocked mount costs no network and no pipeline; `onShellReady` still fires first; a throwing gate reports `onError('gate')`.
 
-**`persist` is metadata only.** The cartridge declares `{ key, ttl?, scope }`; the host app writes the actual storage primitive. Three reasons (locked decision):
+**A gate guards a mount, never a page.** `appliesTo: 'all'` (the default) runs on every mount — age verification, geo. `appliesTo: 'private'` runs only when the resolved entry page is `private: true` and is skipped silently on a public entry — a sign-in gate. Entry-based on purpose: in-app navigation into a private page does not re-run the gate; a private view renders its signed-out state when the snapshot carries no member data, and the API stays the authority. The entry is resolved by the same URL > `initialNavState` > default ladder `PageManager` uses (`resolveMountEntry`), so under a path or hash router the gate phase sees the page the URL names.
 
-- Cookie writes are state management, not rendering — violates the rendering-only scope line.
-- Cookie semantics are studio concerns (sameSite, domain rules, GDPR scope, SSO).
-- Same precedent as `DataSource.cacheTtlMs`: declarative metadata; behaviour stays studio-side.
+**Two-phase contract: `precheck` for fast-path skip; `mount` for UI.** A sign-in gate verifies the session in `precheck` (`'allow'` if valid, `'gate-required'` otherwise — no UI flash for signed-in visitors). `precheck` runs on every mount and every remount: keep it cheap.
+
+**`'block'` leaves the gate's UI in place.** The framework paints nothing else. The cartridge author writes the "you're blocked" message inside `mount()`. A gate that wants to block *and* send the visitor somewhere calls `location.assign()` itself and returns `'block'`.
+
+**`mount()` may never settle — the redirect round trip.** A sign-in gate that navigates to an identity provider unloads the page, by design. Re-entry is `precheck` on the next mount: the host session now exists, so it allows and no UI re-shows. The return URL carries the nav state — link to `/auth/login?next=<pathname+search>` and have the host redirect back to `next` (same-origin only); hosts with no URL router serialise `app.getNavigationState()` into `next` and re-supply it as `initialNavState`. In-page flows (a wallet prompt) resolve `mount()` in place and need none of this. A gate whose `mount` reloads the page after the host set the cookie is this shape too — and if the next request is a server-rendered private page that is never mounted (Section 4.9), there is no next `precheck` at all; both sentences are true.
+
+**Remounts re-run every gate.** `update()` / `updatePages()` remounts exist to get fresh data, and freshness wins over a remembered verdict. The one hand-off is `mountCartridge({ satisfiedGates })`: the ids a server render already met (from the SSR result's `gates.satisfied`), skipped once on the initial mount and narrated `gate:allowed { via: 'server' }`.
+
+**Hydrate: the runtime restores the server's markup after a gate that painted into the render root allows.** That guarantee covers the render root only. A gate that paints or mutates anywhere else — an overlay appended beside the render root, `document.body.style` — undoes it itself in `destroy()`. The contract is "undo what you did", not only "what you did to the host".
+
+**Narration.** `gate:precheck { gateId, decision }`, `gate:mount`, `gate:allowed { via: 'precheck' | 'mount' | 'server' }`, `gate:blocked` on the gate context bus. The precheck/mount ratio is the number that says whether a chunked-gate hook would pay for itself; until then, keep a gate's SDK behind `await import()` inside `mount()` — anything on `Cartridge.gates` ships in every bundle that imports the cartridge.
+
+**`persist` is documentation with a type.** The framework never reads it; it exists so a host that writes storage has one declared place to read the key, lifetime and outcome from. One hint or an array with `outcome: 'pass' | 'fail'` — a real age gate remembers a pass across sessions and a fail for this tab. Hosts with their own session stack (a server-set cookie the gate never touches) ignore it entirely; that pattern is first-class. Three reasons the framework writes nothing (locked decision): cookie writes are state management, not rendering; cookie semantics are host concerns (sameSite, domain, GDPR scope, SSO); same precedent as `DataSource.cacheTtlMs`.
+
+**Cookie consent is not a gate.** A widget stays usable without consent and consent never blocks anything; model it as a consent provider the views read.
 
 ```ts
-// ✅
+// ✅ — an age gate: runs on every mount, cheap precheck, two lifetimes declared
 const ageGate: Gate<MyConfig> = {
   id: 'age-verification',
   isEnabled: (config) => config.ageVerification.enabled,
   precheck: async () => {
-    const verified = readSessionStorage('mycart:age-verified') === 'true';
+    const verified = localStorage.getItem('mycart:age-verified') === 'true';
     return verified ? 'allow' : 'gate-required';
   },
   mount: async (host) => {
-    // Render modal; resolve 'allow' on user confirm or 'block' on cancel.
+    // Render modal; resolve 'allow' on confirm or 'block' on cancel.
   },
   destroy: () => undefined,
-  persist: { key: 'mycart:age-verified', scope: 'session' },
+  persist: [
+    { key: 'mycart:age-verified', scope: 'persistent', outcome: 'pass' },
+    { key: 'mycart:age-failed', scope: 'session', outcome: 'fail' },
+  ],
+};
+
+// ✅ — a sign-in gate: private entries only, the host's session is the truth
+const loginGate: Gate<MyConfig> = {
+  id: 'login',
+  appliesTo: 'private',
+  isEnabled: () => true,
+  precheck: async () => {
+    const res = await fetch('/auth/session', { credentials: 'same-origin' });
+    return res.ok ? 'allow' : 'gate-required';
+  },
+  mount: async (host) => {
+    host.innerHTML = signInPanel(`${location.pathname}${location.search}`);
+    return 'block'; // the link leaves the page; re-entry is precheck on the next mount
+  },
+  destroy: () => undefined,
 };
 ```
 
@@ -152,6 +183,8 @@ const ageGate: Gate<MyConfig> = {
 **Page graph is statically declared.** Cartridges with fixed templates (the common case) hardcode the page list — no need for dynamic discovery.
 
 **Templates are not config branches.** Don't use templates to A/B different feature toggles; use cartridge config for that. Templates are *page-graph shapes* — different sets of pages with different navigation flows.
+
+**A page can be private.** `{ id: 'members', type: 'members', enabled: true, private: true }` marks a page that exists for one signed-in visitor: the SSR runner refuses or renders it per request, no adapter ever runs for it, and a gate declared `appliesTo: 'private'` runs only on mounts that start there (Section 4.9). It is a page-graph property, not a view capability, so both the server and a chunked browser cartridge read the same answer off the same `Page`. The default entry does not skip private pages: a template whose first enabled page is private has a private default entry and `/` refuses anonymously — right for an all-private site, a surprise for a public site that reorders its pages, so keep a public page first unless you mean it. Pinned by test.
 
 ```ts
 // ✅
@@ -323,7 +356,7 @@ pushToMailbox('__AIRO_MY_CARTRIDGE_PAGES__', {
 
 The server cartridge keeps `views: [...]` with full factories + capabilities — SSR uses `templateOnly()` factories that have no hydrate code, so chunking saves no bytes on the server.
 
-**Do NOT ship placeholder factories.** The framework's resolver checks the static `views[]` array first ([packages/cartridge-kit/src/cartridge-registry.ts:62-80](packages/cartridge-kit/src/cartridge-registry.ts#L62-L80)) and short-circuits on `pageType` match. A placeholder factory permanently blocks the mailbox path for that `pageType`. Empty array means "all factories arrive via mailbox."
+**Do NOT ship placeholder factories.** The framework's resolver checks the static `views[]` array first ([packages/cartridge-kit/src/cartridge-registry.ts:62-80](packages/cartridge-kit/src/cartridge-registry.ts#L62-L80)) and short-circuits on `pageType` match. A placeholder factory permanently blocks the mailbox path for that `pageType`. Empty array means "all factories arrive via mailbox." A `ViewDefinition` **without** a factory is different (0.11.0): it is a capability-only declaration, and the resolver falls through to the mailbox for it — the way a mailbox-only page type declares `csr-only`.
 
 **`capabilities` lives on the server cartridge only.** SSR coverage gating and adapter routing both consume `ViewDefinition.capabilities`; the browser doesn't filter on it. Maintaining capabilities in one place (server cartridge) is the correct mental model.
 
@@ -672,7 +705,7 @@ const csrOnly = new Set(
 );
 ```
 
-The capability declarations on `views[]` are the source of truth. Parallel constants are technical debt with a sync comment attached. When a new capability ships (`'requires-auth'`, `'requires-feed'`), extending `excludeCapabilities` or the filter predicate is a one-place change; extending three parallel constants is three opportunities to forget.
+The capability declarations on `views[]` are the source of truth. Parallel constants are technical debt with a sync comment attached. When a new capability ships (`'requires-feed'`, say), extending `excludeCapabilities` or the filter predicate is a one-place change; extending three parallel constants is three opportunities to forget. Private pages are deliberately **not** a capability: they are `TemplatePage.private` on the page graph (Section 4.9), read off the same `Page` object on the server and in a chunked browser cartridge alike — which is why there is no `REQUIRES_AUTH_PAGE_TYPES` to keep in sync in the first place.
 
 ---
 
@@ -782,6 +815,48 @@ src.onerror   = () => { /* HOST: jittered backoff + Last-Event-ID resume */ };
 **The boundary.** This drives UI from *config and data*, not from an arbitrary server-sent component tree. The page graph is statically declared by the template (§2.9) — the server can flip visibility, swap props, change which *declared* pages show, and push new data, but it cannot introduce a component type the cartridge never registered. If you need that, it's a cartridge change, not a stream.
 
 **If this pattern doesn't fit — file a feature request.** The buffer bridge above is deliberately host-side so the framework ships nothing speculative. If it's failing your team — e.g. you want a direct server-pushed-snapshot seam (`result.setData(snapshot)`) that bypasses `DataSource.fetch`, or granular append semantics for high-frequency feeds — open a feature request describing the real workload. Those are additive-compatible primitives the framework will ship once a concrete consumer validates the shape.
+
+### 4.9 Mixed public/private sites — private pages and login gates
+
+A members area is the opposite of everything else this framework does. Public pages serve three audiences from one snapshot; a private page serves one signed-in human and must reach none of the others — not the crawler, not `llms.txt`, not the sitemap, not the MCP manifest, not a shared cache. Two sentences govern the whole section, and they are signed in `gate.ts`: **a Gate decides whether to paint; whether to serve is the host's, per request.** And **bots are never gated** — private pages are refused, not gated.
+
+**Declare it on the page graph.** `{ id: 'members', type: 'members', enabled: true, private: true }` in the template (Section 1.7). Views for private pages are ordinary `ViewDefinition`s; nothing on the view says "private", because both the server and a chunked browser cartridge already hold the `Page`.
+
+**The simplest private page is never mounted.** Open with this because for a site-shaped host it is the main path, not a footnote: a members page whose renderer attaches no listeners — its writes are plain `<form method="post">` to host routes — needs no `mountCartridge` at all. The server renders it for a session, refuses it without one, and ships no script for it. No client data, no hydrate, no gate to run. Flip to mounting the day the page gains a listener; until then, the page that ships zero client bytes is the one you do not hydrate. (This is the honest answer to "how do I avoid shipping the snapshot to the browser": don't hydrate what has no interactivity.)
+
+**Refuse first, then ask who is asking.** The server flow that keeps the entry ladder in one place:
+
+```ts
+// 1. Render as an anonymous request would. Public pages come back rendered;
+//    a private entry comes back refused, with nothing run and nothing inlined.
+let result = await renderAppWithPublication({ cartridge, appConfig, snapshot: publicSnapshot, publicationCtx, document, initialNavState });
+
+if (result.skipped?.reason === 'private') {
+  // 2. Only now read the cookie. Public pages never touch it — true by construction.
+  const session = readSession(req);
+  if (!session) return respond401Shell();            // data-airo-mode="csr", noindex, no-store
+  // 3. Build the private slice and render for this session. Adapters still never run.
+  const privateSnapshot = { ...publicSnapshot, member: memberSliceFor(session.userId, slug) };
+  result = await renderAppWithPublication({ ...sameOptions, snapshot: privateSnapshot, renderPrivate: true });
+  res.set('Cache-Control', 'private, no-store').set('Vary', 'Cookie').set('X-Robots-Tag', 'noindex');
+}
+```
+
+Two runner calls on a signed-in private request; the first is entry resolution and a refusal, the second the render. The host never re-derives which page the URL names — the runner did — and the private branch is the only place the cookie is read. Branch on `skipped` **before** `headFromPublication`: a private refusal has no canonical, and a "no canonical → 404" rule written for public pages will misfire on it.
+
+**`renderPrivate` is the one explicit unlock.** The framework verifies nothing (rendering-only) and reads no other input — a host that passes country or locale into anything must never unlock a private page by accident, so the unlock is this flag and only this flag. Set it after your handler has verified the session for this request. With it the page renders as HTML only; adapters never run for a private entry, so there is no JSON-LD, no head-meta, nothing for the sitemap or `llms.txt`, by construction rather than by remembering.
+
+**Authenticated but not entitled is a private render with an empty slice, not a refusal.** A valid session whose subject the site has not linked or licensed gets `renderPrivate: true` and a snapshot with `member: { …, entitlement: null }`, and the view renders "not linked". Not 401, not 403: distinguishing unknown, revoked and linked-to-someone-else tells an anonymous caller which guess was warm. The page flag decides the slice; the session decides render-versus-refuse.
+
+**Key the private slice on the page, never on the session.** `member` is built only when the resolved entry page is `private: true`. A signed-in visitor's public pages are byte-identical to an anonymous visitor's, which is what makes them shared-cacheable at all; a slice keyed on "session present" leaks member data into a `Cache-Control: public` response the moment someone signed in loads the home page. Pin it with a smoke check.
+
+**Member data never enters a snapshot built for a machine route.** Adapters and MCP tools are page-blind: they publish whatever the snapshot holds. `/sitemap.xml`, `/llms.txt`, `/mcp/call` and every feed route build their snapshots without a session, so the private slice is simply never there. A host that co-locates tool dispatch with the page render — one snapshot, one call, every tool answer stamped with the page's id — splits the two on a private request; the tools never see the private slice.
+
+**Headers are the guard.** `Cache-Control: private, no-store`, `Vary: Cookie`, `X-Robots-Tag: noindex` and a `<meta name="robots" content="noindex">` on every private response; `Disallow` the private prefixes in `robots.txt`. Derive them from the resolved entry page's `private` flag, never from a path prefix.
+
+**The client half, when the page is interactive.** The 401 shell mounts `mode: 'csr'`; the gate (Section 1.5, `appliesTo: 'private'`) runs before any fetch, prechecks the session, and paints the sign-in panel on `'gate-required'`. Its one round trip is deliberate: session validity stays a server opinion, not a marker cookie that can drift. A signed-in page the server rendered mounts `mode: 'hydrate'` with `satisfiedGates` from the SSR result's `gates.satisfied` (the host prints them as `data-airo-gates-satisfied` on the mount root), so the gate that exists to establish the session is not re-asked by the render that required it; hydrate attaches listeners and refetches the private slice through a members DataSource with the cookie — the first page is SSR, everything after it is CSR. `gates.pending` is what a host emits as `data-airo-gate="pending"` to hide content until the client gate resolves (the runtime flips it to `passed` / `blocked` / `error`); under a one-gate-fan-out it names the one framework gate — "something is pending", not which instance.
+
+**What the framework does not do.** No identity side channel into views: the snapshot your handler builds for a verified session is the per-request reference, and it stays byte-identical on hydrate. No gate verdict cache across remounts: a remount exists to get fresh data. No `resolveGate` chunking hook yet: `await import()` inside `mount()` keeps a gate's SDK out of the landing bundle, and `gate:precheck` gives the ratio that would justify a hook. OAuth for an MCP endpoint is host-side and not this section.
 
 ---
 
@@ -963,13 +1038,7 @@ const result = await renderAppWithPublication({
 
 Don't hand-roll the `Template → AppConfig` translation. `mountCartridge` and `templateToAppConfig` ship the same mapping (subset → `AppConfig.pages` with empty layout placeholders); duplicating the logic in your SSR entry is exactly the parallel-list anti-pattern (Section 3.12) one layer up.
 
-Default-excludes `['csr-only']`. Compose additional capability gates via `excludeCapabilities`:
-
-```ts
-const anonymouslySafe = filterServerSafeCartridge(myCartridge, {
-  excludeCapabilities: ['csr-only', 'requires-auth'],
-});
-```
+Default-excludes `['csr-only']`. Compose additional capability gates via `excludeCapabilities` when a future server-unsafe tag ships. Its axis is *execution* safety — can this renderer run in Node — not publication policy: private pages are a page flag the runner refuses or renders per request (Section 4.9), never something to filter out of `views[]`.
 
 Two reasons to filter at import (not just rely on the dispatch gate):
 
@@ -988,7 +1057,7 @@ const csrOnlyPageTypes = new Set(
 
 One source of truth (`ViewDefinition.capabilities`) — no drift, no sync comment, no parallel list to maintain. See Anti-pattern 3.12 for why parallel runtime allowlists are a smell.
 
-**Mailbox-only cartridges** (views registered via `pushToMailbox` on chunk load, no static `views[]`) skip the capability check at this layer — the flag isn't available before the chunk loads. Cartridges that need the gate must ship a static `ViewDefinition` placeholder in `views[]` with `capabilities` set; `filterServerSafeCartridge` and the dispatch gate both read from that array.
+**Mailbox-only cartridges** (views registered via `pushToMailbox` on chunk load, no static `views[]`) skip the capability check at this layer — the flag isn't available before the chunk loads. Cartridges that need the gate ship a **factory-less** `ViewDefinition` in `views[]` with `capabilities` set: since 0.11.0 `factory` is optional, and the resolver falls through to the mailbox for an entry that has none instead of letting it shadow the chunk. `filterServerSafeCartridge` and the dispatch gate both read from that array. (Never ship a placeholder *factory* — that still blocks the mailbox path.)
 
 Don't claim `'ssr-safe'` if your renderer imports `window` or third-party browser-only libs at module scope. The honest declaration is a feature, not a failure.
 

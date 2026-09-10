@@ -2,6 +2,72 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why this line is `0.11.0`
+
+The gate reshape below changes behaviour every consumer can feel — gates run **before** the data fetch, `createCartridgeApp` no longer runs them, `runGates` returns an object — and adds the surface 1.0.0 will freeze: `Page.private`, `renderPrivate`, `Gate.appliesTo`, `satisfiedGates`, `resolveMountEntry`. A `^0.10` range must not pull that silently; the minor slot makes the upgrade deliberate, and 1.0.0 freezes the fixed gate contract rather than the one with the wrong `blockedBy`.
+
+Both consumers shaped this line on the bridge (`msg_mtvaicmu_ad3aee`, `msg_mtva69kk_de152d`); the reviewed plan, with every decision and its rationale, is [`docs/designs/gate-reshape-0.11.md`](docs/designs/gate-reshape-0.11.md). Two sentences the framework now signs, verbatim in `gate.ts`: **a Gate decides whether to paint; whether to serve is the host's, per request** — the gate is UX, the host's API and SSR handler are the boundary. And **bots are never gated** — SSR never runs gates; private pages are refused, not gated.
+
+**Upgrading:** if you call `runGates` directly, read `result.verdict` / `result.blockedBy` instead of comparing to a string. If you call `createCartridgeApp` directly, it is now synchronous, returns `App`, and runs no gates — call `runGatePhase` first if you relied on them. If you read `renderAppWithPublication`'s `skipped` by presence, branch on `skipped.reason` — `'private'` is new and is a 401, not a csr-only partial-win. Everything else is additive.
+
+## `@airo-js/core` 0.11.0 — 2026-09-10
+
+### Added
+- **`Page.private?: boolean`** — a page that exists for one signed-in visitor, never for the public. A page-graph property, not a renderer capability, so a chunked browser cartridge (`views: []`) reads the same answer off the same `Page` object as the server. Core interprets nothing off it; the SSR runner, the runtime's gate phase and hosts do.
+- **`resolveMountEntry({ pages, isGatePage?, enableRouter?, initialNavState? })`** — the URL > `initialNavState` > default-entry ladder as one exported function. Until now it lived only inside `PageManager`'s constructor, inside `createApp`; the runtime's gate phase needs the answer before that, so the ladder is a function both call and the page the gates are scoped against is the page that mounts. With it: `createRouter(option, onNavigate, validPages)` (the one place a `RouterOption` becomes a router — constructors are side-effect free, `start()` attaches listeners), `parseRouterUrl` and `validPagesFor`.
+
+### Changed
+- `findEntryPage`, `resolveEntryPage`, `describeEntryResolution` and their types moved to `entry-resolution.ts`; still exported from the barrel and re-exported from `page-manager.ts`, so nothing importable changed. `PageManager`'s constructor now seeds `navState` via `resolveMountEntry` and `initRouter` builds its router via `createRouter`; behaviour is byte-identical (the existing suite is unchanged) and the URL is now decoded by the same code on both sides of `createApp`.
+
+## `@airo-js/cartridge-kit` 0.11.0 — 2026-09-10
+
+**`CONTRACT_VERSION` 0.9.0 → 0.10.0** — the gate contract and the page graph gain surface; one helper changes shape.
+
+### Fixed
+- **`blockedBy` named the wrong gate.** `createCartridgeApp` learned which gate blocked by re-walking every gate's `precheck` after the fact, and that walk returned the first gate *without* a precheck unconditionally — so with `[consent (no precheck, allows), login (blocks)]` the mount reported `consent`. It also replayed prechecks against a stub event bus (any `events.emit` in a precheck went into the void) and cost a second network round-trip for a gate that verifies a token. The runner knows which gate blocked; it now says so. First direct tests for `runGates`.
+
+### Changed
+- **BREAKING: `runGates` returns `{ verdict: 'allow' } | { verdict: 'block'; blockedBy }`** instead of `'allow' | 'block'`. No caller outside this repo's own `createCartridgeApp` existed in either consumer.
+- **BREAKING: `createCartridgeApp` runs no gates, is synchronous, and returns `App`.** `CartridgeAppResult` and `CartridgeAppDeps.gateScope` are removed. Gates were inside it because it was the only mount helper when they shipped, and because it needs the snapshot they inherited "after the data fetch" — a sign-in gate could not protect a member fetch from behind the fetch. Its only caller was the runtime, which now runs the gate phase itself before the data phase. A direct caller that relied on gates running here calls `runGatePhase` first.
+- **`ViewDefinition.factory` is optional.** An entry without a factory is a capability-only declaration for a page type whose factory arrives through the chunk mailbox; the resolver (`createCartridgeRegistry`, `getDefaultRenderResolver`) falls through to the mailbox for it instead of letting it shadow the chunk. From the second consumer's ask: a mailbox-only page type can now declare `csr-only` without a second cartridge.
+- `gate.ts` header rewritten around the two sentences the framework signs, the redirect round trip (`mount()` may never settle; re-entry is `precheck` on the next mount; the return URL carries the nav state), and hydrate. Cookie consent leaves the gate use-case list — a widget stays usable without consent and consent never blocks; model it as a consent provider the views read.
+
+### Added
+- **`TemplatePage.private?: boolean`**, round-tripped onto `Page.private` by `templateToAppConfig`.
+- **`Gate.appliesTo?: 'all' | 'private'`** (default `'all'`). A `'private'` gate runs only on mounts whose resolved entry page is `private: true`; on a public entry it is skipped without precheck, mount or narration; when no entry can be resolved it runs (the unknowable case fails closed). Entry-based, not graph-based: a gate guards the mount it runs on.
+- **`selectGates(gates, entryPage)`** and **`runGatePhase({ gates, entryPage, host, ctx, satisfiedGates? })`** in `gate-phase.ts` — selection plus `runGates` plus the server-verified hand-off, the single entry point the runtime calls. `satisfiedGates` skips the named gates and narrates them as `gate:allowed { via: 'server' }`.
+- **Gate lifecycle events** on the gate context bus: `gate:precheck { gateId, decision }`, `gate:mount { gateId }`, `gate:allowed { gateId, via: 'precheck' | 'mount' | 'server' }`, `gate:blocked { gateId }`. `GateLifecycleEvents` types the payloads.
+- **`Gate.persist` accepts an array of `PersistHint`** with `outcome?: 'pass' | 'fail'` — a real age gate remembers a pass across sessions and a fail for this tab. The single-hint shape is unchanged. Its docblock now opens with the fact the studio consumer asked us to state plainly: the framework never reads this field; it is documentation with a type. Whether it survives 1.0 as a field is on the freeze review list — this line has produced three declared-and-unread primitives (`postProcessors` until 0.9.0, `requires` until 0.10.0, and this), and the freeze should not add a fourth.
+
+## `@airo-js/ssr` 0.11.0 — 2026-09-10
+
+### Added
+- **Private pages are refused, not published.** `renderAppWithPublication` resolves the entry page BEFORE running adapters. A `private: true` entry runs no adapter and inlines nothing; without `renderPrivate: true` it is refused with `skipped: { reason: 'private' }` (a 401 for a root-mounted host, the way `fellBack.reason === 'unknown-page'` is a 404 — nothing is substituted, so it is never a fallback); with it the page renders as HTML only. Page-private is checked before the view's `csr-only` capability and refusal wins, so a private page can never take the JSON-LD partial-win branch anonymously. `renderPrivate` is the one explicit unlock: the framework verifies nothing and reads no other input to decide, so a country- or locale-scoped host cannot open private pages by accident.
+- **`gates: { pending, satisfied }` on the result** — what the client mount will do about gates for this entry page, via the same `selectGates` the runtime uses. `pending` for hosts that ship `data-airo-gate="pending"` and hide under it (the no-paint case); `satisfied` = the `appliesTo: 'private'` gates a `renderPrivate` render already met, for `mountCartridge({ satisfiedGates })`.
+
+### Changed
+- **`skipped.reason` is an open union** (`'csr-only' | 'private' | (string & {})`, the 0.10.0 `AdapterSkipped` precedent). A consumer that labels the skip by presence — `kind: 'skipped-csr-only'` whenever `result.skipped` exists — should branch on `reason`.
+- `filterServerSafeCartridge`'s docblock no longer promises a `'requires-auth'` capability; the helper's axis is execution safety and private pages are a page flag the runner handles. Mailbox-only page types carry capabilities through a factory-less `ViewDefinition` now that the resolver falls through for one.
+
+## `@airo-js/runtime` 0.11.0 — 2026-09-10
+
+### Changed
+- **Gates run BEFORE the data fetch.** `mountCartridge` resolves the entry page (`resolveMountEntry`, the same ladder `PageManager` uses, so under a path or hash router the gate phase sees the page the URL names), runs `runGatePhase`, and only then fetches and runs the pipeline. A blocked mount costs no network, runs no transformer and never fires `onPipelineComplete`. `onShellReady` still fires first. A throwing gate reports **`onError('gate')`** — the phase `MountPhase` declared and nothing emitted until now.
+- **Hydrate + a gate that paints into the render root.** In `mode: 'hydrate'` the runtime snapshots the server's markup before the gate phase and restores it when a gate that painted into the render root resolves `'allow'`, so hydration adopts the server's DOM and not the gate's; on `'block'` the gate's paint stays. A contract guarantee for a synthetic case rather than a consumer's shape: the studio consumer's modal is appended beside the render root, which this never touches. Anything a gate mutates outside the render root it undoes itself.
+- Remounts through `update()` / `updatePages()` re-run every gate, as before, and a blocked remount throws the documented error — now pinned by a regression test the suite had explicitly deferred.
+
+### Added
+- **`satisfiedGates?: ReadonlyArray<string>`** on `MountCartridgeOptions` — gate ids the host's server render already satisfied for the initial mount (from the SSR result's `gates.satisfied`, printed on the mount root as `data-airo-gates-satisfied` and passed by the client entry). Skipped once, no precheck, narrated `gate:allowed { via: 'server' }`; remounts ignore it, because a remount exists to get fresh data. The runtime reads no attribute itself.
+- **The no-paint attribute.** A host that ships `data-airo-gate="pending"` on the host element gets it resolved on every exit of the gate phase — `passed` (including "no gate applied"), `blocked`, `error`. Absent → never written.
+
+## `@airo-js/embed` 0.11.0 — 2026-09-10
+
+Sync rev; the line moves together. No source change — `defineAiroApp` forwards to `mountCartridge`, whose gate phase moved beneath it.
+
+## `@airo-js/mcp` 0.11.0 — 2026-09-10
+
+Sync rev; the line moves together. No source change — tools stay page-blind by design; a host keeps private data out of the snapshot it dispatches against.
+
 ## Why the fix is `0.10.1` and not `1.0.0`
 
 The typed `requires` below changes a published interface at compile time, which strict semver would call a major. It ships in the patch slot on purpose. `^0.10.0` reaches it automatically, and what it reaches consumers with is **loud**: a declaration the snapshot cannot satisfy stops compiling, naming the offending literal. That is the opposite of the failure 0.10.0's minor slot was guarding against — a silent runtime skip — and it is the check both consumers asked for after their audits. Both had already corrected their declarations against 0.10.0, so for them the bump is a no-op that proves the type agrees with their audit. The one migration a consumer may hit is a hoisted `SchemaFieldRef[]` constant, which now needs its snapshot type.

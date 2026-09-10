@@ -1,26 +1,27 @@
 # `@airo-js/runtime`
 
-Cartridge mount orchestration for the airo framework. Single-call shell setup → optional data fetch → pipeline → mount via `createCartridgeApp`. Studio-side concerns (theme, error UI, debug observers) extend via hooks rather than forking the orchestration.
+Cartridge mount orchestration for the airo framework. Single-call shell setup → entry resolution → gate phase → optional data fetch → pipeline → mount via `createCartridgeApp`. Studio-side concerns (theme, error UI, debug observers) extend via hooks rather than forking the orchestration.
 
-> Status: **v0.2.0**. CSR + SSR-hydrate single-mount surface. Per-page chunk loading and live `update()` still deferred (additive — current callers won't break).
+> Status: CSR + SSR-hydrate single-mount surface with live `update()` / `updatePages()`. Per-page chunk loading via `resolveView`.
 
 ## What's in here
 
 - `mountCartridge(opts)` — the only entry point. Runs the full mount sequence.
 - `MountCartridgeOptions<TData, TConfig>` — required: `cartridge`, `config`, `template`, `host`. Everything else optional.
-- `MountCartridgeResult` — discriminated union: either `{ blocked: false, app, shell, destroy }` or `{ blocked: true, blockedBy, shell, destroy }`.
+- `MountCartridgeResult` — discriminated union: either `{ blocked: false, app, shell, destroy, update, updatePages }` or `{ blocked: true, blockedBy, shell, destroy }`.
 - `ShellHandle` — what `onShellReady` receives: `renderRoot`, `styleRoot`, `events`, `rootId`.
-- `MountPhase` — phase identifier for `onError`: `'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount'`.
+- `MountPhase` — phase identifier for `onError`: `'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount' | 'resolve-view'`.
 
 ## Why this exists
 
 Without this package, every host app that runs a cartridge would inline the same ~75 LOC of orchestration:
 
 1. Set up the isolation root + style root.
-2. Pick a data source, run `dataSource.fetch()` (or skip if `preloadedData` was passed).
-3. Run the cartridge's transformer chain via `createPipeline`.
-4. Build `AppConfig` from the template's pages.
-5. Delegate to `createCartridgeApp` (which handles gates, app context, and `createApp`).
+2. Resolve the entry page (URL > `initialNavState` > default) and run the gates that apply to it — **before** any data.
+3. Pick a data source, run `dataSource.fetch()` (or skip if `preloadedData` was passed).
+4. Run the cartridge's transformer chain via `createPipeline`.
+5. Build `AppConfig` from the template's pages.
+6. Delegate to `createCartridgeApp` (app context, renderer resolution, `createApp`).
 
 That's generic plumbing. The studio-specific bits (theme injection, error UI, multi-runtime toggles, config translation) are the only things that vary between host apps. `mountCartridge` ships the plumbing; host apps extend via `onShellReady` and `onError`.
 
@@ -89,10 +90,12 @@ result.destroy();
 | Concern | Owner |
 |---|---|
 | Isolation root + style root setup | `@airo-js/runtime` (wraps `@airo-js/core`'s `setupIsolationRoot`) |
-| Gate sequencing | `@airo-js/runtime` (delegates to `runGates` via `createCartridgeApp`) |
+| Entry resolution before gates | `@airo-js/runtime` (delegates to `resolveMountEntry` from `@airo-js/core` — the same ladder `PageManager` uses) |
+| Gate sequencing | `@airo-js/runtime` (delegates to `runGatePhase` from `@airo-js/cartridge-kit`; runs BEFORE the data fetch) |
 | Data fetch (or `preloadedData` shortcut) | `@airo-js/runtime` |
 | Transformer pipeline | `@airo-js/runtime` (delegates to `createPipeline`) |
-| `createCartridgeApp` invocation | `@airo-js/runtime` |
+| `createCartridgeApp` invocation | `@airo-js/runtime` (synchronous; no gates inside it) |
+| Session, cookies, who may see a private page | **Host app** — a Gate decides whether to paint; whether to serve is the host's, per request |
 | Theme injection | **Host app** (via `onShellReady`) |
 | Global / skeleton CSS | **Host app** (via `onShellReady`) |
 | Config-shape translation (studio config → cartridge config) | **Host app** (upstream of `mountCartridge`) |
@@ -119,7 +122,18 @@ Fires when a phase throws. The error is then re-thrown — the runtime never sil
 
 - Rendering studio-specific error UI in `host`.
 - Logging / telemetry.
-- Triaging by phase: `'fetch'` errors get a retry button, `'pipeline'` errors are likely cartridge bugs.
+- Triaging by phase: `'gate'` errors are a precheck that could not verify (offer a retry), `'fetch'` errors get a retry button, `'pipeline'` errors are likely cartridge bugs.
+
+## Gates (0.11.0)
+
+Gates run **before** the data fetch: a blocked mount costs no network and no pipeline. The runtime resolves the entry page first (`resolveMountEntry` — URL > `initialNavState` > default, the same ladder `PageManager` uses), then runs `runGatePhase`. A gate declared `appliesTo: 'private'` runs only when that entry page is `private: true`.
+
+- **`satisfiedGates`** — gate ids the host's server render already met for this initial mount (from `renderAppWithPublication`'s `gates.satisfied`; the host prints them as `data-airo-gates-satisfied` on the mount root and its client entry passes them here). Skipped once, narrated `gate:allowed { via: 'server' }`. Remounts re-run every gate — a remount exists to get fresh data.
+- **`data-airo-gate`** — a host that needs zero painted frames before a gate ships `data-airo-gate="pending"` on the host element and hides under it with its own CSS; the runtime resolves the attribute on every exit of the gate phase (`passed`, including "no gate applied"; `blocked`; `error`). Absent → never written.
+- **Hydrate** — the runtime snapshots the server's markup before the gate phase and restores it when a gate that painted into the render root allows. Anything a gate mutates elsewhere it undoes itself.
+- **Narration** — `gate:precheck`, `gate:mount`, `gate:allowed`, `gate:blocked` on `shell.events`.
+
+A Gate decides whether to paint; whether to serve is the host's, per request. Bots are never gated. The full contract is in `@airo-js/cartridge-kit`'s `gate.ts` and best-practices §1.5 / §4.9.
 
 ## Migration from inline orchestration
 
@@ -128,15 +142,15 @@ If your host app today does any of:
 ```ts
 const { renderRoot } = setupIsolationRoot(host, 'shadow');
 const events = new EventBus();
-const gateResult = await runGates({ ... });
-if (gateResult === 'block') return;
+const gate = await runGatePhase({ gates: cartridge.gates, entryPage, host: renderRoot, ctx: { config, events } });
+if (gate.verdict === 'block') return;
 const data = await cartridge.dataSources[0].fetch(...);
 const pipeline = createPipeline(cartridge.transformers, ...);
 const snapshot = pipeline.runTransformers(data, ...);
 const app = createApp(appConfig, { ..., resolveRenderer: cast }); // ← cast smell
 ```
 
-Replace it with one call to `mountCartridge(opts)`. The cast disappears (the runtime calls `createCartridgeApp`, which handles the registry's heterogeneous typing internally).
+Replace it with one call to `mountCartridge(opts)`. The cast disappears (the runtime calls `createCartridgeApp`, which handles the registry's heterogeneous typing internally), and the gate phase is scoped to the entry the URL names without you re-deriving it.
 
 ## SSR-hydrate path (v0.2)
 

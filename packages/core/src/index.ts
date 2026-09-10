@@ -134,4 +134,4 @@ export { parseHtml, parseHtmlFragment } from './parse-html.js';
 
 export const PACKAGE_NAME = '@airo-js/core';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.10.1';
+export const VERSION = '0.11.0';

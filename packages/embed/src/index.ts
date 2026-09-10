@@ -23,4 +23,4 @@ export { defineAiroApp } from './define-airo-app.js';
 
 export const PACKAGE_NAME = '@airo-js/embed';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.10.1';
+export const VERSION = '0.11.0';

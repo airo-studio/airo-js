@@ -67,12 +67,18 @@
  *
  * Gates are CSR-only. On the client, in hydrate mode, the runtime snapshots
  * the server's markup before the gate phase and restores it when a gate
- * that painted resolves `'allow'`, so hydration adopts the server's DOM and
- * not the gate's; on `'block'` the gate's paint stays. Hosts that need zero
- * painted frames before a gate ship the hide in the initial HTML
- * (`data-airo-gate="pending"`, from the SSR result's `gates.pending`) and
- * the runtime flips the attribute to `passed` / `blocked` / `error` when the
- * phase resolves.
+ * that painted INTO THE RENDER ROOT resolves `'allow'`, so hydration adopts
+ * the server's DOM and not the gate's; on `'block'` the gate's paint stays.
+ * That guarantee covers the render root only. A gate that paints or mutates
+ * anywhere else — an overlay appended beside the render root, a
+ * `document.body.style` change — undoes it itself in `destroy()`: the
+ * contract is "undo what you did", not only "what you did to the host".
+ * Hosts that need zero painted frames before a gate ship the hide in the
+ * initial HTML (`data-airo-gate="pending"`, from the SSR result's
+ * `gates.pending`) and the runtime flips the attribute to `passed` /
+ * `blocked` / `error` when the phase resolves. Under a one-gate-fan-out (one
+ * framework gate running N configured gates) `pending` names the one
+ * framework gate — it means "something is pending", not which instance.
  *
  * ## Remounts
  *
@@ -196,6 +202,15 @@ export interface Gate<TConfig = unknown> {
   destroy(): void;
 
   /**
+   * **Documentation with a type: the framework never reads this field.**
+   * Nothing in `@airo-js/*` consumes `persist` — not the runner, not the
+   * runtime, not the SSR path — so two gates can declare identical hints
+   * and behave differently and nothing will say so. It exists so a host
+   * that implements the storage write has one declared place to read the
+   * key, lifetime and outcome from. Whether it survives 1.0 as a field or
+   * as a docs convention is an open review item; do not build on it
+   * being read.
+   *
    * Persistence convention — METADATA ONLY. Cartridge declares the hint;
    * the host app implements the actual storage write.
    *
