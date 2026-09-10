@@ -9,19 +9,24 @@
  *
  * This helper does the construction. Consumers pass the cartridge + config
  * + already-post-Transformer snapshot, and it threads everything into
- * `createApp` with the right typing.
+ * `createApp` with the right typing. It is synchronous and returns the
+ * `App` handle.
  *
- * Async (returns `Promise<CartridgeAppResult>`) because pre-render Gates
- * run BEFORE views paint, and Gates are async (precheck() may verify a
- * token over the network, mount() awaits the user's decision). When all
- * gates clear, the helper proceeds with `createApp` and returns the App
- * handle. When any gate blocks, no App is created and the helper returns
- * `{ blocked: true }` — the gate's UI stays in `host` and the framework
- * paints nothing else.
+ * ## Gates do not run here (0.11.0)
+ *
+ * Until 0.11.0 this helper ran the cartridge's Gates before `createApp`,
+ * which is why it was async and why gates ran AFTER the data fetch — this
+ * helper needs the snapshot, so anything inside it inherited "after
+ * snapshot". A sign-in gate cannot protect a member-data fetch from
+ * behind the fetch. The gate phase is now `runGatePhase` (in this
+ * package), and `@airo-js/runtime`'s `mountCartridge` runs it before the
+ * data phase. Its only caller was the runtime, so no consumer path
+ * changes; a direct caller that relied on gates running here must call
+ * `runGatePhase` itself first.
  *
  * Why this lives in `@airo-js/cartridge-kit` and not `@airo-js/core`: putting
  * it in core would require core to depend on cartridge-kit (for `Cartridge`
- * and gate types), creating a circular workspace dependency. Keeping it
+ * and view types), creating a circular workspace dependency. Keeping it
  * here lets core stay cartridge-unaware.
  */
 
@@ -34,7 +39,6 @@ import { createApp } from '@airo-js/core';
 
 import type { Cartridge, CartridgeRegistry } from './cartridge.js';
 import type { CartridgeAppContext } from './view.js';
-import { runGates } from './run-gates.js';
 import { getDefaultRenderResolver } from './cartridge-registry.js';
 
 export interface CartridgeAppDeps<TPageType extends string = string>
@@ -61,70 +65,29 @@ export interface CartridgeAppDeps<TPageType extends string = string>
    * > lazy WeakMap-memoised default built from the cartridge alone.
    */
   registry?: CartridgeRegistry;
-  /**
-   * Host-app-supplied scope passed through to gate `precheck` / `mount`
-   * via `GateContext.scope`. Host apps with tenancy or auth use this to
-   * thread user_id / locale / country into gates without making them
-   * host-app-specific.
-   */
-  gateScope?: Record<string, string | undefined>;
 }
-
-export type CartridgeAppResult =
-  | { app: App; blocked: false }
-  | { app: null; blocked: true; blockedBy: string };
 
 /**
  * Mount a cartridge against a `host` element. Sequence:
  *
- *   1. Run pre-render gates (see `runGates`). Gates paint into `host` if
- *      they need user input. First gate that resolves `'block'`
- *      short-circuits — the helper returns early with `{ blocked: true }`.
- *   2. Build `CartridgeAppContext` from cartridge id + config + snapshot.
- *   3. Derive `resolveRenderer` from `cartridge.views[]` (or use the
- *      override).
- *   4. Delegate to `createApp` from `@airo-js/core` for the actual mount.
+ *   1. Build `CartridgeAppContext` from cartridge id + config + snapshot.
+ *   2. Derive `resolveRenderer` from `cartridge.views[]` (or use the
+ *      override / the registry).
+ *   3. Delegate to `createApp` from `@airo-js/core` for the actual mount.
  *
  * Snapshot is REQUIRED — caller has run the cartridge's transformer chain
  * (typically via `createPipeline().runTransformers`) and passes the result
  * here. Separating the pipeline from the mount lets consumers decide
- * caching, async pre-fetch, and re-mount semantics.
+ * caching, async pre-fetch, and re-mount semantics. Gates are the
+ * caller's phase too — see the header.
  */
-export async function createCartridgeApp<TData, TConfig, TPageType extends string = string>(
+export function createCartridgeApp<TData, TConfig, TPageType extends string = string>(
   cartridge: Cartridge<TData, TConfig>,
   config: AppConfig<TPageType>,
   snapshot: TData,
   cartridgeConfig: TConfig,
   deps: CartridgeAppDeps<TPageType>,
-): Promise<CartridgeAppResult> {
-  // Phase 1 — gates. Skip gracefully when the cartridge has none.
-  const gates = cartridge.gates ?? [];
-  if (gates.length > 0) {
-    const events = deps.events;
-    if (!events) {
-      throw new Error(
-        '[@airo-js/cartridge-kit] createCartridgeApp: gates require an `events` bus on deps. Pass `events: new EventBus()` (or your existing one) so gate UIs can emit cross-component signals.',
-      );
-    }
-    const gateResult = await runGates({
-      gates,
-      host: deps.host,
-      ctx: {
-        config: cartridgeConfig,
-        events,
-        scope: deps.gateScope,
-      },
-    });
-    if (gateResult.verdict === 'block') {
-      // The blocking gate left its UI in `host`. The framework paints
-      // nothing else; caller checks `result.blocked` to decide whether to
-      // surface a "blocked by" message in the host app. The runner names
-      // the blocker exactly — no re-walk, no second precheck.
-      return { app: null, blocked: true, blockedBy: gateResult.blockedBy };
-    }
-  }
-
-  // Phase 2 — view mount.
+): App {
   const appContext: CartridgeAppContext<TData, TConfig> = {
     cartridgeId: cartridge.id,
     config: cartridgeConfig,
@@ -153,11 +116,9 @@ export async function createCartridgeApp<TData, TConfig, TPageType extends strin
       CartridgeAppContext<unknown, unknown>
     >['resolveRenderer']);
 
-  const app = createApp<TPageType, CartridgeAppContext<unknown, unknown>>(config, {
+  return createApp<TPageType, CartridgeAppContext<unknown, unknown>>(config, {
     ...deps,
     appContext: appContext as unknown as CartridgeAppContext<unknown, unknown>,
     resolveRenderer,
   });
-
-  return { app, blocked: false };
 }

@@ -94,13 +94,15 @@ export { buildCrumbs } from './breadcrumb.js';
 
 export { escapeAttr, escapeHtml } from './escape.js';
 export type { PageManagerOptions, PostRenderHook } from './page-manager.js';
-export type { EntryFallbackReason, EntryResolution } from './page-manager.js';
+export { PageManager } from './page-manager.js';
+export type { EntryFallbackReason, EntryResolution } from './entry-resolution.js';
 export {
-  PageManager,
   describeEntryResolution,
   findEntryPage,
   resolveEntryPage,
-} from './page-manager.js';
+} from './entry-resolution.js';
+export type { MountEntry, ResolveMountEntryOptions } from './mount-entry.js';
+export { createRouter, parseRouterUrl, resolveMountEntry, validPagesFor } from './mount-entry.js';
 
 export type {
   AppLifecycleState,

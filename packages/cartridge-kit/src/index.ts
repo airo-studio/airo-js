@@ -106,7 +106,6 @@ export { runGatePhase, selectGates } from './gate-phase.js';
 
 export type {
   CartridgeAppDeps,
-  CartridgeAppResult,
 } from './cartridge-app.js';
 export { createCartridgeApp } from './cartridge-app.js';
 
