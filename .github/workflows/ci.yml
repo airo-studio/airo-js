@@ -94,6 +94,14 @@ jobs:
       - name: Embed bundle budget
         run: pnpm --filter @airo-js/embed size:check
 
+      # The runtime's reachable closure (runtime + core + cartridge-kit +
+      # log) is what every consumer page that mounts a cartridge pays.
+      # Both consumers measured 0.11.0's growth independently and asked
+      # for a number to watch before 1.0; this is it. Raising the budget
+      # is a deliberate CHANGELOG line, never a silent edit.
+      - name: Runtime closure budget
+        run: pnpm --filter @airo-js/runtime size:check
+
       - name: Shellcheck
         run: |
           shellcheck --version >/dev/null 2>&1 || sudo apt-get install -y shellcheck

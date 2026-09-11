@@ -48,6 +48,9 @@
     "test:happy-dom": "vitest run",
     "test:jsdom": "vitest run -c vitest.jsdom.config.ts",
     "test:watch": "vitest",
+    "size": "esbuild --bundle --minify --format=esm --target=es2022 src/index.ts | wc -c",
+    "size:gzip": "esbuild --bundle --minify --format=esm --target=es2022 src/index.ts | gzip -9 -c | wc -c",
+    "size:check": "node ./scripts/size-check.mjs",
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
   },
@@ -58,6 +61,7 @@
   },
   "devDependencies": {
     "@airo-js/log": "workspace:^",
+    "esbuild": "^0.21.0",
     "happy-dom": "^15.0.0",
     "jsdom": "^25.0.0",
     "vitest": "^2.1.0"

@@ -185,6 +185,9 @@ importers:
       '@airo-js/log':
         specifier: workspace:^
         version: link:../log
+      esbuild:
+        specifier: ^0.21.0
+        version: 0.21.5
       happy-dom:
         specifier: ^15.0.0
         version: 15.11.7

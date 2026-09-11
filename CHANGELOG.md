@@ -59,6 +59,10 @@ Both consumers shaped this line on the bridge (`msg_mtvaicmu_ad3aee`, `msg_mtva6
 ### Added
 - **`satisfiedGates?: ReadonlyArray<string>`** on `MountCartridgeOptions` — gate ids the host's server render already satisfied for the initial mount (from the SSR result's `gates.satisfied`, printed on the mount root as `data-airo-gates-satisfied` and passed by the client entry). Skipped once, no precheck, narrated `gate:allowed { via: 'server' }`; remounts ignore it, because a remount exists to get fresh data. The runtime reads no attribute itself.
 - **The no-paint attribute.** A host that ships `data-airo-gate="pending"` on the host element gets it resolved on every exit of the gate phase — `passed` (including "no gate applied"), `blocked`, `error`. Absent → never written.
+- **`pnpm --filter @airo-js/runtime size:check`** — a bundle-size gate for the closure reachable from `mountCartridge` (runtime + core + cartridge-kit + log, esbuild ESM minified), the same shape as the embed's, run in CI. Budget 29 KB minified / 9.5 KB gzip against a measured ~27.6 KB / ~9.0 KB. Both consumers measured this line's growth independently and asked for a number to watch before 1.0; raising the budget is allowed and is a changelog line.
+
+### Cost
+- **The closure reachable from `mountCartridge` grows by ~1.0 KB minified / ~0.27 KB gzip** (26.5 → 27.6 KB / 8.68 → 8.95 KB; esbuild, ESM, es2022). Where it went, minified: `mountCartridge` +454 B (gate phase, hydrate stash/restore, the attribute, `satisfiedGates`); the shared entry ladder +399 B net (`mount-entry` +744 B and `entry-resolution` +331 B, `PageManager` −676 B); the gate machinery +137 B net (`gate-phase` +546 B, `run-gates` +302 B for the result object and events, `createCartridgeApp` −711 B); everything else +72 B. Importing every export of core, cartridge-kit and runtime bounds the delta at +1.2 KB / +0.32 KB gzip. It is code that now runs on every mount — the gate phase and the entry ladder cannot be reached lazily without a split chunk, which IIFE consumers cannot take — so the line is paid, not trimmed, and gated from here on.
 
 ## `@airo-js/embed` 0.11.0 — 2026-09-10
 
