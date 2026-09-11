@@ -126,7 +126,7 @@ describe('mountCartridge', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test('onShellReady fires once, before gates run', async () => {
+  test('onShellReady fires once, before gates run — and gates run before the data fetch', async () => {
     const order: string[] = [];
     const gate = {
       id: 'order-probe',
@@ -144,21 +144,30 @@ describe('mountCartridge', () => {
         // no-op
       },
     };
+    const cartridge = fakeCartridge({
+      gates: [gate],
+      dataSources: [
+        fakeDataSource({
+          fetch: async () => {
+            order.push('fetch');
+            return { items: [] };
+          },
+        }),
+      ],
+    });
 
     await mountCartridge({
-      cartridge: fakeCartridge({ gates: [gate] }),
+      cartridge,
       config: {},
       template: fakeTemplate(),
       host,
-      preloadedData: { items: [] },
+      dataSourceInput: { kind: 'url', url: 'https://example.com/feed' },
       onShellReady: () => {
         order.push('shell-ready');
       },
     });
 
-    expect(order[0]).toBe('shell-ready');
-    expect(order.filter((s) => s === 'shell-ready')).toHaveLength(1);
-    expect(order.indexOf('shell-ready')).toBeLessThan(order.indexOf('gate-precheck'));
+    expect(order).toEqual(['shell-ready', 'gate-precheck', 'fetch']);
   });
 
   test('destroy() tears down the App and clears renderRoot when isolated', async () => {

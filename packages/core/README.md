@@ -9,7 +9,7 @@ The runtime engine for the airo framework. Pure rendering primitives — no doma
 - **App lifecycle** — `createApp`, `App`, `AppDeps`, lifecycle FSM
 - **Page rendering** — `PageManager`, `PageRenderer`, `PageRendererFactory`, `RenderContext`
 - **Schema** — `Page`, `PageLayout`, `Region`, `Slot`, `AppConfig`, `ComponentSettings`
-- **Navigation** — `HashRouter`, `NavigationState`, `buildCrumbs` (data-only trail helper; cartridges render their own breadcrumb DOM)
+- **Navigation** — `HashRouter` / `PathRouter` / `QueryRouter` (built from a `RouterOption` by `createRouter`), `NavigationState`, `resolveMountEntry` (the URL > `initialNavState` > default-entry ladder as one function, shared by `PageManager`, the SSR runner and the runtime's gate phase), `buildCrumbs` (data-only trail helper; cartridges render their own breadcrumb DOM)
 - **Events** — `EventBus`, `IEventBus` (snapshot-semantics observer)
 - **Style isolation** — `IsolationRoot`, `setupIsolationRoot`, `wrapInShadow` (Shadow DOM strategies: `light` / `shadow`; framework ships zero CSS — cartridges own every rule inside the shadow root)
 - **Theming** — `Theme` (CSS custom-property injection + `customCSS` escape hatch)

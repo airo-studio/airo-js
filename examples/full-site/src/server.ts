@@ -1,5 +1,5 @@
 /**
- * The whole server. ~150 lines of Express, and none of it is framework-specific.
+ * The whole server. ~250 lines of Express, and none of it is framework-specific.
  *
  * ## Read this if you take one thing from this example
  *
@@ -11,7 +11,13 @@
  * sibling `shopify-edge-worker` example is the same framework calls behind a
  * Worker `fetch` handler.
  *
- * ## Four things here are easy to get wrong
+ * The same is true of the members area: sessions, cookies, the OAuth
+ * provider and the relying party (`./auth/*`) are host code. The framework's
+ * whole involvement is the `private: true` flag on two pages, the
+ * `renderPrivate` flag this file sets after it verified a session, and a
+ * gate that paints a sign-in panel.
+ *
+ * ## Six things here are easy to get wrong
  *
  * 1. **Static assets are routed BEFORE the wildcard.** `basePath: '/'`
  *    normalises to `''`, and `''.startsWith('')` is true for every path, so
@@ -27,35 +33,88 @@
  *    `navState.page` from the page it actually resolved, so a rejected id
  *    cannot reach a renderer. See best-practices §5.10a.
  *
- * 3. **404 branches on `fellBack.reason`, never on its presence.** Only
- *    `'unknown-page'` means the url does not exist. `'disabled'` is a config
- *    state and `'gate-page'` is a real page — both legitimate 200s.
+ * 3. **404 branches on `fellBack.reason`, never on its presence** — and
+ *    `skipped` is read BEFORE `fellBack`. Only `'unknown-page'` means the
+ *    url does not exist. `'disabled'` is a config state and `'gate-page'`
+ *    is a real page — both legitimate 200s. `skipped.reason === 'private'`
+ *    is a 401, and a private refusal has no canonical, so a "no canonical
+ *    → 404" rule written for public pages would misfire on it.
  *
- * 4. **The snapshot is per request.** The DataSource takes the requested slug,
- *    so canonicals are per-page and `validate()` gates one url rather than the
- *    whole site.
+ * 4. **The snapshot is per request.** The DataSource takes the requested
+ *    slug, so canonicals are per-page and `validate()` gates one url rather
+ *    than the whole site.
+ *
+ * 5. **Member data never enters a snapshot built for a machine route, and
+ *    it is keyed on the PAGE, never on the session.** Adapters and MCP tools
+ *    are page-blind; they publish whatever the snapshot holds. `/sitemap.xml`,
+ *    `/llms.txt` and `/mcp/call` build their snapshots without a session, so
+ *    the private slice is simply never there. And the wildcard builds it
+ *    only inside the `skipped.reason === 'private'` branch — a signed-in
+ *    visitor's public pages are byte-identical to an anonymous visitor's,
+ *    which is what makes `Cache-Control: public` honest.
+ *
+ * 6. **Refuse first, then ask who is asking.** The wildcard calls the runner
+ *    WITHOUT `renderPrivate`; only on a private refusal does it read the
+ *    cookie, build the slice and call again. Two runner calls on a signed-in
+ *    private request, and the host never re-derives which page the URL
+ *    names — the runner did.
  */
+
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 import { parseHTML } from 'linkedom';
 
-import { extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
+import { escapeHtml, extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
 import { renderAppWithPublication, renderDocument, runPublicationAdapters, headFromPublication } from '@airo-js/ssr';
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 
-import { DOCS, SITE } from './content.js';
-import { SITE_CSS, docSiteCartridge, docSiteTemplate, type DocSiteConfig, type DocSiteData } from './cartridge.js';
+import { DOCS, SITE, type MemberUser } from './content.js';
+import { MEMBER_NOTES, findNote } from './members-content.js';
+import {
+  MEMBERS_SOURCE_ID,
+  ROOT_ATTRS,
+  SITE_CSS,
+  docSiteCartridge,
+  docSiteTemplate,
+  signInPanel,
+  toSummary,
+  type DocSiteConfig,
+  type DocSiteData,
+  type MemberSlice,
+} from './cartridge.js';
+import { oauthProvider, type RegisteredClient } from './auth/oauth-provider.js';
+import { privateHeaders, readSession, relyingParty, type Session } from './auth/session.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_PATH = '/';
 const PATH_CONTEXT_KEY = 'slug';
+/** This server's own origin; the demo identity provider lives on it too unless `AUTH_ISSUER` says otherwise. */
+const ORIGIN = process.env.SITE_ORIGIN ?? `http://localhost:${PORT}`;
+const AUTH_ISSUER = process.env.AUTH_ISSUER ?? ORIGIN;
 
 const config: DocSiteConfig = { locale: 'en-GB', siteUrl: SITE.url, siteName: SITE.name };
 const appConfig = templateToAppConfig(docSiteTemplate, docSiteCartridge.id);
 const publicationCtx = { config, locale: config.locale, country: 'GB' as const };
 
-const app = express();
+/**
+ * The one relying party the demo provider knows. `redirect_uri` is matched
+ * exactly. The id and secret are demo constants; pointing `AUTH_ISSUER` at
+ * a real provider means registering this client there and setting
+ * `AUTH_CLIENT_SECRET` to the secret it issues — never editing it in here.
+ */
+const client: RegisteredClient = {
+  clientId: process.env.AUTH_CLIENT_ID ?? 'full-site',
+  clientSecret: process.env.AUTH_CLIENT_SECRET ?? 'demo-client-secret',
+  redirectUri: `${ORIGIN}/auth/callback`,
+};
+
+export const app: express.Express = express();
+// Honour `X-Forwarded-Proto` from one hop, so `req.secure` (and the cookie's
+// `Secure` flag) is right behind a TLS terminator.
+app.set('trust proxy', 1);
 
 /** A fresh Document per request. `@airo-js/ssr` never touches a global one. */
 function freshDocument(): Document {
@@ -69,13 +128,32 @@ function navStateFor(pathname: string): Partial<NavigationState> | undefined {
   return fragmentToState(tail, { pathContextKey: PATH_CONTEXT_KEY }) ?? undefined;
 }
 
+/** The raw public data for a request, before transformers. Never carries `member`. */
+async function rawSnapshotFor(slug?: string): Promise<DocSiteData> {
+  return docSiteCartridge.dataSources[0]!.fetch({ kind: 'custom', payload: { slug } }, { config });
+}
+
+/** The public snapshot for a request — never carries `member`. */
 async function snapshotFor(slug?: string): Promise<DocSiteData> {
-  const raw = await docSiteCartridge.dataSources[0]!.fetch(
-    { kind: 'custom', payload: { slug } },
-    { config },
-  );
-  // Run the transformer chain exactly as the client will, so the anchor ids
-  // a crawler indexes are the ones a reader clicks.
+  return runTransformers(await rawSnapshotFor(slug));
+}
+
+/**
+ * The private snapshot for a verified session: the raw public data plus
+ * the member slice, transformed ONCE. One builder for the wildcard's
+ * private branch and `/api/members/me`, so SSR and the API cannot disagree
+ * about the shape — and so the transformer chain never runs twice over one
+ * snapshot (safe today only because `anchorIds` is idempotent; a copier
+ * adding an enriching transformer would get doubled output on private pages
+ * and not on public ones).
+ */
+async function privateSnapshotFor(session: Session, slug?: string): Promise<DocSiteData> {
+  return runTransformers({ ...(await rawSnapshotFor(slug)), member: memberSliceFor(session.user, slug) });
+}
+
+// Run the transformer chain exactly as the client will, so the anchor ids
+// a crawler indexes are the ones a reader clicks.
+async function runTransformers(raw: DocSiteData): Promise<DocSiteData> {
   let data = raw;
   for (const t of docSiteCartridge.transformers ?? []) {
     if (t.isEnabled(config)) data = await t.transform(data, { config, navState: { page: '' }, locale: config.locale });
@@ -83,9 +161,40 @@ async function snapshotFor(slug?: string): Promise<DocSiteData> {
   return data;
 }
 
+/**
+ * The private slice, built ONLY for a verified session rendering a private
+ * page. One builder, used by the wildcard's private branch and by
+ * `/api/members/me`, so SSR and the API cannot disagree about its shape.
+ * Shaped to exactly what the two private views render.
+ */
+function memberSliceFor(user: MemberUser, slug?: string): MemberSlice {
+  return {
+    user,
+    notes: MEMBER_NOTES.map(toSummary),
+    ...(slug ? { note: findNote(slug) } : {}),
+  };
+}
+
 type HeadPatch = Partial<Parameters<typeof renderDocument>[0]['head']>;
 
-function documentFor(head: HeadPatch, body: string): string {
+/**
+ * Assemble a full document. `mount` names how the client should treat the
+ * `#app` root — `'hydrate'` adopts the server's markup, `'csr'` paints
+ * fresh into an empty root — or `false` for documents (the 404 page) that
+ * carry no app and therefore no client bundle. `rootAttrs` are extra
+ * `data-airo-*` attributes on the root: which DataSource the client mounts
+ * with, and which gates the server's render already satisfied. The client
+ * reads all of it off the DOM, so the two sides never disagree.
+ */
+function documentFor(
+  head: HeadPatch,
+  body: string,
+  mount: 'hydrate' | 'csr' | false = 'hydrate',
+  rootAttrs: Record<string, string> = {},
+): string {
+  const attrs = Object.entries(rootAttrs)
+    .map(([k, v]) => ` ${k}="${escapeHtml(v)}"`)
+    .join('');
   return renderDocument({
     head: {
       // Viewport has NO framework default; it is responsive-design policy,
@@ -97,20 +206,52 @@ function documentFor(head: HeadPatch, body: string): string {
       // is pinned last rather than spread over.
       lang: config.locale,
     },
-    body,
-    bodyScripts: [{ src: '/client.js', type: 'module' }],
+    body: mount ? `<div id="app" ${ROOT_ATTRS.mode}="${mount}"${attrs}>${body}</div>` : body,
+    bodyScripts: mount ? [{ src: '/client.js', type: 'module' }] : [],
   });
 }
 
+const NOINDEX: HeadPatch = { meta: [{ name: 'robots', content: 'noindex, nofollow' }] };
+
 // 1 ── static assets FIRST. See note 1.
+//
+// `dist/public/client.js` is the esbuild bundle of `src/client.ts`. Until
+// 0.11.0 this file referenced `/client.js` and never served it: the route
+// fell through to the wildcard and the browser was handed an HTML page as
+// a module, so this example's hydrate path had never run in a browser.
+// The Playwright checks in `e2e/` exist so that cannot happen silently
+// again.
+app.use(express.static(join(dirname(fileURLToPath(import.meta.url)), 'public'), { index: false }));
 app.use('/assets', express.static('public'));
-// For POST /mcp/call. Nothing else on this server takes a body.
+// JSON for POST /mcp/call; urlencoded for the sign-in form and the token endpoint.
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
-// 2 ── machine surfaces, all off the same snapshot the humans get.
+// 2 ── auth. All host code: the demo identity provider and the relying party.
+app.use(oauthProvider(client));
+app.use(relyingParty({ client, issuer: AUTH_ISSUER }));
+
+/**
+ * The members API — the authority. 401 without a session, the private
+ * snapshot with one. The client's `membersSource` calls this on every
+ * private mount; the gate that paints the sign-in panel is UX, this is the
+ * boundary.
+ */
+app.get('/api/members/me', async (req, res) => {
+  privateHeaders(res);
+  const session = readSession(req);
+  if (!session) { res.status(401).json({ error: 'unauthenticated' }); return; }
+  const slug = typeof req.query.slug === 'string' ? req.query.slug : undefined;
+  res.json(await privateSnapshotFor(session, slug));
+});
+
+// 3 ── machine surfaces, all off the same PUBLIC snapshot the humans get.
+// None of these read a cookie, so none can ever carry a `member` slice.
 app.get('/robots.txt', (_req, res) => {
-  res.type('text/plain').send(`User-agent: *\nAllow: /\nSitemap: ${SITE.url}/sitemap.xml\n`);
+  res.type('text/plain').send(
+    `User-agent: *\nAllow: /\nDisallow: /members\nDisallow: /note/\nDisallow: /auth/\nDisallow: /api/\nDisallow: /oauth/\nSitemap: ${SITE.url}/sitemap.xml\n`,
+  );
 });
 
 /**
@@ -118,15 +259,28 @@ app.get('/robots.txt', (_req, res) => {
  * `sitemap.xml`. That is not a gap: having the full entry list requires a
  * site-wide inventory, and an inventory means enumeration plus persistence —
  * state the framework is not allowed to own. The host has the route list, so
- * the host assembles it. This is that assembly, and it is 15 lines.
+ * the host assembles it. This is that assembly, and it is 15 lines. The
+ * inventory is the PUBLIC docs; member notes are not in it by construction.
  */
+//
+// Per page, in parallel: each snapshot is independent. A real site builds
+// this from an inventory or a cache rather than per request — crawlers poll
+// sitemaps on a schedule, and with a real DataSource every hit would be N
+// upstream fetches. The `max-age` is the demo's stand-in for that cache.
+const PUBLIC_SLUGS = [undefined, ...DOCS.map((d) => d.slug)];
+const MACHINE_CACHE = 'public, max-age=300';
+
 app.get('/sitemap.xml', async (_req, res) => {
+  const results = await Promise.all(
+    PUBLIC_SLUGS.map(async (slug) => {
+      const [result] = await runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+        adapterIds: ['crawler-surface'],
+      });
+      return result;
+    }),
+  );
   const entries: string[] = [];
-  for (const slug of [undefined, ...DOCS.map((d) => d.slug)]) {
-    const snapshot = await snapshotFor(slug);
-    const [result] = await runPublicationAdapters(docSiteCartridge, snapshot, publicationCtx, {
-      adapterIds: ['crawler-surface'],
-    });
+  for (const result of results) {
     // `included: false` means validate() blocked it — the unfinished draft.
     // It is absent from the sitemap for the same reason it 404s.
     if (!result?.included) continue;
@@ -137,6 +291,7 @@ app.get('/sitemap.xml', async (_req, res) => {
     );
   }
   res
+    .set('Cache-Control', MACHINE_CACHE)
     .type('application/xml')
     .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join('\n')}\n</urlset>\n`);
 });
@@ -155,17 +310,20 @@ app.get('/sitemap.xml', async (_req, res) => {
  * framework gives you per-adapter verdicts, not a site-wide policy.
  */
 app.get('/llms.txt', async (_req, res) => {
+  const perPage = await Promise.all(
+    PUBLIC_SLUGS.map(async (slug) =>
+      runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+        adapterIds: ['crawler-surface', 'llms-txt'],
+      }),
+    ),
+  );
   const lines: string[] = [];
-  for (const slug of [undefined, ...DOCS.map((d) => d.slug)]) {
-    const snapshot = await snapshotFor(slug);
-    const results = await runPublicationAdapters(docSiteCartridge, snapshot, publicationCtx, {
-      adapterIds: ['crawler-surface', 'llms-txt'],
-    });
+  for (const results of perPage) {
     const publishable = results.find((r) => r.adapterId === 'crawler-surface')?.included;
     const llms = results.find((r) => r.adapterId === 'llms-txt');
     if (publishable && llms?.included) lines.push((llms.output as { indexLine: string }).indexLine);
   }
-  res.type('text/plain').send(lines.join('\n') + '\n');
+  res.set('Cache-Control', MACHINE_CACHE).type('text/plain').send(lines.join('\n') + '\n');
 });
 
 /**
@@ -196,7 +354,8 @@ app.get('/microdata/:slug', async (req, res) => {
  * typed helper existed. `buildToolManifest` emits MCP's `tools/list` shape
  * from the cartridge directly, and `dispatchTool` answers a call against the
  * same `snapshotFor(slug)` the HTML route renders — which is the whole
- * snapshot-fidelity claim, made checkable on one page.
+ * snapshot-fidelity claim, made checkable on one page. It never reads a
+ * cookie, so an agent can never be handed a member's notes.
  */
 app.get('/mcp/tools', (_req, res) => {
   res.json(buildToolManifest(docSiteCartridge));
@@ -225,7 +384,7 @@ app.post('/mcp/call', async (req, res) => {
   res.status(200).json(out);
 });
 
-// 3 ── every human-facing url lands here.
+// 4 ── every human-facing url lands here.
 //
 // Registered TWICE on purpose: Express 5's `/*splat` matches one-or-more
 // segments and does NOT match the bare root, so a wildcard-only route leaves
@@ -233,39 +392,110 @@ app.post('/mcp/call', async (req, res) => {
 // site most needs to serve. Caught by curling `/` rather than by any test.
 const renderPage: express.RequestHandler = async (req, res) => {
   const initialNavState = navStateFor(req.path);
-  const snapshot = await snapshotFor(initialNavState?.[PATH_CONTEXT_KEY] as string | undefined);
+  const slug = initialNavState?.[PATH_CONTEXT_KEY] as string | undefined;
+  const publicSnapshot = await snapshotFor(slug);
+  // The Document is built inside the closure: the refusal call never
+  // touches one, so it never parses one.
+  const render = (snapshot: DocSiteData, renderPrivate: boolean) =>
+    renderAppWithPublication<DocSiteData, DocSiteConfig>({
+      cartridge: docSiteCartridge,
+      appConfig,
+      snapshot,
+      publicationCtx,
+      document: freshDocument(),
+      initialNavState,
+      renderPrivate,
+    });
 
-  const result = await renderAppWithPublication<DocSiteData, DocSiteConfig>({
-    cartridge: docSiteCartridge,
-    appConfig,
-    snapshot,
-    publicationCtx,
-    document: freshDocument(),
-    initialNavState,
-  });
+  // Note 6: refuse first. Public pages come back rendered; a private entry
+  // comes back refused with nothing run and nothing inlined.
+  let result = await render(publicSnapshot, false);
+  let snapshot = publicSnapshot;
+  let isPrivate = false;
 
-  // Note 3: branch on the REASON. Only 'unknown-page' is a missing url.
+  // Note 3, first half: an unknown url is a 404 BEFORE anything else — even
+  // when the page the runner fell back to is private. On a members-first
+  // template (first enabled page private) `/does-not-exist` resolves to the
+  // private default entry and comes back with BOTH `fellBack.reason ===
+  // 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped`
+  // first would answer 401 and tell a crawler the url exists.
+  const unknownPage = result.fellBack?.reason === 'unknown-page';
+
+  if (!unknownPage && result.skipped?.reason === 'private') {
+    isPrivate = true;
+    privateHeaders(res);
+    // Only now — inside the private branch — is the cookie read. Public
+    // pages never touch it, which is true by construction rather than by
+    // discipline.
+    const session = readSession(req);
+    if (!session) {
+      // The 401 shell: the sign-in panel server-rendered (it is public
+      // markup — no private byte in it — so the page is usable without JS
+      // and paints nothing blank), plus the client bundle, which mounts in
+      // CSR mode with the members DataSource: the gate runs before any
+      // fetch, asks `/auth/session`, and repaints the same panel. Bots get
+      // this too — nothing private to index, `noindex` twice.
+      res.status(401).send(
+        documentFor(
+          { title: `Members — ${SITE.name}`, ...NOINDEX },
+          signInPanel(req.originalUrl),
+          'csr',
+          { [ROOT_ATTRS.source]: MEMBERS_SOURCE_ID },
+        ),
+      );
+      return;
+    }
+    // Note 5: the slice is built here and nowhere else on this route.
+    snapshot = await privateSnapshotFor(session, slug);
+    result = await render(snapshot, true);
+  }
+
+  // Note 3, second half: only 'unknown-page' is a missing url. A private
+  // refusal that reached here has already been answered above.
   const unknownUrl =
-    result.fellBack?.reason === 'unknown-page' ||
+    unknownPage ||
     // A doc page whose slug matched no document, or one the publish gate
     // blocked (no canonical), is equally a 404 on this surface.
     (initialNavState?.page === 'doc' && !snapshot.doc) ||
-    (snapshot.doc && !snapshot.doc.updatedAt);
+    (snapshot.doc && !snapshot.doc.updatedAt) ||
+    // A member note that does not exist — only reachable signed in.
+    (initialNavState?.page === 'note' && !snapshot.member?.note);
 
   if (unknownUrl) {
     // Assembled directly — no cartridge and no snapshot needed, which is
-    // exactly why renderDocument composes rather than wraps.
+    // exactly why renderDocument composes rather than wraps. No app root
+    // and no client bundle either: there is nothing to mount.
     res.status(404).send(
       documentFor(
         { title: `Not found — ${SITE.name}` },
         `<div class="fs-page"><h1 class="fs-title">Not found</h1>
-         <p class="fs-tagline">No page lives at <code>${req.path}</code>.</p>
+         <p class="fs-tagline">No page lives at <code>${escapeHtml(req.path)}</code>.</p>
          <a class="fs-back" href="/">← index</a></div>`,
+        false,
       ),
     );
     return;
   }
 
+  if (isPrivate) {
+    // A private render for a session: server-rendered HTML, no adapters ran
+    // (so no canonical, no OpenGraph, no JSON-LD to fold in), `noindex`, and
+    // the gates this render already met on the root so the client mounts
+    // without asking `/auth/session` again.
+    const title = snapshot.member?.note ? `${snapshot.member.note.title} — Members` : `Members — ${SITE.name}`;
+    res.status(200).send(
+      documentFor({ title, ...NOINDEX }, result.html, 'hydrate', {
+        [ROOT_ATTRS.source]: MEMBERS_SOURCE_ID,
+        [ROOT_ATTRS.gatesSatisfied]: result.gates.satisfied.join(','),
+      }),
+    );
+    return;
+  }
+
+  // Public pages are shared-cacheable: a signed-in visitor's public page is
+  // byte-identical to an anonymous visitor's, which is what makes this
+  // header honest.
+  res.set('Cache-Control', 'public, max-age=60');
   res.status(200).send(
     documentFor(
       {
@@ -282,11 +512,18 @@ const renderPage: express.RequestHandler = async (req, res) => {
 app.get('/', renderPage);
 app.get('/*splat', renderPage);
 
-app.listen(PORT, () => {
-  console.log(`full-site listening on http://localhost:${PORT}`);
-  console.log(`  /                      index`);
-  console.log(`  /doc/why-snapshots     a document`);
-  console.log(`  /doc/unfinished-draft  404 — blocked by the publish gate`);
-  console.log(`  /does-not-exist        404 — fellBack.reason === 'unknown-page'`);
-  console.log(`  /sitemap.xml /llms.txt /robots.txt /mcp/tools`);
-});
+// `server.ts` is imported by the unit tests (which bind their own port) and
+// run directly by `pnpm dev`; only the latter listens here.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  app.listen(PORT, () => {
+    console.log(`full-site listening on http://localhost:${PORT}`);
+    console.log(`  /                      index`);
+    console.log(`  /doc/why-snapshots     a document`);
+    console.log(`  /doc/unfinished-draft  404 — blocked by the publish gate`);
+    console.log(`  /does-not-exist        404 — fellBack.reason === 'unknown-page'`);
+    console.log(`  /members               401 shell + sign-in gate; 200 server-rendered for a session (demo / demo)`);
+    console.log(`  /note/roadmap          a member note — private`);
+    console.log(`  /sitemap.xml /llms.txt /robots.txt /mcp/tools`);
+    console.log(`  identity provider at ${AUTH_ISSUER}/oauth/authorize`);
+  });
+}

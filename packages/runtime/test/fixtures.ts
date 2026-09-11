@@ -163,6 +163,90 @@ export function blockingGate(id = 'always-block'): Gate<TestConfig> {
   };
 }
 
+/**
+ * A public home page plus a private members page — the mixed graph the
+ * 0.11.0 gate phase is scoped against. `members` is `private: true`.
+ */
+export function privateTemplate(): Template<TestConfig> {
+  return {
+    id: 'mixed',
+    displayName: 'Mixed',
+    description: 'Public home, private members page.',
+    pages: [
+      { id: 'home', type: 'home', enabled: true },
+      { id: 'members', type: 'members', enabled: true, private: true },
+    ],
+    defaultConfig: {},
+  };
+}
+
+/** A cartridge whose views cover both pages of `privateTemplate()`. */
+export function mixedCartridge(
+  overrides: Partial<Cartridge<TestData, TestConfig>> = {},
+): Cartridge<TestData, TestConfig> {
+  return fakeCartridge({
+    views: [
+      { id: 'home-view', displayName: 'Home', pageType: 'home', factory: () => noopRenderer() },
+      { id: 'members-view', displayName: 'Members', pageType: 'members', factory: () => noopRenderer() },
+    ],
+    templates: [privateTemplate()],
+    defaultTemplateId: 'mixed',
+    ...overrides,
+  });
+}
+
+/**
+ * A sign-in gate scoped to private entries. Every lifecycle call is pushed
+ * onto `record` so tests can assert what ran (and, with `satisfiedGates`,
+ * what did not). `decision` controls precheck; `verdict` controls mount.
+ */
+export function loginGate(
+  record: string[],
+  opts: { decision?: 'allow' | 'gate-required'; verdict?: 'allow' | 'block'; id?: string } = {},
+): Gate<TestConfig> {
+  const id = opts.id ?? 'login';
+  return {
+    id,
+    displayName: 'Sign in',
+    appliesTo: 'private',
+    isEnabled: () => true,
+    async precheck() {
+      record.push(`${id}:precheck`);
+      return opts.decision ?? 'gate-required';
+    },
+    async mount(host) {
+      record.push(`${id}:mount`);
+      host.innerHTML = `<div class="gate-${id}">sign in</div>`;
+      return opts.verdict ?? 'block';
+    },
+    destroy() {
+      record.push(`${id}:destroy`);
+    },
+  };
+}
+
+/**
+ * A gate that PAINTS over the render root and then allows — the age-modal
+ * shape. In hydrate mode the runtime must restore the SSR markup after it.
+ */
+export function paintingGate(id: string, verdict: 'allow' | 'block' = 'allow'): Gate<TestConfig> {
+  return {
+    id,
+    displayName: 'Painting',
+    isEnabled: () => true,
+    async precheck() {
+      return 'gate-required';
+    },
+    async mount(host) {
+      host.innerHTML = `<div class="gate-${id}">modal</div>`;
+      return verdict;
+    },
+    destroy() {
+      // no-op — a gate that allows leaves its paint for the runtime to replace
+    },
+  };
+}
+
 export function failingTransformer(
   policy: 'fail-render' | 'skip' = 'fail-render',
 ): Transformer<TestData, TestConfig> {

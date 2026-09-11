@@ -111,3 +111,15 @@ export const DOCS: Doc[] = [
 export function findDoc(slug: string): Doc | undefined {
   return DOCS.find((d) => d.slug === slug);
 }
+
+// ─────────────────────────── the members area ───────────────────────────
+//
+// Only the TYPE lives here. The notes themselves and the demo account are in
+// `members-content.ts`, which nothing the client bundle imports can reach —
+// so no member byte is in `client.js` by construction, not by dead-code
+// elimination.
+
+export interface MemberUser {
+  id: string;
+  name: string;
+}

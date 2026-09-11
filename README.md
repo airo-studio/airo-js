@@ -10,7 +10,7 @@ Use it when a widget cannot just be a bundle of JavaScript. An Airo cartridge ca
 
 Most micro frontend systems solve "how do I mount code on a page?" Airo adds the missing product layer around that code:
 
-- **Ultra-light by design.** The embed shell is budgeted at 5 KB minified / 2.5 KB gzip and only lazy-loads runtime code when an `<airo-app>` is actually present.
+- **Ultra-light by design.** The embed shell is budgeted at 5.25 KB minified / 2.5 KB gzip and only lazy-loads runtime code when an `<airo-app>` is actually present.
 - **Horizontal or vertical composition.** Put many cartridges on one page, or let one cartridge own an entire multi-page journey.
 - **Studio-editable by contract.** Cartridges declare templates, component schema, theme schema, style surfaces, data sources, gates, and hot-swap boundaries so a no-code studio can render safe configuration forms instead of reverse-engineering a bundle.
 - **One snapshot, many audiences.** The rendered UI, JSON-LD, XML feeds, `llms.txt`, and MCP tools consume the same post-transformer snapshot. What the user sees is what crawlers index and what agents answer from.
@@ -36,7 +36,7 @@ DataSource
 - **ViewDefinition**: maps a `page.type` to a renderer factory. Renderers may support CSR, SSR, hydrate, subpages, and live style updates.
 - **PublicationAdapter**: turns the same snapshot into JSON-LD, XML, TSV, `llms.txt`, MCP manifests, or other publishable outputs.
 - **Studio metadata**: `componentSchema`, `themeSchema`, `defineStyleSurface`, and token helpers describe what a CMS-style editor can safely expose.
-- **Runtime**: `mountCartridge` performs shell setup, optional fetch, pipeline, gates, mount, hydrate, and live updates.
+- **Runtime**: `mountCartridge` performs shell setup, entry resolution, gates, optional fetch, pipeline, mount, hydrate, and live updates.
 - **Embed**: `defineAiroApp` registers the custom element customers paste into a page.
 
 ## Install
@@ -74,7 +74,7 @@ pnpm test
 pnpm build
 ```
 
-Current workspace packages are on the `0.8.x` line. The framework is pre-1.0, so read [`CHANGELOG.md`](./CHANGELOG.md) when upgrading.
+Current workspace packages are on the `0.11.x` line. The framework is pre-1.0, so read [`CHANGELOG.md`](./CHANGELOG.md) when upgrading.
 
 ## Micro Size Budget
 
@@ -84,7 +84,8 @@ Measured in this workspace with `esbuild --bundle --minify --platform=browser` a
 
 | Bundle | Minified | Gzip | What it includes |
 |---|---:|---:|---|
-| `@airo-js/embed` package budget | 5,030 B | 2,211 B | Custom element loader, lifecycle, SSR-hydrate handoff, missing-view recovery. Runtime is lazy-loaded. |
+| `@airo-js/embed` package budget | 5,159 B | 2,248 B | Custom element loader, lifecycle, SSR-hydrate handoff, missing-view recovery, gate-phase error forwarding. Runtime is lazy-loaded. CI-gated at 5.25 KB / 2.5 KB. |
+| `@airo-js/runtime` reachable closure | 28,332 B | 9,252 B | `mountCartridge` plus everything it reaches in `@airo-js/core`, `@airo-js/cartridge-kit`, and `@airo-js/log` (ESM, es2022) — the most a consumer entry pays for the framework; cartridge code excluded. CI-gated at 29 KB / 9.5 KB. |
 | README hello cartridge only | 2,438 B | 1,293 B | The hello cartridge contract, data source, template, and SSR-safe view. |
 | README hello CSR app | 24,583 B | 8,235 B | `mountCartridge`, core runtime pieces, and the hello cartridge in one browser bundle. |
 | README hello custom embed entry | 6,958 B | 3,098 B | `defineAiroApp` plus the tiny hello cartridge, with `@airo-js/runtime` still external/lazy. |
@@ -97,7 +98,7 @@ Those numbers are a starting budget, not a ceiling for every real cartridge. Rea
 |---|---|
 | [`@airo-js/core`](./packages/core/README.md) | Rendering engine: `createApp`, `PageManager`, routing, events, style isolation, theme injection, registry mailboxes, and pipeline primitives. |
 | [`@airo-js/cartridge-kit`](./packages/cartridge-kit/README.md) | Cartridge contract: `Cartridge`, `DataSource`, `ViewDefinition`, `Template`, `Gate`, `PublicationAdapter`, MCP tools, editor schema, and SSR-safe renderer helpers. |
-| [`@airo-js/runtime`](./packages/runtime/README.md) | Browser mount orchestration: shell setup, fetch or preloaded data, transformer pipeline, gates, mount, hydrate, and live update dispatch. |
+| [`@airo-js/runtime`](./packages/runtime/README.md) | Browser mount orchestration: shell setup, entry resolution, gates, fetch or preloaded data, transformer pipeline, mount, hydrate, and live update dispatch. |
 | [`@airo-js/ssr`](./packages/ssr/README.md) | Runtime-agnostic SSR and publication helpers: `renderAppToHTML`, `runPublicationAdapters`, and `renderAppWithPublication`. |
 | [`@airo-js/embed`](./packages/embed/README.md) | Tiny custom-element bootstrap for customer pages. Loads config, resolves cartridges, lazy-loads runtime, hydrates SSR HTML when present, and recovers missing view chunks. |
 | [`@airo-js/mcp`](./packages/mcp/README.md) | MCP tool manifest emission and dispatch: `buildToolManifest`, `dispatchTool`. Agent answers come from the same post-Transformer snapshot the views render. |
@@ -323,7 +324,7 @@ await mountCartridge({
 });
 ```
 
-`mountCartridge` sets up the render shell, runs the data source, runs transformers, evaluates gates, creates the cartridge app context, and mounts the active page renderer.
+`mountCartridge` sets up the render shell, resolves the entry page, runs the gates that apply to it (a blocked mount fetches nothing), runs the data source, runs transformers, creates the cartridge app context, and mounts the active page renderer.
 
 ## Hello World SSR + Hydrate
 

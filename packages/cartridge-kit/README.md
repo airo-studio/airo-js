@@ -10,10 +10,11 @@ The cartridge contract for the airo framework. Defines the API surface every car
 - `DataSource` — onboarding affordances + data-loading shape
 - `Transformer` / `PostProcessor` / `RuntimePipeline` — runtime pipeline (re-exported from `@airo-js/core` because pipeline orchestration is rendering, and rendering belongs to the framework)
 - `ViewDefinition` + `CartridgeAppContext` — typed wrapper around the framework's `PageRenderer`
-- `Template<TConfig>` — pre-composed view-set + default config
+- `Template<TConfig>` — pre-composed view-set + default config; a `TemplatePage` may be `private: true`
+- `Gate<TConfig>` + `runGatePhase` / `selectGates` / `runGates` — pre-render guards, scoped to the mount's entry page (`appliesTo: 'all' | 'private'`), run by `@airo-js/runtime` before the data fetch
 - `McpToolDefinition` — agent-facing tools (POST-transformer data)
 - `PublicationAdapter` — fan post-pipeline data out to surface-specific outputs (Schema.org JSON-LD, vendor XML feeds, etc.)
-- Supporting: `SchemaDefinition`, `OnboardingStep`, `ValidationResult`, `PublicationContext`, `SchemaFieldRef<TData>`, `SnapshotPath<TData>`, `Duration`
+- Supporting: `SchemaDefinition`, `OnboardingStep`, `ValidationResult`, `PublicationContext`, `SchemaFieldRef<TData>`, `SnapshotPath<TData>`, `Duration`, `PersistHint`, `GateLifecycleEvents`, `RunGatePhaseResult<TConfig>`
 
 ## Three contract guarantees
 
@@ -113,9 +114,15 @@ teardown();
 
 Host apps with custom semantics (async support, custom error reporting, OTel tracing) implement their own `RuntimePipeline<TData, TConfig>`.
 
-### Gate persistence is metadata, not behaviour
+### Gates: a Gate decides whether to paint; whether to serve is the host's
 
-`Gate.persist` is a hint cartridges declare; **the framework writes nothing based on it**. Host apps implement the actual storage primitive — cookies, localStorage, server-side session table — with their own compliance posture (sameSite, domain rules, GDPR scope, SSO interaction).
+Two sentences the framework signs, verbatim in `gate.ts`: **a Gate decides whether to paint; whether to serve is the host's, per request** — the gate is UX, the host's API and SSR handler are the security boundary. And **bots are never gated** — SSR never runs gates; private pages (`TemplatePage.private`) are refused by the SSR runner, not gated.
+
+The gate phase is `runGatePhase({ gates, entryPage, host, ctx, satisfiedGates? })` — `selectGates` (the one place `Gate.appliesTo` is read: `'private'` gates run only when the resolved entry page is private) plus `runGates`, which returns `{ verdict, blockedBy }` and narrates `gate:precheck / mount / allowed / blocked` on the context bus. `@airo-js/runtime` calls it **before** the data fetch; `createCartridgeApp` runs no gates and is synchronous.
+
+### Gate persistence is documentation with a type, not behaviour
+
+`Gate.persist` is a hint cartridges declare; **the framework never reads it and writes nothing based on it**. Host apps implement the actual storage primitive — cookies, localStorage, server-side session table — with their own compliance posture (sameSite, domain rules, GDPR scope, SSO interaction). One hint or an array with `outcome: 'pass' | 'fail'`.
 
 This mirrors how `DataSource.cacheTtlMs` works: cartridge declares the hint, host app decides actual cache policy. Same shape, same envelope.
 
@@ -163,6 +170,7 @@ import {
   createCartridgeRegistry,
   createCartridgeApp,
   createPipeline,
+  runGatePhase,
 } from '@airo-js/cartridge-kit';
 
 import { commerceCartridge } from '@my-org/commerce-cartridge';
@@ -191,7 +199,20 @@ const appConfig = {
   })),
 };
 
-// 4. Load data via the cartridge's DataSource and run the pipeline.
+// 4. Run the gate phase BEFORE any data — a blocked mount costs no network.
+//    `entryPage` is the page this mount starts on (core's `resolveMountEntry`
+//    gives you the URL > initialNavState > default answer); a gate declared
+//    `appliesTo: 'private'` runs only when that page is `private: true`.
+//    (`mountCartridge` in @airo-js/runtime does all of this for you.)
+const gate = await runGatePhase({
+  gates: cartridge.gates,
+  entryPage,
+  host: containerEl,
+  ctx: { config, events },
+});
+if (gate.verdict === 'block') return; // the gate's UI stays; blockedBy names it
+
+// 5. Load data via the cartridge's DataSource and run the pipeline.
 //    Snapshot is what views, MCP tools, and publication adapters all read.
 const dataSource = cartridge.dataSources[0];
 const rawData = await dataSource.fetch(input, { config });
@@ -201,9 +222,9 @@ const pipeline = createPipeline(
 );
 const snapshot = await pipeline.runTransformers(rawData, { config, navState: { page: '' } });
 
-// 5. Mount. createCartridgeApp builds CartridgeAppContext, derives the
+// 6. Mount. createCartridgeApp builds CartridgeAppContext, derives the
 //    resolveRenderer from the cartridge's views[], and delegates to
-//    createApp.
+//    createApp. Synchronous; it runs no gates (step 4 did).
 const app = createCartridgeApp(cartridge, appConfig, snapshot, config, {
   host: containerEl,
   enableRouter: true,

@@ -25,6 +25,30 @@
  * Inline placement: JSON-LD scripts go BEFORE the widget HTML. Host apps
  * embedding the SSR response into a `<head>`-or-`<body>` slot on the page
  * get the structured data and the widget markup as one blob.
+ *
+ * ## Private pages (0.11.0)
+ *
+ * A page carrying `Page.private: true` exists for one signed-in visitor.
+ * This runner never publishes it: no adapter runs, nothing is inlined, and
+ * unless the host asserts `renderPrivate: true` (it verified a session for
+ * this request) no HTML is rendered either — the result is
+ * `skipped: { reason: 'private' }`, which a host maps to 401 the way it
+ * maps `fellBack.reason === 'unknown-page'` to 404. With `renderPrivate`
+ * the page renders as HTML only; the host serves it
+ * `Cache-Control: private, no-store` with `noindex`. Bots are never gated,
+ * and private pages are refused rather than gated.
+ *
+ * ## Gates (0.11.0)
+ *
+ * The runner never runs gates — server-rendered HTML is un-gated by
+ * guarantee. It reports which gates the client's mount will run
+ * (`gates.pending`, for hosts that ship a hide in the initial HTML so no
+ * frame paints before the gate) and which the host's private render has
+ * already met (`gates.satisfied`: the `appliesTo: 'private'` gates when
+ * `renderPrivate` is set — the gate that exists to establish the session
+ * is satisfied by the render that required it). The host prints the latter
+ * on the mount root and the client passes it to
+ * `mountCartridge({ satisfiedGates })`.
  */
 
 import {
@@ -32,13 +56,15 @@ import {
   type AppConfig,
   type EntryFallbackReason,
   type NavigationState,
+  type Page,
   type PageRendererFactory,
 } from '@airo-js/core';
 import type {
   Cartridge,
+  Gate,
   PublicationContext,
 } from '@airo-js/cartridge-kit';
-import { getDefaultRenderResolver } from '@airo-js/cartridge-kit';
+import { getDefaultRenderResolver, selectGates } from '@airo-js/cartridge-kit';
 import { logger } from '@airo-js/log';
 
 import { buildJsonLdScript } from './build-json-ld-script.js';
@@ -110,6 +136,31 @@ export interface RenderWithPublicationOptions<
    * non-inline adapters in the same run for cache warming).
    */
   publicationFilter?: RunPublicationOptions;
+  /**
+   * The host asserts it verified a session for THIS request, so a private
+   * entry page may be rendered (HTML only — adapters never run for a
+   * private page). Default `false`: a private entry is refused with
+   * `skipped: { reason: 'private' }`.
+   *
+   * Set it only after your handler has verified the session. The framework
+   * never verifies anything (rendering-only); it also never reads any other
+   * input to make this decision — a country- or locale-scoped host must
+   * not unlock private pages by accident, so the unlock is this one
+   * explicit flag.
+   *
+   * `true` is shorthand for "this render satisfies every `appliesTo:
+   * 'private'` gate" — right when the sign-in gate is the only one, which
+   * is what a verified session satisfies. A host with a second
+   * private-scoped gate (a paywall tier, a step-up) names exactly the gates
+   * its render met: `{ satisfiedGates: ['login'] }`. The runner echoes what
+   * the host asserts, restricted to gates that apply to this entry, and the
+   * rest stay `pending` for the client. The object form unlocks ONLY when
+   * it names an enabled, applicable, `'private'`-scoped gate; a list that is
+   * empty, names only public-scoped gates, or names unknown ids refuses
+   * like `false` — so a list computed per request cannot open a private
+   * page on a branch where no session was verified.
+   */
+  renderPrivate?: boolean | { satisfiedGates: ReadonlyArray<string> };
 }
 
 export interface RenderWithPublicationResult {
@@ -118,13 +169,28 @@ export interface RenderWithPublicationResult {
   /** Per-adapter run result. Inspect for warnings, failed validation, non-inline outputs. */
   adapterResults: AdapterRunResult[];
   /**
-   * Set when the entry page's view declared `capabilities: ['csr-only']`
-   * — the SSR runner refuses to render it server-side. Adapter results
-   * still ran normally; `html` contains the JSON-LD inline scripts (or
-   * empty string if no adapters matched). The client bundle will mount
-   * via mountCartridge as usual; this branch is the SEO partial-win.
+   * Set when the runner refused to render the entry page server-side.
+   *
+   *   - `'csr-only'`: the entry page's view declared
+   *     `capabilities: ['csr-only']`. Adapter results still ran normally
+   *     and `html` contains the JSON-LD inline scripts (or empty string if
+   *     no adapters matched) — the SEO partial-win — unless the page is
+   *     also `private`, in which case no adapter ran and `html` is empty.
+   *     The client bundle mounts via `mountCartridge` as usual.
+   *   - `'private'`: the entry page is `private: true` and the host did
+   *     not pass `renderPrivate`. Nothing ran, nothing was inlined,
+   *     `html` is empty and `adapterResults` is empty. This is a 401 for a
+   *     root-mounted host. `fellBack` MAY accompany it: when the requested
+   *     id was rejected and the default entry it fell back to is private,
+   *     both are set. Read `fellBack.reason === 'unknown-page'` FIRST — an
+   *     unknown url is a 404 whatever the fallback page's privacy — and
+   *     only then map a private skip to 401. Read `skipped` before any
+   *     "no canonical → 404" rule: a private refusal has no canonical.
+   *
+   * Open union (the 0.10.0 `AdapterSkipped.reason` precedent): branch on
+   * the reason with a default, never on presence alone.
    */
-  skipped?: { pageType: string; reason: 'csr-only' };
+  skipped?: { pageType: string; reason: 'csr-only' | 'private' | (string & {}) };
   /**
    * Set when `initialNavState.page` named a page the runner REJECTED,
    * substituting the default entry. Forwarded verbatim from
@@ -135,6 +201,18 @@ export interface RenderWithPublicationResult {
    * `/` — a soft 404 that nothing errors about.
    */
   fellBack?: { requested: string; reason: EntryFallbackReason };
+  /**
+   * What the client's mount will do about gates, reported so the host can
+   * ship the right initial HTML. `pending`: ids of the enabled gates
+   * `mountCartridge` will run for this entry page (emit
+   * `data-airo-gate="pending"` and hide under it if you need zero painted
+   * frames). `satisfied`: ids of the `appliesTo: 'private'` gates this
+   * private render already met (emit them as
+   * `data-airo-gates-satisfied` and pass them to
+   * `mountCartridge({ satisfiedGates })`). Both empty when the cartridge
+   * has no gates or no entry page resolved.
+   */
+  gates: { pending: string[]; satisfied: string[] };
 }
 
 /**
@@ -176,6 +254,71 @@ export async function renderAppWithPublication<
     );
   }
 
+  // Entry resolution FIRST — before any adapter runs — via the shared core
+  // helper. Same logic PageManager.mountInitial uses on the client, so SSR
+  // and CSR pick the same page for any given `initialNavState.page`.
+  // Invalid / unknown / disabled / gate / subpage ids fall back to the
+  // default entry — keeps the SSR path safe against tampered or stale
+  // deeplinks. It has to come first because a private entry page must
+  // stop the adapters from running at all (below).
+  const isGate = opts.isGatePage ?? (() => false);
+  const entryResolution = describeEntryResolution(
+    opts.appConfig.pages,
+    isGate,
+    opts.initialNavState?.page,
+  );
+  const entryPage = entryResolution.page;
+  // Threaded onto every return path below, including both skips — a host
+  // answering 404 must not have that decision depend on whether the
+  // fallback page happened to be server-renderable.
+  const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
+  const hostSatisfied =
+    typeof opts.renderPrivate === 'object' && opts.renderPrivate !== null
+      ? opts.renderPrivate.satisfiedGates
+      : undefined;
+  // The object form unlocks only when it names a private-scoped gate that
+  // applies to this entry — the sign-in gate, which is what a verified
+  // session satisfies. A list that is empty, names only public-scoped
+  // gates (`['age']`), or names ids no gate has, refuses like `false`: a
+  // host computing `[...(ageOk ? ['age'] : []), ...(session ? ['login'] : [])]`
+  // must not serve private HTML to an age-verified anonymous visitor. To
+  // render privately with no private-scoped gate to name, pass `true`.
+  const applicableGates = selectGates(opts.cartridge.gates, entryPage).filter((g) =>
+    g.isEnabled(opts.publicationCtx.config),
+  );
+  const namesPrivateGate =
+    hostSatisfied !== undefined &&
+    applicableGates.some((g) => g.appliesTo === 'private' && hostSatisfied.includes(g.id));
+  const privateUnlock = opts.renderPrivate === true || namesPrivateGate;
+  const gates = gatesFor(applicableGates, entryPage, privateUnlock, hostSatisfied);
+
+  // ── The private / csr-only decision table ─────────────────────────────
+  //
+  //   page.private  renderPrivate  view csr-only  │ adapters  html     skipped
+  //   ─────────────────────────────────────────────┼────────────────────────────
+  //   false         —              false          │ run       widget   —
+  //   false         —              true           │ run       json-ld  csr-only
+  //   true          false          —              │ NONE      ''       private
+  //   true          true           false          │ NONE      widget   —
+  //   true          true           true           │ NONE      ''       csr-only
+  //
+  // Page-private is checked first and refusal wins: a private page's view
+  // being csr-only must never turn into "inline the JSON-LD anyway".
+  const isPrivate = entryPage?.private === true;
+  if (entryPage && isPrivate && !privateUnlock) {
+    log.info(
+      `renderAppWithPublication: refusing private page '${entryPage.id}' (pageType: ${entryPage.type}) — no renderPrivate. Nothing rendered, nothing published.`,
+      { pageType: entryPage.type, pageId: entryPage.id, phase: 'private-page' },
+    );
+    return {
+      html: '',
+      adapterResults: [],
+      skipped: { pageType: entryPage.type, reason: 'private' },
+      gates,
+      ...fellBack,
+    };
+  }
+
   // Default filter: the two formats that belong on the render hot path —
   // JSON-LD (inlined into the returned fragment below) and head-meta
   // (returned in `adapterResults` for `headFromPublication` to fold into
@@ -190,15 +333,14 @@ export async function renderAppWithPublication<
     deliveries: ['inline-in-host'],
   };
 
-  // Run adapters first — surfaces validation errors before we commit to
-  // rendering. Cheaper to abort here than after a full SSR pass. Also
-  // means CSR-only views still get their JSON-LD surfaced to crawlers.
-  const adapterResults = await runPublicationAdapters(
-    opts.cartridge,
-    opts.snapshot,
-    opts.publicationCtx,
-    filter,
-  );
+  // Run adapters (public pages only) — surfaces validation errors before
+  // we commit to rendering. Cheaper to abort here than after a full SSR
+  // pass. Also means CSR-only views still get their JSON-LD surfaced to
+  // crawlers. A private page gets NO adapter run: adapters are page-blind
+  // and would happily publish whatever the private snapshot holds.
+  const adapterResults: AdapterRunResult[] = isPrivate
+    ? []
+    : await runPublicationAdapters(opts.cartridge, opts.snapshot, opts.publicationCtx, filter);
 
   // Build the inline JSON-LD blocks up front — emitted regardless of
   // whether the widget renders.
@@ -214,41 +356,27 @@ export async function renderAppWithPublication<
 
   // Gap 4 — capability gate. Walk the cartridge's views to find the entry
   // page's view; if it declared `csr-only`, refuse SSR and return the
-  // JSON-LD blocks alone. Host app's client bundle mounts as usual.
-  // Mailbox-only cartridges (chunk-registered views) skip the check —
-  // capability info isn't available before the chunk loads. Cartridges
-  // that need the gate must ship a static `views[]` entry.
+  // JSON-LD blocks alone (empty for a private page, by construction). Host
+  // app's client bundle mounts as usual. Mailbox-only cartridges
+  // (chunk-registered views) skip the check — capability info isn't
+  // available before the chunk loads. Cartridges that need the gate ship a
+  // factory-less `views[]` entry carrying the capability.
   //
   // This check runs BEFORE `getDefaultRenderResolver` so csr-only
   // cartridges (typically lighter — no resolver registry needed) don't
   // pay the resolver-construction cost on the SSR-skip path.
-  const isGate = opts.isGatePage ?? (() => false);
-  // Entry resolution via the shared core helper. Same logic
-  // PageManager.mountInitial uses on the client, so SSR and CSR pick
-  // the same page for any given `initialNavState.page`. Invalid /
-  // unknown / disabled / gate / subpage ids fall back to the default
-  // entry — keeps the SSR path safe against tampered or stale deeplinks.
-  const entryResolution = describeEntryResolution(
-    opts.appConfig.pages,
-    isGate,
-    opts.initialNavState?.page,
-  );
-  const entryPage = entryResolution.page;
-  // Threaded onto every return path below, including the csr-only skip —
-  // a host answering 404 must not have that decision depend on whether
-  // the fallback page happened to be server-renderable.
-  const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
   if (entryPage) {
     const entryView = opts.cartridge.views?.find((v) => v.pageType === entryPage.type);
     if (entryView?.capabilities?.includes('csr-only')) {
       log.info(
-        `renderAppWithPublication: skipping SSR for csr-only view '${entryView.id}' (pageType: ${entryPage.type}). JSON-LD still inlined.`,
+        `renderAppWithPublication: skipping SSR for csr-only view '${entryView.id}' (pageType: ${entryPage.type}). ${isPrivate ? 'Private page: nothing inlined.' : 'JSON-LD still inlined.'}`,
         { pageType: entryPage.type, viewId: entryView.id, phase: 'capability-gate' },
       );
       return {
         html: inlineScripts,
         adapterResults,
         skipped: { pageType: entryPage.type, reason: 'csr-only' },
+        gates,
         ...fellBack,
       };
     }
@@ -281,10 +409,43 @@ export async function renderAppWithPublication<
       config: opts.publicationCtx.config,
       data: opts.snapshot,
     },
+    // The private decision was made above; the low-level renderer keeps
+    // the same promise and must be told it was.
+    renderPrivate: privateUnlock,
   };
 
   const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
-  return { html, adapterResults, ...fellBack };
+  return { html, adapterResults, gates, ...fellBack };
+}
+
+/**
+ * What the client's mount will do about gates for this entry page — the
+ * same `selectGates` the runtime uses, so the two sides cannot disagree.
+ * `satisfied` is the private-scoped subset when the host rendered privately.
+ */
+function gatesFor<TConfig>(
+  enabled: ReadonlyArray<Gate<TConfig>>,
+  entryPage: Page | undefined,
+  renderPrivate: boolean,
+  hostSatisfied: ReadonlyArray<string> | undefined,
+): { pending: string[]; satisfied: string[] } {
+  // No entry page: `selectGates` fails closed (every gate), so the client
+  // WILL run them all — report them as pending rather than nothing.
+  if (!entryPage) return { pending: enabled.map((g) => g.id), satisfied: [] };
+  // `renderPrivate: true` is shorthand for "every private-scoped gate"; the
+  // object form names exactly what the host verified. Either way only a
+  // gate that applies to this entry can be satisfied — the host's list is
+  // echoed, not trusted beyond the gates that would have run.
+  const satisfiedByRender = renderPrivate && entryPage.private === true;
+  const isSatisfied = (gate: (typeof enabled)[number]): boolean =>
+    hostSatisfied ? hostSatisfied.includes(gate.id) : satisfiedByRender && gate.appliesTo === 'private';
+  const pending: string[] = [];
+  const satisfied: string[] = [];
+  for (const gate of enabled) {
+    if (isSatisfied(gate)) satisfied.push(gate.id);
+    else pending.push(gate.id);
+  }
+  return { pending, satisfied };
 }

@@ -59,11 +59,14 @@ function buildCartridge(mailboxName = '__AIRO_CAPABILITY_TEST_MAILBOX__'): Cartr
         capabilities: ['csr-only'],
       },
       {
-        id: 'auth-view',
-        displayName: 'Authenticated Dashboard',
+        // Any second tag will do here — the test is that a custom exclude
+        // list composes. (Private pages are NOT a capability: they are
+        // `Page.private` on the page graph, handled by the runner.)
+        id: 'responsive-view',
+        displayName: 'Responsive Dashboard',
         pageType: 'dashboard',
         factory: () => ssrRenderer('dashboard'),
-        capabilities: ['requires-auth'],
+        capabilities: ['responsive'],
       },
       {
         id: 'untagged-view',
@@ -84,14 +87,14 @@ describe('filterServerSafeCartridge', () => {
     const cartridge = buildCartridge();
     const filtered = filterServerSafeCartridge(cartridge);
     const ids = filtered.views.map((v) => v.id);
-    expect(ids).toEqual(['home-view', 'auth-view', 'untagged-view']);
+    expect(ids).toEqual(['home-view', 'responsive-view', 'untagged-view']);
     expect(ids).not.toContain('map-view');
   });
 
   test('custom excludeCapabilities composes multiple capability gates', () => {
     const cartridge = buildCartridge();
     const filtered = filterServerSafeCartridge(cartridge, {
-      excludeCapabilities: ['csr-only', 'requires-auth'],
+      excludeCapabilities: ['csr-only', 'responsive'],
     });
     const ids = filtered.views.map((v) => v.id);
     expect(ids).toEqual(['home-view', 'untagged-view']);

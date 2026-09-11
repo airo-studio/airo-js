@@ -16,6 +16,8 @@ State is **never** serialised into the output — the client-side `createApp({ h
 
 Use when you want widget markup and nothing else.
 
+Honours `Page.private` the same way the full runner does: a private entry page is refused with `skipped: { reason: 'private' }` and empty `html` unless `deps.renderPrivate` is `true` — set it only after your handler has verified a session for this request.
+
 ### `runPublicationAdapters(cartridge, snapshot, ctx, opts?)`
 
 Execute a cartridge's `PublicationAdapter`s and return per-adapter results. Use for non-HTML outputs (XML feeds, MCP-tool manifests) or when running adapters on a schedule independent of widget render. Includes validation results — when `onValidationFail: 'block-publish'` (the default) is in effect, failed outputs are returned with `included: false` so callers know not to serve them downstream.
@@ -27,6 +29,10 @@ Filterable by `id`, `format`, and `delivery`.
 Combines the above. Renders the entry page AND inlines the cartridge's `inline-in-host` JSON-LD outputs as `<script type="application/ld+json">` tags before the widget markup. The SEO landing path.
 
 JSON-LD payloads are escaped against `</script>` breakout — safe to inline strings from snapshot fields without manual sanitisation.
+
+**Private pages (0.11.0).** A `Page.private: true` entry is refused, not published: no adapter runs, nothing is inlined, and the result is `{ html: '', skipped: { reason: 'private' }, gates }` — a 401 for a root-mounted host. Read `fellBack.reason === 'unknown-page'` first (the two can co-occur; an unknown url is a 404 whatever the fallback page's privacy). Pass `renderPrivate: true` only once your handler has verified a session for this request; the page then renders as HTML only, still adapter-free. `renderPrivate: { satisfiedGates: [...] }` names the private-scoped gates the render met when there is more than one. `skipped.reason` is an open union (`'csr-only' | 'private' | …`) — branch on the reason, never on presence.
+
+**`gates: { pending, satisfied }`** on every result: the enabled gates the client's `mountCartridge` will run for this entry page (emit `data-airo-gate="pending"` on the mount root to hide until they resolve) and the `appliesTo: 'private'` gates a private render already met (emit them as `data-airo-gates-satisfied` and pass them to `mountCartridge({ satisfiedGates })`). The runner never runs gates — server-rendered HTML is un-gated by guarantee; private pages are refused, not gated.
 
 ## Install
 

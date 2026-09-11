@@ -94,13 +94,15 @@ export { buildCrumbs } from './breadcrumb.js';
 
 export { escapeAttr, escapeHtml } from './escape.js';
 export type { PageManagerOptions, PostRenderHook } from './page-manager.js';
-export type { EntryFallbackReason, EntryResolution } from './page-manager.js';
+export { PageManager } from './page-manager.js';
+export type { EntryFallbackReason, EntryResolution } from './entry-resolution.js';
 export {
-  PageManager,
   describeEntryResolution,
   findEntryPage,
   resolveEntryPage,
-} from './page-manager.js';
+} from './entry-resolution.js';
+export type { MountEntry, ResolveMountEntryOptions } from './mount-entry.js';
+export { createRouter, parseRouterUrl, resolveMountEntry, validPagesFor } from './mount-entry.js';
 
 export type {
   AppLifecycleState,
@@ -132,4 +134,4 @@ export { parseHtml, parseHtmlFragment } from './parse-html.js';
 
 export const PACKAGE_NAME = '@airo-js/core';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.10.1';
+export const VERSION = '0.11.0';

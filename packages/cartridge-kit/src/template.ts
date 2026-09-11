@@ -49,6 +49,14 @@ export interface TemplatePage<TPageType extends string = string> {
   /** For subpages (e.g. quickview under products). */
   parent?: string;
   /**
+   * Marks a page that exists for one signed-in visitor, never for the
+   * public. Round-tripped onto `Page.private` by `templateToAppConfig`;
+   * see that field for what the runner, the runtime and hosts do with it.
+   * Views for a private page stay ordinary `ViewDefinition`s — private-ness
+   * is where the page sits in the graph, not what its renderer can do.
+   */
+  private?: boolean;
+  /**
    * Page-level layout (regions + region order + slot tree). When omitted,
    * `templateToAppConfig` substitutes `{ regionOrder: [], regions: {} }`.
    * Cartridges that use the region/slot system populate this directly.

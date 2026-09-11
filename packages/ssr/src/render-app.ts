@@ -74,11 +74,28 @@ export interface RenderToHTMLDeps<
   initialNavState?: Partial<NavigationState>;
   /** Opaque app-context the consumer hands through to the renderer. */
   appContext: TAppContext;
+  /**
+   * Render a `Page.private` entry. Default `false`: a private entry page is
+   * refused with `skipped: { reason: 'private' }` and an empty `html`, on
+   * this runner exactly as on `renderAppWithPublication`. Set it only after
+   * your handler has verified a session for THIS request — the framework
+   * verifies nothing and reads no other input to decide.
+   */
+  renderPrivate?: boolean;
 }
 
 export interface RenderToHTMLResult {
   /** The serialised HTML of the rendered entry page. */
   html: string;
+  /**
+   * Set when the runner refused to render the entry page: `'private'` when
+   * it is `Page.private` and `renderPrivate` was not passed. `html` is
+   * empty. A 401 for a root-mounted host — read `fellBack.reason ===
+   * 'unknown-page'` first, the two can co-occur (see
+   * `RenderWithPublicationResult.skipped`). Open union: branch on the
+   * reason, never on presence alone.
+   */
+  skipped?: { pageType: string; reason: 'private' | (string & {}) };
   /**
    * Set when `initialNavState.page` named a page the runner REJECTED and
    * substituted the default entry for. Absent when no page was requested,
@@ -168,6 +185,17 @@ export function renderAppToHTML<
 
   if (!entry) {
     return { html: '', ...fellBack };
+  }
+
+  // `Page.private` is a promise on the page graph, so both SSR entry points
+  // keep it: a private entry renders only when the host asserts it verified
+  // a session for this request.
+  if (entry.private === true && deps.renderPrivate !== true) {
+    log.info(
+      `renderAppToHTML: refusing private page '${entry.id}' (pageType: ${entry.type}) — no renderPrivate. Nothing rendered.`,
+      { pageType: entry.type, pageId: entry.id, phase: 'private-page' },
+    );
+    return { html: '', skipped: { pageType: entry.type, reason: 'private' }, ...fellBack };
   }
 
   const factory = deps.resolveRenderer(entry.type);

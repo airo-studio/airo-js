@@ -686,3 +686,86 @@ describe('defineAiroApp', () => {
     expect(onError.mock.calls[0][0]).toBe('resolve-view');
   });
 });
+
+describe('gates through the facade (0.11.0)', () => {
+  test("a throwing gate precheck → onError('gate', err, host) once, never 'mount'", async () => {
+    const elementName = uniqueElementName();
+    const onError = vi.fn();
+    const age = {
+      id: 'age',
+      displayName: 'Age',
+      isEnabled: () => true,
+      async precheck() {
+        throw new Error('verify failed');
+      },
+      async mount() {
+        return 'allow' as const;
+      },
+      destroy() {},
+    };
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+      }),
+      resolveCartridge: async () => ({ ...fakeCartridge(), gates: [age] }),
+      onError,
+    });
+
+    const el = mountElement(elementName, { 'airo-id': 'wgt_gate_err' });
+
+    await waitFor(() => onError.mock.calls.length > 0);
+    // Settle: the runtime re-throws after onError('gate'); the facade must
+    // not report the same error a second time as 'mount'.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onError.mock.calls.map((c) => c[0])).toEqual(['gate']);
+    expect(String(onError.mock.calls[0][1])).toContain('verify failed');
+    expect(onError.mock.calls[0][2]).toBe(el);
+  });
+
+  test('satisfiedGates from loadConfig skip the named gate on the initial mount', async () => {
+    const elementName = uniqueElementName();
+    const onMounted = vi.fn();
+    const record: string[] = [];
+    const login = {
+      id: 'login',
+      displayName: 'Sign in',
+      appliesTo: 'private' as const,
+      isEnabled: () => true,
+      async precheck() {
+        record.push('precheck');
+        return 'gate-required' as const;
+      },
+      async mount() {
+        record.push('mount');
+        return 'block' as const;
+      },
+      destroy() {},
+    };
+
+    defineAiroApp({
+      elementName,
+      loadConfig: async () => ({
+        config: {},
+        cartridgeId: 'fake',
+        templateId: 'main',
+        preloadedData: { items: [] },
+        // The host's persisted graph makes the entry page private, so the
+        // login gate applies — and the host's render already satisfied it.
+        templatePages: [{ id: 'home', type: 'home', enabled: true, private: true }],
+        satisfiedGates: ['login'],
+      }),
+      resolveCartridge: async () => ({ ...fakeCartridge(), gates: [login] }),
+      onMounted,
+    });
+
+    mountElement(elementName, { 'airo-id': 'wgt_satisfied' });
+
+    await waitFor(() => onMounted.mock.calls.length > 0);
+    expect(record).toEqual([]);
+  });
+});

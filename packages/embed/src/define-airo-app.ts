@@ -87,6 +87,15 @@ export interface LoadConfigResult<TConfig = unknown> {
   /** Optional preloaded data — skips `dataSource.fetch` in mountCartridge. */
   preloadedData?: unknown;
   /**
+   * Gate ids the host's server render already satisfied for this mount
+   * (0.11.0) — forwarded to `mountCartridge({ satisfiedGates })`, so a
+   * server-rendered private page hydrates without re-asking its login
+   * gate. Read them off the markup you rendered (the convention is
+   * `data-airo-gates-satisfied` from the SSR result's `gates.satisfied`).
+   * Initial mount only; remounts re-run every gate.
+   */
+  satisfiedGates?: ReadonlyArray<string>;
+  /**
    * Mount-time navigation state. Threaded through to `mountCartridge` →
    * `createApp` → `PageManager` so the active page + ctx.navState resolve
    * from URL-decoded or host-supplied state at construction time.
@@ -155,11 +164,18 @@ export interface LoadConfigResult<TConfig = unknown> {
  * Phase identifier passed to `onError`. Lets host apps render different
  * error UI per phase (retry on transient `load-config`, fatal on
  * `resolve-cartridge`, fall through on `fetch-ssr`).
+ *
+ * `'gate'` (0.11.0) is the runtime's gate phase — a gate's `precheck` or
+ * `mount` threw. Forwarded distinctly, like `'resolve-view'`, because the
+ * two ask for different host responses: a gate that could not verify is a
+ * retry, a mount failure is fatal. The runtime README's per-phase triage
+ * applies unchanged through this facade.
  */
 export type EmbedPhase =
   | 'load-config'
   | 'resolve-cartridge'
   | 'fetch-ssr'
+  | 'gate'
   | 'resolve-view'
   | 'mount';
 
@@ -507,6 +523,10 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
         onShellReady: opts.onShellReady,
         resolveView: opts.resolveView,
       };
+      // A gate-phase throw is forwarded as 'gate' and then re-thrown by
+      // mountCartridge; the flag keeps the catch below from reporting the
+      // same error a second time as 'mount'.
+      let reported = false;
       try {
         const result = await mountCartridge({
           ...sharedHooks,
@@ -519,14 +539,20 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           widgetId: id,
           preloadedData: loaded.preloadedData,
           initialNavState: loaded.initialNavState,
+          satisfiedGates: loaded.satisfiedGates,
           mode: hydrating ? 'hydrate' : 'csr',
           onError: (phase, err) => {
             // The shared chunk-recovery engine reports async load
             // failures through the runtime's onError; map to embed's
-            // phase vocabulary. Every other runtime phase re-throws from
+            // phase vocabulary. A gate throw is its own phase (retry, not
+            // fatal). Every other runtime phase re-throws from
             // mountCartridge and is reported by the catch below as
             // 'mount' — forwarding those here would double-report.
             if (phase === 'resolve-view') emitError(opts, 'resolve-view', err, this);
+            if (phase === 'gate') {
+              reported = true;
+              emitError(opts, 'gate', err, this);
+            }
           },
         });
         if (this.disposed) {
@@ -546,7 +572,7 @@ export function defineAiroApp(opts: DefineAiroAppOptions): void {
           opts.onMounted?.(id, this);
         }
       } catch (err) {
-        emitError(opts, 'mount', err, this);
+        if (!reported) emitError(opts, 'mount', err, this);
       }
     }
 

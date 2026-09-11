@@ -42,114 +42,14 @@ import type {
 } from './page.js';
 import type { IEventBus } from './events.js';
 import type { IRouter, RouteState, RouterOption } from './router.js';
-import { HashRouter, QueryRouter } from './router.js';
-import { PathRouter } from './path-router.js';
+import { findEntryPage, resolveEntryPage } from './entry-resolution.js';
+import { createRouter, resolveMountEntry, validPagesFor } from './mount-entry.js';
 
 const log = logger('core');
 
-/**
- * Default entry-page selection. First enabled, non-gate, non-subpage page
- * in the configured order. Shared by PageManager + SSR runner so both
- * agree on what "default entry" means.
- */
-export function findEntryPage<TPageType extends string>(
-  pages: ReadonlyArray<Page<TPageType>>,
-  isGate: (type: TPageType) => boolean,
-): Page<TPageType> | undefined {
-  return pages.find((p) => p.enabled && !isGate(p.type) && !p.parent);
-}
-
-/**
- * Resolve the entry page given an optional preferred id. Used by
- * `PageManager.mountInitial` and the SSR runner. The preferred id wins
- * only when it points to an enabled, non-subpage, non-gate page in the
- * config; otherwise falls back to `findEntryPage` so tampered or stale
- * deeplinks never crash the runtime.
- */
-export function resolveEntryPage<TPageType extends string>(
-  pages: ReadonlyArray<Page<TPageType>>,
-  isGate: (type: TPageType) => boolean,
-  preferredId?: string,
-): Page<TPageType> | undefined {
-  return describeEntryResolution(pages, isGate, preferredId).page;
-}
-
-/** Why a requested entry id was rejected in favour of the default entry. */
-export type EntryFallbackReason =
-  /** No page in the graph has this id. */
-  | 'unknown-page'
-  /** The page exists but `enabled` is false. */
-  | 'disabled'
-  /** The page exists but is a subpage — subpages activate through their parent. */
-  | 'subpage'
-  /** The page exists but `isGatePage` claims its type. */
-  | 'gate-page';
-
-export interface EntryResolution<TPageType extends string> {
-  page: Page<TPageType> | undefined;
-  /**
-   * Present ONLY when a preferred id was supplied and rejected. Absent
-   * when no id was requested (a bare `basePath`, the legitimate entry
-   * case) and when the requested id resolved.
-   */
-  fellBack?: { requested: string; reason: EntryFallbackReason };
-}
-
-/**
- * `resolveEntryPage`, plus WHY it fell back.
- *
- * The resolver already validates a requested id against the page graph
- * and silently substitutes the default entry — deliberately, so a
- * tampered or stale deeplink can never crash a render. Taken literally
- * that serves the home page at `/does-not-exist` with a 200 and a
- * canonical of `/`: a soft 404, which search engines penalise, and which
- * nothing errors or warns about. Two independent consumers shipped it
- * without noticing.
- *
- * The right answer is PER SURFACE, not per consumer — the same codebase
- * routinely serves several. On its own crawlable domain an unknown tail
- * is a 404. On a customer's page, where the URL belongs to the customer's
- * router and the tail may have nothing to do with this widget at all,
- * falling back is mandatory: a widget that refused to render because it
- * did not recognise a path segment would be a vendor breaking a
- * customer's page. That is why the fallback will never be reversed, and
- * why the framework cannot pick.
- *
- * So the fallback stays and the DECISION stops being thrown away. The
- * runner is the only party that knows the decode failed; the host is the
- * only party that knows what that means. HTTP status stays entirely
- * host-side — this reports what it did and has no opinion about the
- * response code.
- *
- * Callers should branch on `reason`, not on the presence of `fellBack`:
- * only `'unknown-page'` is a 404. `'disabled'` is a publisher config
- * state and `'gate-page'` is a real page in the template — both are
- * legitimate 200s that happened to resolve elsewhere.
- */
-export function describeEntryResolution<TPageType extends string>(
-  pages: ReadonlyArray<Page<TPageType>>,
-  isGate: (type: TPageType) => boolean,
-  preferredId?: string,
-): EntryResolution<TPageType> {
-  if (!preferredId) return { page: findEntryPage(pages, isGate) };
-
-  const match = pages.find((p) => p.id === preferredId);
-  const reason: EntryFallbackReason | undefined = !match
-    ? 'unknown-page'
-    : !match.enabled
-      ? 'disabled'
-      : match.parent
-        ? 'subpage'
-        : isGate(match.type)
-          ? 'gate-page'
-          : undefined;
-
-  if (!reason) return { page: match };
-  return {
-    page: findEntryPage(pages, isGate),
-    fellBack: { requested: preferredId, reason },
-  };
-}
+// Entry resolution lives in `./entry-resolution.ts` (0.11.0) so the mount
+// ladder in `./mount-entry.ts` can share it without a module cycle; the
+// package barrel exports it from there.
 
 /**
  * Post-render side-effect hook. Receives the three things only PageManager
@@ -279,14 +179,17 @@ export class PageManager<
     this.pages = opts.pages;
     this.appContext = opts.appContext;
     this.isGatePage = opts.isGatePage ?? (() => false);
-    const entry = findEntryPage(this.pages, this.isGatePage);
-    // Seed precedence: default entry → host-supplied initialNavState →
-    // (initRouter below) URL state. Last write wins, so URL beats host
-    // config beats default — matches the v3 contract.
-    this.navState = {
-      page: entry?.id ?? '',
-      ...(opts.initialNavState ?? {}),
-    };
+    // Seed precedence: default entry → host-supplied initialNavState → URL
+    // state. Last write wins, so URL beats host config beats default —
+    // matches the v3 contract. One implementation (`resolveMountEntry`),
+    // shared with the runtime's gate phase, so the page the gates were
+    // scoped against is the page that mounts.
+    this.navState = resolveMountEntry({
+      pages: this.pages,
+      isGatePage: this.isGatePage,
+      enableRouter: opts.enableRouter,
+      initialNavState: opts.initialNavState,
+    }).navState;
 
     if (opts.enableRouter) {
       this.initRouter();
@@ -583,12 +486,7 @@ export class PageManager<
     const opt = this.opts.enableRouter;
     if (!opt) return;
 
-    const validPages = this.pages
-      .filter((p) => !p.parent && !this.isGatePage(p.type))
-      .map((p) => p.id);
-
-    // Discriminated-union branch on the opt shape. `true` is the
-    // back-compat alias for `{ mode: 'hash' }`.
+    const validPages = validPagesFor(this.pages, this.isGatePage);
     const mode: 'hash' | 'path' | 'query' = opt === true ? 'hash' : opt.mode;
 
     const onRouterNavigate = (state: RouteState): void => {
@@ -601,47 +499,15 @@ export class PageManager<
     };
 
     try {
-      if (mode === 'hash') {
-        // Hash variant — `pathContextKey` belongs to the hash/path
-        // family; the `true` alias has no pathContextKey override.
-        const hashOpt = opt === true ? {} : (opt as { pathContextKey?: string });
-        this.router = new HashRouter(onRouterNavigate, {
-          validPages,
-          pathContextKey: hashOpt.pathContextKey,
-        });
-      } else if (mode === 'path') {
-        // TS narrows `opt` to the path variant here.
-        const pathOpt = opt as {
-          mode: 'path';
-          basePath: string;
-          pathContextKey?: string;
-          entryPageId?: string;
-        };
-        this.router = new PathRouter(onRouterNavigate, {
-          basePath: pathOpt.basePath,
-          validPages,
-          pathContextKey: pathOpt.pathContextKey,
-          // Opt-in, NOT defaulted to the template's entry page. Turning it
-          // on changes which url the entry page canonicalises to, which is
-          // an SEO event for anyone with `basePath/<entryPageId>` already
-          // indexed — their call to make, not a side effect of upgrading.
-          entryPageId: pathOpt.entryPageId,
-        });
-      } else {
-        // mode === 'query' — `paramPrefix` optional, defaults inside
-        // QueryRouter. `pathContextKey` isn't honored in query mode
-        // (discrete-param shape has no path segments).
-        const queryOpt = opt as { mode: 'query'; paramPrefix?: string };
-        this.router = new QueryRouter(onRouterNavigate, {
-          paramPrefix: queryOpt.paramPrefix,
-          validPages,
-        });
-      }
+      // One router factory, shared with `resolveMountEntry`'s parse-only
+      // use, so the URL the constructor folded into `navState` is decoded
+      // by the same code that will drive navigation from here on.
+      this.router = createRouter(opt, onRouterNavigate, validPages);
       this.router.start();
-      const initial = this.router.parseCurrent();
-      if (initial) {
-        this.navState = { ...this.navState, ...initial };
-      } else {
+      // The constructor already applied the URL via `resolveMountEntry`.
+      // When the URL named no state, write ours so the address bar
+      // reflects the entry page.
+      if (!this.router.parseCurrent()) {
         this.router.replace(this.navState as RouteState);
       }
     } catch (err) {

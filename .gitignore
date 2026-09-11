@@ -39,3 +39,7 @@ tmp/
 .context/
 .claude/
 CLAUDE.md
+
+# Playwright output (examples/full-site e2e)
+test-results/
+playwright-report/

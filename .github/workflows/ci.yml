@@ -89,10 +89,20 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # The embed budget is load-bearing and has sat within ~40 bytes of its
-      # ceiling for several releases. It fails the build, not a comment.
+      # The embed budget is load-bearing. It sat within ~40 bytes of a 5 KB
+      # ceiling for several releases; 0.11.0 raised the ceiling to 5.25 KB
+      # for the gate-phase forwarding (a changelog line). It fails the
+      # build, not a comment.
       - name: Embed bundle budget
         run: pnpm --filter @airo-js/embed size:check
+
+      # The runtime's reachable closure (runtime + core + cartridge-kit +
+      # log) is what every consumer page that mounts a cartridge pays.
+      # Both consumers measured 0.11.0's growth independently and asked
+      # for a number to watch before 1.0; this is it. Raising the budget
+      # is a deliberate CHANGELOG line, never a silent edit.
+      - name: Runtime closure budget
+        run: pnpm --filter @airo-js/runtime size:check
 
       - name: Shellcheck
         run: |
@@ -160,11 +170,25 @@ jobs:
       - name: Build full-site
         run: pnpm --filter @airo-js-examples/full-site build
 
+      # Unit tests for the example (happy-dom, `fetch` mocked): the gate's
+      # precheck, the sign-in panel, session expiry. Runs before the server
+      # is up because it needs none.
+      - name: Test — full-site (unit)
+        run: pnpm --filter @airo-js-examples/full-site test
+
+      # One real browser. The HTTP smoke cannot see the gate paint or
+      # hydration adopt the server's DOM; Playwright can. Chromium only.
+      - name: Install Playwright Chromium
+        run: pnpm --filter @airo-js-examples/full-site exec playwright install --with-deps chromium
+
       # This smoke drives a live server over HTTP and has no retry of its own,
       # so readiness is polled here rather than slept on — a fixed sleep is
-      # either flaky or slow, and on a cold runner it is usually both.
-      - name: Smoke — full-site
+      # either flaky or slow, and on a cold runner it is usually both. The
+      # Playwright run reuses the same server (`reuseExistingServer`).
+      - name: Smoke + e2e — full-site
         working-directory: examples/full-site
+        env:
+          CI: 'true'
         run: |
           PORT=4317 node dist/server.js &
           SERVER_PID=$!
@@ -188,3 +212,4 @@ jobs:
           }
 
           node scripts/smoke.mjs
+          PORT=4317 pnpm e2e
