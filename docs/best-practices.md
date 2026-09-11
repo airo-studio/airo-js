@@ -356,7 +356,7 @@ pushToMailbox('__AIRO_MY_CARTRIDGE_PAGES__', {
 
 The server cartridge keeps `views: [...]` with full factories + capabilities — SSR uses `templateOnly()` factories that have no hydrate code, so chunking saves no bytes on the server.
 
-**Do NOT ship placeholder factories.** The framework's resolver checks the static `views[]` array first ([packages/cartridge-kit/src/cartridge-registry.ts:62-80](packages/cartridge-kit/src/cartridge-registry.ts#L62-L80)) and short-circuits on `pageType` match. A placeholder factory permanently blocks the mailbox path for that `pageType`. Empty array means "all factories arrive via mailbox." A `ViewDefinition` **without** a factory is different (0.11.0): it is a capability-only declaration, and the resolver falls through to the mailbox for it — the way a mailbox-only page type declares `csr-only`.
+**Do NOT ship placeholder factories.** The framework's resolver checks the static `views[]` array first ([packages/cartridge-kit/src/cartridge-registry.ts:86-98](packages/cartridge-kit/src/cartridge-registry.ts#L86-L98), and `resolverFor` at L110-L113) and short-circuits on a `pageType` match that carries a factory. A placeholder factory permanently blocks the mailbox path for that `pageType`. Empty array means "all factories arrive via mailbox." A `ViewDefinition` **without** a factory is different (0.11.0): it is a capability-only declaration, and the resolver falls through to the mailbox for it — the way a mailbox-only page type declares `csr-only`.
 
 **`capabilities` lives on the server cartridge only.** SSR coverage gating and adapter routing both consume `ViewDefinition.capabilities`; the browser doesn't filter on it. Maintaining capabilities in one place (server cartridge) is the correct mental model.
 
@@ -831,20 +831,28 @@ A members area is the opposite of everything else this framework does. Public pa
 //    a private entry comes back refused, with nothing run and nothing inlined.
 let result = await renderAppWithPublication({ cartridge, appConfig, snapshot: publicSnapshot, publicationCtx, document, initialNavState });
 
-if (result.skipped?.reason === 'private') {
-  // 2. Only now read the cookie. Public pages never touch it — true by construction.
+// 2. An unknown url is a 404 before anything else — even when the page the
+//    runner fell back to is private (the two reasons can co-occur).
+const unknownPage = result.fellBack?.reason === 'unknown-page';
+
+if (!unknownPage && result.skipped?.reason === 'private') {
+  // 3. Only now read the cookie. Public pages never touch it — true by construction.
   const session = readSession(req);
-  if (!session) return respond401Shell();            // data-airo-mode="csr", noindex, no-store
-  // 3. Build the private slice and render for this session. Adapters still never run.
-  const privateSnapshot = { ...publicSnapshot, member: memberSliceFor(session.userId, slug) };
+  if (!session) return respond401Shell();            // server-rendered sign-in panel, data-airo-mode="csr", noindex, no-store
+  // 4. Build the private slice and render for this session. Adapters still never run.
+  const privateSnapshot = await privateSnapshotFor(session, slug);   // raw data + slice, transformed once
   result = await renderAppWithPublication({ ...sameOptions, snapshot: privateSnapshot, renderPrivate: true });
   res.set('Cache-Control', 'private, no-store').set('Vary', 'Cookie').set('X-Robots-Tag', 'noindex');
 }
 ```
 
-Two runner calls on a signed-in private request; the first is entry resolution and a refusal, the second the render. The host never re-derives which page the URL names — the runner did — and the private branch is the only place the cookie is read. Branch on `skipped` **before** `headFromPublication`: a private refusal has no canonical, and a "no canonical → 404" rule written for public pages will misfire on it.
+Two runner calls on a signed-in private request; the first is entry resolution and a refusal, the second the render. The host never re-derives which page the URL names — the runner did — and the private branch is the only place the cookie is read.
 
-**`renderPrivate` is the one explicit unlock.** The framework verifies nothing (rendering-only) and reads no other input — a host that passes country or locale into anything must never unlock a private page by accident, so the unlock is this flag and only this flag. Set it after your handler has verified the session for this request. With it the page renders as HTML only; adapters never run for a private entry, so there is no JSON-LD, no head-meta, nothing for the sitemap or `llms.txt`, by construction rather than by remembering.
+The order of the three reads matters. **First `fellBack.reason === 'unknown-page'` → 404**: on a template whose first enabled page is private, `/does-not-exist` resolves to that private default entry and the result carries *both* `fellBack.reason === 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped` first would answer 401 and tell a crawler the url exists. **Then `skipped.reason === 'private'` → 401** (or the private render). **Then `headFromPublication`**, never before `skipped`: a private refusal has no canonical, and a "no canonical → 404" rule written for public pages will misfire on it.
+
+**`renderPrivate` is the one explicit unlock.** The framework verifies nothing (rendering-only) and reads no other input — a host that passes country or locale into anything must never unlock a private page by accident, so the unlock is this flag and only this flag. Set it after your handler has verified the session for this request. With it the page renders as HTML only; adapters never run for a private entry, so there is no JSON-LD, no head-meta, nothing for the sitemap or `llms.txt`, by construction rather than by remembering. The low-level `renderAppToHTML` keeps the same promise through the same option on its deps: the flag lives on the page graph, not on one runner.
+
+**`true` is shorthand; name the gates when there is more than one.** `renderPrivate: true` tells the runner "this render satisfies every `appliesTo: 'private'` gate", which is exactly right when the sign-in gate is the only one — a verified session is what it checks. A site with a second private-scoped gate (a paywall tier, a step-up) passes `renderPrivate: { satisfiedGates: ['login'] }` instead; the runner echoes those ids in `gates.satisfied`, restricted to gates that apply to the entry, and the paywall stays `pending` for the client.
 
 **Authenticated but not entitled is a private render with an empty slice, not a refusal.** A valid session whose subject the site has not linked or licensed gets `renderPrivate: true` and a snapshot with `member: { …, entitlement: null }`, and the view renders "not linked". Not 401, not 403: distinguishing unknown, revoked and linked-to-someone-else tells an anonymous caller which guess was warm. The page flag decides the slice; the session decides render-versus-refuse.
 

@@ -36,7 +36,7 @@ DataSource
 - **ViewDefinition**: maps a `page.type` to a renderer factory. Renderers may support CSR, SSR, hydrate, subpages, and live style updates.
 - **PublicationAdapter**: turns the same snapshot into JSON-LD, XML, TSV, `llms.txt`, MCP manifests, or other publishable outputs.
 - **Studio metadata**: `componentSchema`, `themeSchema`, `defineStyleSurface`, and token helpers describe what a CMS-style editor can safely expose.
-- **Runtime**: `mountCartridge` performs shell setup, optional fetch, pipeline, gates, mount, hydrate, and live updates.
+- **Runtime**: `mountCartridge` performs shell setup, entry resolution, gates, optional fetch, pipeline, mount, hydrate, and live updates.
 - **Embed**: `defineAiroApp` registers the custom element customers paste into a page.
 
 ## Install
@@ -97,7 +97,7 @@ Those numbers are a starting budget, not a ceiling for every real cartridge. Rea
 |---|---|
 | [`@airo-js/core`](./packages/core/README.md) | Rendering engine: `createApp`, `PageManager`, routing, events, style isolation, theme injection, registry mailboxes, and pipeline primitives. |
 | [`@airo-js/cartridge-kit`](./packages/cartridge-kit/README.md) | Cartridge contract: `Cartridge`, `DataSource`, `ViewDefinition`, `Template`, `Gate`, `PublicationAdapter`, MCP tools, editor schema, and SSR-safe renderer helpers. |
-| [`@airo-js/runtime`](./packages/runtime/README.md) | Browser mount orchestration: shell setup, fetch or preloaded data, transformer pipeline, gates, mount, hydrate, and live update dispatch. |
+| [`@airo-js/runtime`](./packages/runtime/README.md) | Browser mount orchestration: shell setup, entry resolution, gates, fetch or preloaded data, transformer pipeline, mount, hydrate, and live update dispatch. |
 | [`@airo-js/ssr`](./packages/ssr/README.md) | Runtime-agnostic SSR and publication helpers: `renderAppToHTML`, `runPublicationAdapters`, and `renderAppWithPublication`. |
 | [`@airo-js/embed`](./packages/embed/README.md) | Tiny custom-element bootstrap for customer pages. Loads config, resolves cartridges, lazy-loads runtime, hydrates SSR HTML when present, and recovers missing view chunks. |
 | [`@airo-js/mcp`](./packages/mcp/README.md) | MCP tool manifest emission and dispatch: `buildToolManifest`, `dispatchTool`. Agent answers come from the same post-Transformer snapshot the views render. |
@@ -323,7 +323,7 @@ await mountCartridge({
 });
 ```
 
-`mountCartridge` sets up the render shell, runs the data source, runs transformers, evaluates gates, creates the cartridge app context, and mounts the active page renderer.
+`mountCartridge` sets up the render shell, resolves the entry page, runs the gates that apply to it (a blocked mount fetches nothing), runs the data source, runs transformers, creates the cartridge app context, and mounts the active page renderer.
 
 ## Hello World SSR + Hydrate
 

@@ -185,10 +185,15 @@ See [`docs/best-practices.md` §2.5b](../../docs/best-practices.md) for the unde
 | `'load-config'` | Your `loadConfig` rejected. |
 | `'resolve-cartridge'` | Your `resolveCartridge` rejected. |
 | `'fetch-ssr'` | Your `fetchSsrHtml` rejected. **Mount continues** (CSR fallback). |
+| `'gate'` | A gate's `precheck` or `mount` threw (0.11.0). A verification that could not complete — offer a retry. Reported once; never also as `'mount'`. |
 | `'resolve-view'` | Your `resolveView` rejected (chunk failed to load). The page stays unpainted until a later miss retries. |
 | `'mount'` | Template not found, runtime import failed, or `mountCartridge` rejected. |
 
 Without an `onError` hook, embed logs to `console.error` and leaves the host element empty. For customer-visible errors, supply a hook that paints a studio-branded fallback into `host`.
+
+## Server-rendered private pages
+
+A host that server-rendered a `private: true` page for a verified session hands the runtime that verdict so the hydrate never re-asks the login gate: read the ids off the markup you rendered (the convention is `data-airo-gates-satisfied`, from the SSR result's `gates.satisfied`) and return them as `satisfiedGates` from `loadConfig`. They apply to the initial mount only; remounts re-run every gate. A `templatePages` override replaces the template's pages wholesale — carry `private` through, or the page silently becomes public.
 
 ## What lives where (the M13 line)
 
