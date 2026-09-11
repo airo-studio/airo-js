@@ -61,6 +61,7 @@ import {
 } from '@airo-js/core';
 import type {
   Cartridge,
+  Gate,
   PublicationContext,
 } from '@airo-js/cartridge-kit';
 import { getDefaultRenderResolver, selectGates } from '@airo-js/cartridge-kit';
@@ -153,9 +154,11 @@ export interface RenderWithPublicationOptions<
    * private-scoped gate (a paywall tier, a step-up) names exactly the gates
    * its render met: `{ satisfiedGates: ['login'] }`. The runner echoes what
    * the host asserts, restricted to gates that apply to this entry, and the
-   * rest stay `pending` for the client. An EMPTY list is not an unlock —
-   * `{ satisfiedGates: [] }` refuses like `false` — so a list computed per
-   * request cannot open a private page on its anonymous branch.
+   * rest stay `pending` for the client. The object form unlocks ONLY when
+   * it names an enabled, applicable, `'private'`-scoped gate; a list that is
+   * empty, names only public-scoped gates, or names unknown ids refuses
+   * like `false` — so a list computed per request cannot open a private
+   * page on a branch where no session was verified.
    */
   renderPrivate?: boolean | { satisfiedGates: ReadonlyArray<string> };
 }
@@ -273,12 +276,21 @@ export async function renderAppWithPublication<
     typeof opts.renderPrivate === 'object' && opts.renderPrivate !== null
       ? opts.renderPrivate.satisfiedGates
       : undefined;
-  // An empty list is NOT an unlock: a host computing
-  // `{ satisfiedGates: session ? ['login'] : [] }` must not serve private
-  // HTML to the anonymous branch. To render privately with no gate to
-  // satisfy, pass `true`.
-  const privateUnlock = opts.renderPrivate === true || (hostSatisfied !== undefined && hostSatisfied.length > 0);
-  const gates = gatesFor(opts.cartridge, entryPage, opts.publicationCtx.config, privateUnlock, hostSatisfied);
+  // The object form unlocks only when it names a private-scoped gate that
+  // applies to this entry — the sign-in gate, which is what a verified
+  // session satisfies. A list that is empty, names only public-scoped
+  // gates (`['age']`), or names ids no gate has, refuses like `false`: a
+  // host computing `[...(ageOk ? ['age'] : []), ...(session ? ['login'] : [])]`
+  // must not serve private HTML to an age-verified anonymous visitor. To
+  // render privately with no private-scoped gate to name, pass `true`.
+  const applicableGates = selectGates(opts.cartridge.gates, entryPage).filter((g) =>
+    g.isEnabled(opts.publicationCtx.config),
+  );
+  const namesPrivateGate =
+    hostSatisfied !== undefined &&
+    applicableGates.some((g) => g.appliesTo === 'private' && hostSatisfied.includes(g.id));
+  const privateUnlock = opts.renderPrivate === true || namesPrivateGate;
+  const gates = gatesFor(applicableGates, entryPage, privateUnlock, hostSatisfied);
 
   // ── The private / csr-only decision table ─────────────────────────────
   //
@@ -413,16 +425,14 @@ export async function renderAppWithPublication<
  * same `selectGates` the runtime uses, so the two sides cannot disagree.
  * `satisfied` is the private-scoped subset when the host rendered privately.
  */
-function gatesFor<TData, TConfig>(
-  cartridge: Cartridge<TData, TConfig>,
+function gatesFor<TConfig>(
+  enabled: ReadonlyArray<Gate<TConfig>>,
   entryPage: Page | undefined,
-  config: TConfig,
   renderPrivate: boolean,
   hostSatisfied: ReadonlyArray<string> | undefined,
 ): { pending: string[]; satisfied: string[] } {
   // No entry page: `selectGates` fails closed (every gate), so the client
   // WILL run them all — report them as pending rather than nothing.
-  const enabled = selectGates(cartridge.gates, entryPage).filter((g) => g.isEnabled(config));
   if (!entryPage) return { pending: enabled.map((g) => g.id), satisfied: [] };
   // `renderPrivate: true` is shorthand for "every private-scoped gate"; the
   // object form names exactly what the host verified. Either way only a

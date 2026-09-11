@@ -180,6 +180,22 @@ describe('renderPrivate names what the host verified', () => {
     expect(result.gates).toEqual({ pending: ['age', 'paywall'], satisfied: ['login'] });
   });
 
+  test('a list naming only a public-scoped gate, or unknown ids, is not an unlock', async () => {
+    for (const satisfiedGates of [['age'], ['nope'], ['age', 'nope']]) {
+      const result = await render(buildCartridge({ gates: gates() }), {
+        page: 'members',
+        renderPrivate: { satisfiedGates },
+      });
+      expect(result.html).toBe('');
+      expect(result.skipped?.reason).toBe('private');
+      // The private-scoped gates stay pending for the client; only an
+      // applicable public-scoped gate the host named is echoed.
+      expect(result.gates.pending).toEqual(expect.arrayContaining(['login', 'paywall']));
+      expect(result.gates.satisfied).not.toContain('login');
+      expect(result.gates.satisfied).not.toContain('paywall');
+    }
+  });
+
   test('an empty list is not an unlock: `{ satisfiedGates: [] }` refuses like `false`', async () => {
     const result = await render(buildCartridge({ gates: gates() }), {
       page: 'members',
