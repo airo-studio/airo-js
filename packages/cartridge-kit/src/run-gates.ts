@@ -34,12 +34,21 @@
  *   gate:allowed   { gateId, via: 'precheck' | 'mount' }
  *   gate:blocked   { gateId }
  *
- * (`gate:allowed` with `via: 'server'` is emitted by the runtime when a
- * gate is skipped because the host's server render already satisfied it —
- * see `satisfiedGates` on `mountCartridge`.)
+ * (`gate:allowed` with `via: 'server'` is emitted by `runGatePhase` in
+ * `gate-phase.ts` when a gate is skipped because the host's server render
+ * already satisfied it — see `satisfiedGates` on `mountCartridge`.)
  *
  * Disabled gates (`isEnabled(config) === false`) are skipped silently
  * without invoking precheck/mount/destroy, and emit nothing.
+ *
+ * ## Fail closed
+ *
+ * `mount()` is typed to resolve `'allow' | 'block'`. Anything else — a
+ * missing `return` (resolving `undefined`), a typo, a redirect helper that
+ * resolves `void` — is treated as `'block'`: the gate's paint stays and
+ * nothing else renders. A cartridge bug degrades to "nothing paints", never
+ * to "everything paints". `precheck` already behaves this way (anything
+ * but `'allow'` falls through to `mount`).
  *
  * Error semantics: a thrown error inside precheck or mount propagates.
  * Caller's responsibility — the runtime reports it as `onError('gate')`.
@@ -87,11 +96,13 @@ export async function runGates<TConfig>(
     }
 
     events.emit('gate:mount', { gateId: gate.id });
-    const result = await gate.mount(opts.host, opts.ctx);
-    if (result === 'block') {
-      // Gate's UI stays. Don't call destroy — gate owns its paint and
-      // any observers/timers it set up. They live until the host
-      // element is unmounted from the DOM.
+    const result: unknown = await gate.mount(opts.host, opts.ctx);
+    if (result !== 'allow') {
+      // 'block' — or a verdict the contract does not know, which fails
+      // closed (see the header). The gate's UI stays; destroy is NOT
+      // called here — the gate owns its paint and any observers/timers it
+      // set up. The runtime calls `destroy()` when the host tears the
+      // mount down or before a remount re-runs the gate phase.
       events.emit('gate:blocked', { gateId: gate.id });
       return { verdict: 'block', blockedBy: gate.id };
     }

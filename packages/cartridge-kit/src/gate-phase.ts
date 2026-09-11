@@ -55,28 +55,38 @@ export interface RunGatePhaseOptions<TConfig> {
   satisfiedGates?: ReadonlyArray<string>;
 }
 
-export type RunGatePhaseResult =
-  | { verdict: 'allow'; applied: Gate[]; satisfied: string[] }
-  | { verdict: 'block'; blockedBy: string; applied: Gate[]; satisfied: string[] };
+export type RunGatePhaseResult<TConfig = unknown> =
+  | { verdict: 'allow'; applied: Gate<TConfig>[]; satisfied: string[] }
+  | { verdict: 'block'; blockedBy: string; applied: Gate<TConfig>[]; satisfied: string[] };
 
 /**
  * Select, skip what the server satisfied, run the rest in order.
+ *
  * `applied` lists every gate the phase considered (selected and enabled),
- * whether it ran or was satisfied — the runtime uses it to know whether
- * the mount had any gates at all.
+ * whether it ran or was satisfied; on a block the runtime finds the
+ * blocking gate in it (`applied.find((g) => g.id === blockedBy)`) so it
+ * can call that gate's `destroy()` at teardown. `satisfied` is the subset
+ * the host's server render met.
+ *
+ * Narration order: every satisfied gate is narrated `gate:allowed
+ * { via: 'server' }` up front, in declaration order, BEFORE the remaining
+ * gates run — not at the point in the sequence where it would have run.
+ * A satisfied gate declared after a blocker is therefore narrated before
+ * the block. Eager on purpose: the skip is a fact about the mount, not an
+ * event in the sequence.
  */
 export async function runGatePhase<TConfig>(
   opts: RunGatePhaseOptions<TConfig>,
-): Promise<RunGatePhaseResult> {
+): Promise<RunGatePhaseResult<TConfig>> {
   const selected = selectGates(opts.gates, opts.entryPage);
   const satisfiedIds = new Set(opts.satisfiedGates ?? []);
-  const applied: Gate[] = [];
+  const applied: Gate<TConfig>[] = [];
   const satisfied: string[] = [];
   const toRun: Gate<TConfig>[] = [];
 
   for (const gate of selected) {
     if (!gate.isEnabled(opts.ctx.config)) continue;
-    applied.push(gate as Gate);
+    applied.push(gate);
     if (satisfiedIds.has(gate.id)) {
       satisfied.push(gate.id);
       opts.ctx.events.emit('gate:allowed', { gateId: gate.id, via: 'server' });

@@ -172,6 +172,43 @@ describe('runGates', () => {
     expect(log).toEqual([]);
   });
 
+  test('a throwing mount propagates after gate:mount was narrated, and nothing after it', async () => {
+    // The runtime reports this as onError('gate'); the narration up to the
+    // throw is what a devtools observer sees, so it must stop at `gate:mount`
+    // — no `gate:allowed`, no `gate:blocked`, no destroy.
+    const { events, log } = recordingBus();
+    const gate = makeGate({ id: 'login', precheck: 'gate-required' });
+    gate.mount = async () => {
+      throw new Error('paint failed');
+    };
+
+    await expect(
+      runGates({ gates: [gate], host, ctx: { config: { ageGate: true }, events } }),
+    ).rejects.toThrow('paint failed');
+    expect(gate.calls).toEqual(['precheck']);
+    expect(log).toEqual([
+      ['gate:precheck', { gateId: 'login', decision: 'gate-required' }],
+      ['gate:mount', { gateId: 'login' }],
+    ]);
+  });
+
+  test("a mount verdict that is not 'allow' fails closed: treated as 'block', destroy not called", async () => {
+    // A redirect helper that resolves `void`, a missing `return`, a typo —
+    // none of them may degrade to "everything paints".
+    const { events, log } = recordingBus();
+    const gate = makeGate({ id: 'redirect', precheck: 'gate-required' });
+    gate.mount = async () => {
+      gate.calls.push('mount');
+      return undefined as unknown as 'block';
+    };
+
+    const result = await runGates({ gates: [gate], host, ctx: { config: { ageGate: true }, events } });
+
+    expect(result).toEqual({ verdict: 'block', blockedBy: 'redirect' });
+    expect(gate.calls).toEqual(['precheck', 'mount']);
+    expect(log.at(-1)).toEqual(['gate:blocked', { gateId: 'redirect' }]);
+  });
+
   test('gates run in declaration order and the narration is sequential', async () => {
     const { events, log } = recordingBus();
     const order: string[] = [];

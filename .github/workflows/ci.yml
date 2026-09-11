@@ -89,8 +89,10 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # The embed budget is load-bearing and has sat within ~40 bytes of its
-      # ceiling for several releases. It fails the build, not a comment.
+      # The embed budget is load-bearing. It sat within ~40 bytes of a 5 KB
+      # ceiling for several releases; 0.11.0 raised the ceiling to 5.25 KB
+      # for the gate-phase forwarding (a changelog line). It fails the
+      # build, not a comment.
       - name: Embed bundle budget
         run: pnpm --filter @airo-js/embed size:check
 

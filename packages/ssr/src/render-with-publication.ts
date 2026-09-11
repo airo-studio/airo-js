@@ -146,8 +146,18 @@ export interface RenderWithPublicationOptions<
    * input to make this decision — a country- or locale-scoped host must
    * not unlock private pages by accident, so the unlock is this one
    * explicit flag.
+   *
+   * `true` is shorthand for "this render satisfies every `appliesTo:
+   * 'private'` gate" — right when the sign-in gate is the only one, which
+   * is what a verified session satisfies. A host with a second
+   * private-scoped gate (a paywall tier, a step-up) names exactly the gates
+   * its render met: `{ satisfiedGates: ['login'] }`. The runner echoes what
+   * the host asserts, restricted to gates that apply to this entry, and the
+   * rest stay `pending` for the client. An EMPTY list is not an unlock —
+   * `{ satisfiedGates: [] }` refuses like `false` — so a list computed per
+   * request cannot open a private page on its anonymous branch.
    */
-  renderPrivate?: boolean;
+  renderPrivate?: boolean | { satisfiedGates: ReadonlyArray<string> };
 }
 
 export interface RenderWithPublicationResult {
@@ -161,13 +171,18 @@ export interface RenderWithPublicationResult {
    *   - `'csr-only'`: the entry page's view declared
    *     `capabilities: ['csr-only']`. Adapter results still ran normally
    *     and `html` contains the JSON-LD inline scripts (or empty string if
-   *     no adapters matched) — the SEO partial-win. The client bundle
-   *     mounts via `mountCartridge` as usual.
+   *     no adapters matched) — the SEO partial-win — unless the page is
+   *     also `private`, in which case no adapter ran and `html` is empty.
+   *     The client bundle mounts via `mountCartridge` as usual.
    *   - `'private'`: the entry page is `private: true` and the host did
    *     not pass `renderPrivate`. Nothing ran, nothing was inlined,
    *     `html` is empty and `adapterResults` is empty. This is a 401 for a
-   *     root-mounted host — never a 404 and never a fallback: no other
-   *     page was substituted.
+   *     root-mounted host. `fellBack` MAY accompany it: when the requested
+   *     id was rejected and the default entry it fell back to is private,
+   *     both are set. Read `fellBack.reason === 'unknown-page'` FIRST — an
+   *     unknown url is a 404 whatever the fallback page's privacy — and
+   *     only then map a private skip to 401. Read `skipped` before any
+   *     "no canonical → 404" rule: a private refusal has no canonical.
    *
    * Open union (the 0.10.0 `AdapterSkipped.reason` precedent): branch on
    * the reason with a default, never on presence alone.
@@ -254,7 +269,16 @@ export async function renderAppWithPublication<
   // answering 404 must not have that decision depend on whether the
   // fallback page happened to be server-renderable.
   const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
-  const gates = gatesFor(opts.cartridge, entryPage, opts.publicationCtx.config, opts.renderPrivate === true);
+  const hostSatisfied =
+    typeof opts.renderPrivate === 'object' && opts.renderPrivate !== null
+      ? opts.renderPrivate.satisfiedGates
+      : undefined;
+  // An empty list is NOT an unlock: a host computing
+  // `{ satisfiedGates: session ? ['login'] : [] }` must not serve private
+  // HTML to the anonymous branch. To render privately with no gate to
+  // satisfy, pass `true`.
+  const privateUnlock = opts.renderPrivate === true || (hostSatisfied !== undefined && hostSatisfied.length > 0);
+  const gates = gatesFor(opts.cartridge, entryPage, opts.publicationCtx.config, privateUnlock, hostSatisfied);
 
   // ── The private / csr-only decision table ─────────────────────────────
   //
@@ -269,10 +293,10 @@ export async function renderAppWithPublication<
   // Page-private is checked first and refusal wins: a private page's view
   // being csr-only must never turn into "inline the JSON-LD anyway".
   const isPrivate = entryPage?.private === true;
-  if (entryPage && isPrivate && !opts.renderPrivate) {
+  if (entryPage && isPrivate && !privateUnlock) {
     log.info(
       `renderAppWithPublication: refusing private page '${entryPage.id}' (pageType: ${entryPage.type}) — no renderPrivate. Nothing rendered, nothing published.`,
-      { pageType: entryPage.type, pageId: entryPage.id, phase: 'capability-gate' },
+      { pageType: entryPage.type, pageId: entryPage.id, phase: 'private-page' },
     );
     return {
       html: '',
@@ -373,6 +397,9 @@ export async function renderAppWithPublication<
       config: opts.publicationCtx.config,
       data: opts.snapshot,
     },
+    // The private decision was made above; the low-level renderer keeps
+    // the same promise and must be told it was.
+    renderPrivate: privateUnlock,
   };
 
   const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
@@ -391,14 +418,23 @@ function gatesFor<TData, TConfig>(
   entryPage: Page | undefined,
   config: TConfig,
   renderPrivate: boolean,
+  hostSatisfied: ReadonlyArray<string> | undefined,
 ): { pending: string[]; satisfied: string[] } {
-  if (!entryPage) return { pending: [], satisfied: [] };
+  // No entry page: `selectGates` fails closed (every gate), so the client
+  // WILL run them all — report them as pending rather than nothing.
   const enabled = selectGates(cartridge.gates, entryPage).filter((g) => g.isEnabled(config));
+  if (!entryPage) return { pending: enabled.map((g) => g.id), satisfied: [] };
+  // `renderPrivate: true` is shorthand for "every private-scoped gate"; the
+  // object form names exactly what the host verified. Either way only a
+  // gate that applies to this entry can be satisfied — the host's list is
+  // echoed, not trusted beyond the gates that would have run.
   const satisfiedByRender = renderPrivate && entryPage.private === true;
+  const isSatisfied = (gate: (typeof enabled)[number]): boolean =>
+    hostSatisfied ? hostSatisfied.includes(gate.id) : satisfiedByRender && gate.appliesTo === 'private';
   const pending: string[] = [];
   const satisfied: string[] = [];
   for (const gate of enabled) {
-    if (satisfiedByRender && gate.appliesTo === 'private') satisfied.push(gate.id);
+    if (isSatisfied(gate)) satisfied.push(gate.id);
     else pending.push(gate.id);
   }
   return { pending, satisfied };

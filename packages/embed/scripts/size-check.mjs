@@ -4,7 +4,9 @@
  * minified, and asserts both raw + gzip sizes against the documented budget.
  *
  * Budget (load-bearing for v0.1):
- *   - Minified: ≤ 5 KB
+ *   - Minified: ≤ 5.25 KB (was 5 KB until 0.11.0; raised to fit forwarding
+ *     the runtime's 'gate' error phase and the `satisfiedGates` hand-off —
+ *     the first growth in several lines, recorded in the CHANGELOG)
  *   - Gzipped:  ≤ 2.5 KB
  *
  * The runtime is excluded from the bundle (peerDep, dynamic-imported at
@@ -18,7 +20,7 @@
 import { execSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 
-const MAX_MIN = 5 * 1024;        // 5 KB
+const MAX_MIN = 5.25 * 1024;     // 5.25 KB
 const MAX_GZIP = 2.5 * 1024;     // 2.5 KB
 
 const minified = execSync(

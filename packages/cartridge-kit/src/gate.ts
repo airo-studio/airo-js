@@ -57,8 +57,9 @@
  * and no UI re-shows. The return URL carries the nav state — link to
  * `/auth/login?next=<pathname+search>` and have the host redirect back to
  * `next` (same-origin paths only); hosts with no URL router serialise
- * `app.getNavigationState()` into `next` and re-supply it as
- * `initialNavState`. Popup and in-page flows (wallet prompts) resolve
+ * `ctx.navState` (the state this mount starts on, handed to the gate
+ * because no App exists yet at gate time) into `next` and re-supply it
+ * as `initialNavState`. Popup and in-page flows (wallet prompts) resolve
  * `mount()` in place and need none of this. A gate that wants to block AND
  * send the visitor somewhere calls `location.assign()` itself and returns
  * `'block'`; no framework channel is needed.
@@ -66,13 +67,21 @@
  * ## SSR and hydrate
  *
  * Gates are CSR-only. On the client, in hydrate mode, the runtime snapshots
- * the server's markup before the gate phase and restores it when a gate
- * that painted INTO THE RENDER ROOT resolves `'allow'`, so hydration adopts
- * the server's DOM and not the gate's; on `'block'` the gate's paint stays.
- * That guarantee covers the render root only. A gate that paints or mutates
- * anywhere else — an overlay appended beside the render root, a
- * `document.body.style` change — undoes it itself in `destroy()`: the
- * contract is "undo what you did", not only "what you did to the host".
+ * the server's markup before the gate phase — only when a gate could
+ * actually paint (one that is enabled, applies to the entry, and was not
+ * satisfied by the server) — and restores it when a gate that painted
+ * INTO THE RENDER ROOT resolves `'allow'`, so hydration adopts the
+ * server's DOM and not the gate's; on `'block'` the gate's paint stays.
+ * The restore re-parses the markup: any node reference or observer a host
+ * attached to the server's DOM in `onShellReady` points at a detached node
+ * afterwards, so attach to the render root, not to what is inside it,
+ * when a painting gate is in play. That guarantee covers the render root
+ * only. A gate that paints or mutates anywhere else — an overlay appended
+ * beside the render root, a `document.body.style` change — undoes it
+ * itself in `destroy()`: the contract is "undo what you did", not only
+ * "what you did to the host". A gate that blocked keeps its paint and its
+ * listeners until the host calls the mount result's `destroy()` or a
+ * remount re-runs the gate phase; the runtime calls `destroy()` then.
  * Hosts that need zero painted frames before a gate ship the hide in the
  * initial HTML (`data-airo-gate="pending"`, from the SSR result's
  * `gates.pending`) and the runtime flips the attribute to `passed` /
@@ -89,13 +98,22 @@
  * skipped once and narrated as `gate:allowed { via: 'server' }`.
  */
 
-import type { IEventBus } from '@airo-js/core';
+import type { IEventBus, NavigationState } from '@airo-js/core';
 
 export interface GateContext<TConfig> {
   /** The cartridge's config — same shape every other primitive sees. */
   config: TConfig;
   /** App-level event bus. Gates can listen and emit (e.g. `auth:login`). */
   events: IEventBus;
+  /**
+   * The navigation state this mount starts on (URL > `initialNavState` >
+   * default entry), as resolved by the runtime before the gate phase.
+   * `navState.page` is the id of the page the gate is scoped against.
+   * Gates run before any App exists, so this is the only framework-supplied
+   * way to build a return URL (`next`) for a host with no URL router.
+   * Absent when the runner is invoked outside the runtime.
+   */
+  navState?: Readonly<NavigationState>;
   /**
    * Host-app-supplied scope. Optional and opaque to the framework — host
    * apps pass whatever scoping their tenancy / locale / user model needs.
@@ -140,6 +158,14 @@ export interface Gate<TConfig = unknown> {
    * navigation into a private page does not re-run it; a private view
    * renders its signed-out state when the snapshot carries no member data,
    * and the host's API stays the authority.
+   *
+   * On the SSR side, `renderPrivate: true` is shorthand for "this render
+   * satisfies every `'private'` gate" — right when the only private-scoped
+   * gate is the sign-in gate, which is what a verified session satisfies.
+   * A host with a second private-scoped gate (a paywall tier, a step-up)
+   * names the ones its render actually met with
+   * `renderPrivate: { satisfiedGates: [...] }`, and the others stay
+   * pending for the client.
    */
   appliesTo?: 'all' | 'private';
 
@@ -195,9 +221,10 @@ export interface Gate<TConfig = unknown> {
   mount(host: HTMLElement, ctx: GateContext<TConfig>): Promise<'allow' | 'block'>;
 
   /**
-   * Tear down listeners, timers, observers. Called when the framework
-   * destroys the App OR when the gate resolved `'allow'` and the next
-   * paint replaces its UI. Idempotent — safe to call twice.
+   * Tear down listeners, timers, observers. Called when the gate resolved
+   * `'allow'` and the next paint replaces its UI, and — for a gate that
+   * blocked — when the host calls the mount result's `destroy()` or a
+   * remount re-runs the gate phase. Idempotent — safe to call twice.
    */
   destroy(): void;
 

@@ -130,7 +130,11 @@ const snapshot: D = { marker: 'x', member: { name: 'Demo' } };
 
 async function render(
   cartridge: Cartridge<D, C>,
-  extra: { page?: string; renderPrivate?: boolean; appConfig?: AppConfig } = {},
+  extra: {
+    page?: string;
+    renderPrivate?: boolean | { satisfiedGates: string[] };
+    appConfig?: AppConfig;
+  } = {},
 ) {
   return renderAppWithPublication<D, C>({
     cartridge,
@@ -142,6 +146,61 @@ async function render(
     ...(extra.renderPrivate !== undefined ? { renderPrivate: extra.renderPrivate } : {}),
   });
 }
+
+describe('the gates report when no entry page resolves', () => {
+  test('every enabled gate is pending — the client fails closed and runs them all, so the host is told so', async () => {
+    const noEntry: AppConfig = {
+      appId: 'app',
+      pages: [{ id: 'home', type: 'home', enabled: false, layout }],
+    };
+    const result = await render(
+      buildCartridge({ gates: [gate('age'), gate('login', 'private'), gate('off', 'all', false)] }),
+      { appConfig: noEntry },
+    );
+    expect(result.html).toBe('');
+    expect(result.gates).toEqual({ pending: ['age', 'login'], satisfied: [] });
+  });
+});
+
+describe('renderPrivate names what the host verified', () => {
+  const gates = () => [gate('age'), gate('login', 'private'), gate('paywall', 'private')];
+
+  test('`true` is shorthand for every private-scoped gate', async () => {
+    const result = await render(buildCartridge({ gates: gates() }), { page: 'members', renderPrivate: true });
+    expect(result.html).toContain('data-marker="members"');
+    expect(result.gates).toEqual({ pending: ['age'], satisfied: ['login', 'paywall'] });
+  });
+
+  test('the object form satisfies exactly the named gates; the rest stay pending', async () => {
+    const result = await render(buildCartridge({ gates: gates() }), {
+      page: 'members',
+      renderPrivate: { satisfiedGates: ['login'] },
+    });
+    expect(result.html).toContain('data-marker="members"');
+    expect(result.gates).toEqual({ pending: ['age', 'paywall'], satisfied: ['login'] });
+  });
+
+  test('an empty list is not an unlock: `{ satisfiedGates: [] }` refuses like `false`', async () => {
+    const result = await render(buildCartridge({ gates: gates() }), {
+      page: 'members',
+      renderPrivate: { satisfiedGates: [] },
+    });
+    expect(result.html).toBe('');
+    expect(result.skipped?.reason).toBe('private');
+    expect(result.gates).toEqual({ pending: ['age', 'login', 'paywall'], satisfied: [] });
+  });
+
+  test('the object form unlocks the private render like `true` does, and is echoed only for gates that apply', async () => {
+    // On a public entry the private-scoped gates are not selected, so a
+    // named 'login' is ignored; a named 'age' (applies to all) is honoured.
+    const result = await render(buildCartridge({ gates: gates() }), {
+      page: 'home',
+      renderPrivate: { satisfiedGates: ['login', 'age'] },
+    });
+    expect(result.html).toContain('data-marker="home"');
+    expect(result.gates).toEqual({ pending: [], satisfied: ['age'] });
+  });
+});
 
 describe('renderAppWithPublication — private pages: the decision table', () => {
   test('public entry, public view → adapters run, widget html', async () => {

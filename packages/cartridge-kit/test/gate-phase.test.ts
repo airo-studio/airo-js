@@ -63,6 +63,30 @@ function makeGate(
 }
 
 const host = {} as HTMLElement;
+
+describe('narration order for satisfied gates', () => {
+  test('a satisfied gate declared AFTER a blocker is narrated allowed (via server) before the block — eager, by contract', async () => {
+    const { events, log } = recordingBus();
+    const age = makeGate('age', { mount: 'block' });
+    const login = makeGate('login', { appliesTo: 'private' });
+
+    const result = await runGatePhase({
+      gates: [age, login],
+      entryPage: { private: true },
+      host,
+      ctx: ctxFor(events),
+      satisfiedGates: ['login'],
+    });
+
+    expect(result.verdict).toBe('block');
+    expect(result.satisfied).toEqual(['login']);
+    // The skip is a fact about the mount, narrated up front; the sequence
+    // of gates that actually ran follows it.
+    expect(log.map(([name]) => name)).toEqual(['gate:allowed', 'gate:precheck', 'gate:mount', 'gate:blocked']);
+    expect(log[0]).toEqual(['gate:allowed', { gateId: 'login', via: 'server' }]);
+    expect(login.calls).toEqual([]);
+  });
+});
 const ctxFor = (events: IEventBus) => ({ config: { requireSignIn: true }, events });
 
 describe('selectGates', () => {

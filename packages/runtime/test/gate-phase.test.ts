@@ -17,9 +17,11 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventBus } from '@airo-js/core';
+import type { Gate, GateContext } from '@airo-js/cartridge-kit';
 
 import { mountCartridge } from '../src/mount-cartridge.js';
 import {
+  type TestConfig,
   fakeCartridge,
   fakeDataSource,
   fakeTemplate,
@@ -364,6 +366,60 @@ describe('data-airo-gate — the no-paint attribute', () => {
     };
     await expect(mountWith([throwing], { initialNavState: { page: 'members' } })).rejects.toThrow('boom');
     expect(host.getAttribute('data-airo-gate')).toBe('error');
+  });
+});
+
+describe('the gate context and the entry sanity check', () => {
+  test('gateScope, the mount config and the shared bus reach the gate as its ctx', async () => {
+    const events = new EventBus();
+    let seen: { scope?: unknown; config?: unknown; events?: unknown } = {};
+    const probe: Gate<TestConfig> = {
+      ...loginGate([], { decision: 'allow' }),
+      async precheck(ctx: GateContext<TestConfig>) {
+        seen = { scope: ctx.scope, config: ctx.config, events: ctx.events };
+        return 'allow';
+      },
+    };
+
+    const result = await mountCartridge({
+      cartridge: mixedCartridge({ gates: [probe] }),
+      config: { locale: 'fr' },
+      template: privateTemplate(),
+      host,
+      preloadedData: { items: [] },
+      initialNavState: { page: 'members' },
+      gateScope: { user_id: 'u1', country: 'GB' },
+      events,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(seen.scope).toEqual({ user_id: 'u1', country: 'GB' });
+    expect(seen.config).toEqual({ locale: 'fr' });
+    expect(seen.events).toBe(events);
+  });
+
+  test("a template with no enabled entry page reports onError('mount') and throws BEFORE any gate runs", async () => {
+    // The sanity check moved ahead of the gate phase in 0.11.0 so a broken
+    // graph fails before a gate paints. `appliesTo: 'private'` fails closed
+    // on an unresolved entry, so this gate WOULD run if the check came later.
+    const record: string[] = [];
+    const onError = vi.fn();
+    const template = { ...fakeTemplate(), pages: [{ id: 'home', type: 'home', enabled: false }] };
+
+    await expect(
+      mountCartridge({
+        cartridge: fakeCartridge({ gates: [loginGate(record)] }),
+        config: {},
+        template,
+        host,
+        preloadedData: { items: [] },
+        onError,
+      }),
+    ).rejects.toThrow(/no enabled entry page/);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBe('mount');
+    expect(record).toEqual([]);
+    expect(host.hasAttribute('data-airo-gate')).toBe(false);
   });
 });
 

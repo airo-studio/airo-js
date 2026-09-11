@@ -115,7 +115,11 @@ export interface MountEntry<TPageType extends string> {
 /**
  * Run the ladder. Deterministic given the same inputs and the same URL,
  * so the runtime (before gates) and `PageManager` (at construction) reach
- * the same page.
+ * the same page — provided the URL did not change in between. The gate
+ * phase is async (network, user input), so it can: the runtime compares
+ * the page it scoped the gates against with the page the App actually
+ * mounted and narrates a disagreement (`log.warn`) rather than pretend
+ * the two are one by construction.
  */
 export function resolveMountEntry<TPageType extends string>(
   opts: ResolveMountEntryOptions<TPageType>,

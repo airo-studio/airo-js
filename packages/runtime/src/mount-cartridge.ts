@@ -79,11 +79,17 @@ import type {
   CartridgeRegistry,
   DataSourceInput,
   DeepPartial,
+  Gate,
   RunGatePhaseResult,
   Template,
   TemplatePage,
 } from '@airo-js/cartridge-kit';
-import { createCartridgeApp, runGatePhase, templateToAppConfig } from '@airo-js/cartridge-kit';
+import {
+  createCartridgeApp,
+  runGatePhase,
+  selectGates,
+  templateToAppConfig,
+} from '@airo-js/cartridge-kit';
 import { initLogControls, logger } from '@airo-js/log';
 
 const log = logger('runtime');
@@ -717,7 +723,9 @@ export async function mountCartridge<
     }
     const paths = leafPaths(delta);
     const hotSwap = (opts.cartridge.hotSwapKeys ?? []).map(String);
-    const needsRemount = paths.some((p) => !isCovered(p, hotSwap));
+    // After a gate-blocked remount there is no live App to hot-swap into:
+    // the gate's paint is on screen. Remount, re-running the gates.
+    const needsRemount = remountBlocked || paths.some((p) => !isCovered(p, hotSwap));
     const navState = currentApp.getNavigationState();
     const newConfig = deepMerge(currentConfig, delta);
 
@@ -725,7 +733,9 @@ export async function mountCartridge<
       // Tear down the old app but leave `currentApp` pointing at the
       // destroyed handle until the new app is ready — this preserves
       // the `result.app.state` getter contract during the async gap
-      // and avoids null-handling at access sites.
+      // and avoids null-handling at access sites. A gate that blocked the
+      // previous remount is torn down before its paint is wiped.
+      destroyBlockedGate();
       currentApp.destroy();
       if (isolationRoot.isolated) {
         renderRoot.innerHTML = '';
@@ -736,11 +746,14 @@ export async function mountCartridge<
         // caller can decide whether to remount with different config or
         // tear down. `currentApp` remains the (destroyed) prior handle,
         // matching post-destroy semantics so subsequent destroy() calls
-        // are idempotent.
+        // are idempotent. `remountBlocked` makes the next update() remount
+        // rather than hot-swap into that destroyed handle.
+        remountBlocked = true;
         throw new Error(
           `[@airo-js/runtime] update() remount was blocked by gate "${next.blockedBy}". Resolve the gate or revert the offending config delta.`,
         );
       }
+      remountBlocked = false;
       currentApp = next.app;
       currentSnapshot = next.snapshot;
       currentConfig = newConfig;
@@ -785,26 +798,32 @@ export async function mountCartridge<
     const nextPages = nextAppConfig.pages;
     const navState = currentApp.getNavigationState();
     const allowed = (opts.cartridge.pageHotSwapKeys ?? []).map(String);
-    const canHotSwap = pagesDiffIsCoveredByHotSwap(
-      currentPages,
-      nextPages,
-      allowed,
-    );
+    const canHotSwap =
+      !remountBlocked &&
+      pagesDiffIsCoveredByHotSwap(
+        currentPages,
+        nextPages,
+        allowed,
+      );
 
     if (!canHotSwap) {
+      destroyBlockedGate();
       currentApp.destroy();
       if (isolationRoot.isolated) {
         renderRoot.innerHTML = '';
       }
-      // Set `currentPages` BEFORE doMountInner so Phase 4 reads the new
-      // graph. doMountInner consumes `currentPages` directly.
+      // Set `currentPages` BEFORE doMountInner so the entry phase (3) and
+      // createCartridgeApp (7) read the new graph. doMountInner consumes
+      // `currentPages` directly.
       currentPages = nextPages;
       const next = await doMountInner(currentConfig, navState, false);
       if (next.blocked) {
+        remountBlocked = true;
         throw new Error(
           `[@airo-js/runtime] updatePages() remount was blocked by gate "${next.blockedBy}". Resolve the gate or revert the offending page-graph delta.`,
         );
       }
+      remountBlocked = false;
       currentApp = next.app;
       currentSnapshot = next.snapshot;
       const outcome: UpdateResult = { mode: 'remount', navState };
@@ -849,6 +868,21 @@ export async function mountCartridge<
     | { blocked: true; blockedBy: string }
     | { blocked: false; app: App; snapshot: TData };
 
+  // The gate that blocked the most recent mount attempt, held so its
+  // `destroy()` runs when the host tears the mount down or before a remount
+  // re-runs the gate phase. `runGates` deliberately does not destroy a
+  // blocking gate (its paint must stay); this is where that lifetime ends.
+  let blockedGate: Gate<TConfig> | null = null;
+  // Set when a remount was blocked by a gate: the live App is gone and the
+  // gate's paint is on screen, so the next update()/updatePages() must
+  // remount (re-running the gates) rather than hot-swap into a destroyed
+  // App and report success.
+  let remountBlocked = false;
+  const destroyBlockedGate = (): void => {
+    blockedGate?.destroy();
+    blockedGate = null;
+  };
+
   // The no-paint attribute (0.11.0). A host that needs zero painted frames
   // before a gate ships `data-airo-gate="pending"` on the host element
   // (from the SSR result's `gates.pending`) and hides under it with its own
@@ -870,11 +904,18 @@ export async function mountCartridge<
     // the same URL > initialNavState > default ladder PageManager applies
     // inside createApp. Also the "no enabled entry page" sanity check, so a
     // broken graph fails before any gate paints.
+    // A previous attempt blocked by a gate left that gate's paint and
+    // listeners in place; this attempt supersedes it, whatever happens
+    // next, so that gate's lifetime ends first.
+    destroyBlockedGate();
     const firstPage = currentPages.find((p) => p.enabled && !p.parent);
     if (!firstPage) {
       const err = new Error(
         '[@airo-js/runtime] mountCartridge: template has no enabled entry page.',
       );
+      // A host that hid under `data-airo-gate="pending"` must not stay
+      // hidden on a broken graph: this exit resolves the attribute too.
+      setGateAttribute('error');
       opts.onError?.('mount', err, shell);
       throw err;
     }
@@ -888,16 +929,25 @@ export async function mountCartridge<
     // member fetch, and a blocked mount must cost no network. In hydrate
     // mode the server's markup is already in `renderRoot`; remember it so
     // a gate that paints over it and then allows does not hand hydration
-    // its own DOM (the age-modal-over-SSR-products shape).
-    const ssrMarkup = mode === 'hydrate' ? renderRoot.innerHTML : null;
-    let gatePhase: RunGatePhaseResult;
+    // its own DOM (the age-modal-over-SSR-products shape). Only when a
+    // gate could actually paint: serialising a large SSR root twice on
+    // every hydrate is not free, and a mount with no applicable, enabled,
+    // unsatisfied gate has nothing to restore. Initial mount only — a
+    // remount's render root holds the destroyed app's DOM, not the
+    // server's.
+    const satisfiedGates = initial ? (opts.satisfiedGates ?? []) : [];
+    const gateMayPaint = selectGates(opts.cartridge.gates, entry.page).some(
+      (g) => g.isEnabled(config) && !satisfiedGates.includes(g.id),
+    );
+    const ssrMarkup = mode === 'hydrate' && initial && gateMayPaint ? renderRoot.innerHTML : null;
+    let gatePhase: RunGatePhaseResult<TConfig>;
     try {
       gatePhase = await runGatePhase({
         gates: opts.cartridge.gates,
         entryPage: entry.page,
         host: renderRoot,
-        ctx: { config, events, scope: opts.gateScope },
-        satisfiedGates: initial ? opts.satisfiedGates : undefined,
+        ctx: { config, events, scope: opts.gateScope, navState: entry.navState },
+        satisfiedGates,
       });
     } catch (err) {
       setGateAttribute('error');
@@ -906,7 +956,8 @@ export async function mountCartridge<
     }
     if (gatePhase.verdict === 'block') {
       // The blocking gate left its UI in `renderRoot`. Nothing else paints,
-      // nothing is fetched.
+      // nothing is fetched. Hold the gate so `destroy()` reaches it.
+      blockedGate = gatePhase.applied.find((g) => g.id === gatePhase.blockedBy) ?? null;
       setGateAttribute('blocked');
       return { blocked: true, blockedBy: gatePhase.blockedBy };
     }
@@ -914,6 +965,23 @@ export async function mountCartridge<
       renderRoot.innerHTML = ssrMarkup;
     }
     setGateAttribute('passed');
+    // The gate phase is async; the URL can change under it (a hash flip, a
+    // host's replaceState, a gate that navigated). PageManager re-parses
+    // the URL at construction, so the page that mounts can differ from the
+    // page the gates were scoped against. Re-run the same ladder now and
+    // narrate a disagreement — the gates ran for `entry.page`, not for what
+    // is about to mount.
+    const afterGates = resolveMountEntry<TPageType>({
+      pages: currentPages,
+      enableRouter: opts.enableRouter,
+      initialNavState: navState,
+    });
+    if (entry.page && afterGates.page && afterGates.page.id !== entry.page.id) {
+      log.warn(
+        `mountCartridge: gates ran for entry page "${entry.page.id}" but the URL now names "${afterGates.page.id}" — the URL changed during the gate phase.`,
+        { scoped: entry.page.id, mounting: afterGates.page.id, phase: 'gate' },
+      );
+    }
 
     // Phase 5 — data. preloadedData wins; otherwise call DataSource.fetch.
     let data: TData;
@@ -957,9 +1025,13 @@ export async function mountCartridge<
     const hasPostProcessors = (opts.cartridge.postProcessors?.length ?? 0) > 0;
     let snapshot: TData;
     try {
+      // The page this mount starts on — the same one the gates were scoped
+      // against — not the template's first page. A transformer that shapes
+      // the snapshot per page (strip a private slice unless the page is
+      // private) must see the page that will render.
       snapshot = await pipeline.runTransformers(data, {
         config,
-        navState: { page: firstPage.id },
+        navState: { ...entry.navState, page: entry.page?.id ?? firstPage.id },
         locale: (config as { locale?: string }).locale,
       });
     } catch (err) {
@@ -1054,6 +1126,9 @@ export async function mountCartridge<
   // intact lets `result.app.state` still report `'destroyed'` (the
   // existing assertion contract) without the getter throwing.
   const destroy = () => {
+    // A gate that blocked (the initial mount, or the latest remount) kept
+    // its paint and listeners; teardown is where they go.
+    destroyBlockedGate();
     if (initialResult.blocked && currentApp === null) {
       // Gate UI stays — caller asked for it. Nothing extra to tear down;
       // we never created an App and the shell is the gate's canvas.
@@ -1198,7 +1273,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * future Page widening shouldn't silently upgrade fields into the
  * "always-remount" set.
  */
-const STRUCTURAL_PAGE_KEYS = ['id', 'type', 'enabled', 'parent'] as const;
+const STRUCTURAL_PAGE_KEYS = ['id', 'type', 'enabled', 'parent', 'private'] as const;
 type StructuralPageKey = (typeof STRUCTURAL_PAGE_KEYS)[number];
 
 /**

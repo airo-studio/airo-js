@@ -5,8 +5,8 @@
  * Shared by `PageManager` (client), the SSR runner and the runtime's gate
  * phase (via `resolveMountEntry`), so every side agrees on what "default
  * entry" means. Lives in its own module (0.11.0) so `mount-entry.ts` can
- * import it without a cycle through `page-manager.ts`; the page manager
- * re-exports these for its existing callers.
+ * import it without a cycle through `page-manager.ts`; the package barrel
+ * (`index.ts`) is the export path, as before.
  */
 
 import type { Page } from './schema.js';
