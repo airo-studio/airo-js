@@ -26,13 +26,13 @@ pnpm e2e              # Playwright, Chromium: the gate paints, hydration adopts 
 
 `@airo-js/ssr` is pure functions over a `Document`. **There is no HTTP server in the framework, no file-based routing, no bundler, no dev server** — that is deliberate, not missing.
 
-`src/server.ts` is ~180 lines of Express and none of it is framework-specific. Swap it for Hono, Fastify, a Cloudflare Worker or bare `node:http` and *nothing else changes*: the cartridge, the client entry and every surface are identical. The sibling [`shopify-edge-worker`](../shopify-edge-worker) example is the same framework calls behind a Worker `fetch` handler.
+`src/server.ts` is ~530 lines of Express — the page route, the machine routes, the members API — and none of it is framework-specific; the OAuth provider and relying party beside it in `src/auth/` (~580 lines) are host code too. Swap it for Hono, Fastify, a Cloudflare Worker or bare `node:http` and *nothing else changes*: the cartridge, the client entry and every surface are identical. The sibling [`shopify-edge-worker`](../shopify-edge-worker) example is the same framework calls behind a Worker `fetch` handler.
 
 So the honest framing is **"your server + airo-js"**, and the server is genuinely any server.
 
 ## What it demonstrates
 
-**One cartridge owns the whole site.** Two routable pages (`home`, `doc`), with the slug in the second path segment via `pathContextKey: 'slug'`. `enableRouter: { mode: 'path', basePath: '/', entryPageId: 'home' }` root-mounts it — and `entryPageId` is what gives the index **one** url instead of answering on both `/` and `/home`.
+**One cartridge owns the whole site.** Four routable pages — `home` and `doc` public, `members` and `note` private — with the slug in the second path segment via `pathContextKey: 'slug'`. `enableRouter: { mode: 'path', basePath: '/', entryPageId: 'home' }` root-mounts it — and `entryPageId` is what gives the index **one** url instead of answering on both `/` and `/home`.
 
 **The snapshot is per request.** The DataSource takes the requested slug and returns a snapshot scoped to *that* page. This is the load-bearing decision: it makes canonicals per-page, and it makes `validate()` a per-page gate rather than a per-feed one. Get it wrong and one unfinished entry blocks the entire site.
 

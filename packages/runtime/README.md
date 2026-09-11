@@ -101,8 +101,8 @@ result.destroy();
 | Config-shape translation (studio config → cartridge config) | **Host app** (upstream of `mountCartridge`) |
 | Error UI | **Host app** (via `onError`) |
 | SSR-hydrate fork (`mode: 'hydrate'`) | `@airo-js/runtime` (v0.2 — landed) |
-| Per-page chunk loading | `@airo-js/runtime` (deferred) |
-| Live `update(opts)` for studio chrome | `@airo-js/runtime` (deferred) |
+| Per-page chunk recovery (singleflight, hydrate-vs-navigate dispatch) | `@airo-js/runtime` (the `resolveView` seam on `SharedLifecycleHooks`; chunk transport is the host's) |
+| Live `update(delta)` / `updatePages(pages)` for studio chrome | `@airo-js/runtime` (hot-swap under `hotSwapKeys` / `pageHotSwapKeys`, otherwise remount with `NavigationState` preserved) |
 
 ## Hook contract
 
@@ -177,7 +177,6 @@ What `mode: 'hydrate'` does:
 ## Deferred (signature-compatible — additive)
 
 - `chunkBase?: string` — CDN URL prefix for lazy-loaded per-page chunks.
-- `MountCartridgeResult.update(opts)` — apply config / theme deltas without re-mount.
 - async `onShellReady` — when a real use case (server-fetched theme tokens) shows up.
 
 ## License

@@ -74,7 +74,7 @@ pnpm test
 pnpm build
 ```
 
-Current workspace packages are on the `0.8.x` line. The framework is pre-1.0, so read [`CHANGELOG.md`](./CHANGELOG.md) when upgrading.
+Current workspace packages are on the `0.11.x` line. The framework is pre-1.0, so read [`CHANGELOG.md`](./CHANGELOG.md) when upgrading.
 
 ## Micro Size Budget
 
@@ -84,7 +84,8 @@ Measured in this workspace with `esbuild --bundle --minify --platform=browser` a
 
 | Bundle | Minified | Gzip | What it includes |
 |---|---:|---:|---|
-| `@airo-js/embed` package budget | 5,030 B | 2,211 B | Custom element loader, lifecycle, SSR-hydrate handoff, missing-view recovery. Runtime is lazy-loaded. |
+| `@airo-js/embed` package budget | 5,159 B | 2,248 B | Custom element loader, lifecycle, SSR-hydrate handoff, missing-view recovery, gate-phase error forwarding. Runtime is lazy-loaded. CI-gated at 5.25 KB / 2.5 KB. |
+| `@airo-js/runtime` reachable closure | 28,332 B | 9,252 B | `mountCartridge` plus everything it reaches in `@airo-js/core`, `@airo-js/cartridge-kit`, and `@airo-js/log` (ESM, es2022) — the most a consumer entry pays for the framework; cartridge code excluded. CI-gated at 29 KB / 9.5 KB. |
 | README hello cartridge only | 2,438 B | 1,293 B | The hello cartridge contract, data source, template, and SSR-safe view. |
 | README hello CSR app | 24,583 B | 8,235 B | `mountCartridge`, core runtime pieces, and the hello cartridge in one browser bundle. |
 | README hello custom embed entry | 6,958 B | 3,098 B | `defineAiroApp` plus the tiny hello cartridge, with `@airo-js/runtime` still external/lazy. |

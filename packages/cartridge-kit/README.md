@@ -10,10 +10,11 @@ The cartridge contract for the airo framework. Defines the API surface every car
 - `DataSource` — onboarding affordances + data-loading shape
 - `Transformer` / `PostProcessor` / `RuntimePipeline` — runtime pipeline (re-exported from `@airo-js/core` because pipeline orchestration is rendering, and rendering belongs to the framework)
 - `ViewDefinition` + `CartridgeAppContext` — typed wrapper around the framework's `PageRenderer`
-- `Template<TConfig>` — pre-composed view-set + default config
+- `Template<TConfig>` — pre-composed view-set + default config; a `TemplatePage` may be `private: true`
+- `Gate<TConfig>` + `runGatePhase` / `selectGates` / `runGates` — pre-render guards, scoped to the mount's entry page (`appliesTo: 'all' | 'private'`), run by `@airo-js/runtime` before the data fetch
 - `McpToolDefinition` — agent-facing tools (POST-transformer data)
 - `PublicationAdapter` — fan post-pipeline data out to surface-specific outputs (Schema.org JSON-LD, vendor XML feeds, etc.)
-- Supporting: `SchemaDefinition`, `OnboardingStep`, `ValidationResult`, `PublicationContext`, `SchemaFieldRef<TData>`, `SnapshotPath<TData>`, `Duration`
+- Supporting: `SchemaDefinition`, `OnboardingStep`, `ValidationResult`, `PublicationContext`, `SchemaFieldRef<TData>`, `SnapshotPath<TData>`, `Duration`, `PersistHint`, `GateLifecycleEvents`, `RunGatePhaseResult<TConfig>`
 
 ## Three contract guarantees
 
