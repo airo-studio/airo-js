@@ -16,19 +16,22 @@
  *   relying party ──POST /oauth/token (code, verifier, client_secret)──► this file: S256, one-shot
  *                 ◄─{ access_token }──  then GET /oauth/userinfo ──► { sub, name }
  *
- * Swap this for GitHub / Google / Auth0 by pointing `AUTH_ISSUER` at them and
- * registering the same `client_id` / `redirect_uri` there; the relying party
- * does not change.
+ * Swap this for GitHub / Google / Auth0 by pointing `AUTH_ISSUER` at them,
+ * registering the same `client_id` / `redirect_uri` there and setting
+ * `AUTH_CLIENT_SECRET` to the secret they issue; the relying party does not
+ * change. The in-memory code and token stores are a demo limitation: they
+ * are swept on every mint and exchange but have no persistence and no
+ * cap beyond their TTLs.
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import express from 'express';
 
 import { escapeAttr, escapeHtml } from '@airo-js/core';
 import { renderDocument } from '@airo-js/ssr';
 
-import { DEMO_USER } from '../content.js';
+import { DEMO_USER } from '../members-content.js';
 
 export interface RegisteredClient {
   clientId: string;
@@ -40,22 +43,37 @@ export interface RegisteredClient {
 const DEMO_CREDENTIALS = { username: 'demo', password: 'demo' };
 const CODE_TTL_MS = 60_000;
 const TOKEN_TTL_MS = 60 * 60_000;
+/** BASE64URL(SHA-256) is 43 characters; anything shorter is not an S256 challenge. */
+export const S256_CHALLENGE_LENGTH = 43;
+/** RFC 6749 §10.12 asks for unguessable state; 16 characters of base64url is the floor here. */
+export const MIN_STATE_LENGTH = 16;
 
 interface IssuedCode {
   codeChallenge: string;
   redirectUri: string;
-  clientId: string;
   expiresAt: number;
   used: boolean;
 }
 
-function b64url(buf: Buffer): string {
-  return buf.toString('base64url');
-}
-
 /** RFC 7636 S256: BASE64URL(SHA256(verifier)). */
 export function s256(verifier: string): string {
-  return b64url(createHash('sha256').update(verifier).digest());
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/**
+ * Constant-time equality on two strings of possibly different length.
+ * Closes: timing side channels on the client secret, the demo password and
+ * the verifier digest. Academic in-process with fixed demo values; not
+ * academic in the copy of this file that fronts a real account table.
+ */
+function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+function isS256Challenge(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= S256_CHALLENGE_LENGTH;
 }
 
 function formDocument(opts: {
@@ -130,11 +148,11 @@ export function oauthProvider(client: RegisteredClient): express.Router {
     if (clientError) { res.status(400).type('text/plain').send(`invalid_request: ${clientError}\n`); return; }
     if (response_type !== 'code') { res.status(400).type('text/plain').send('unsupported_response_type\n'); return; }
     // Closes: PKCE downgrade — plain or absent challenges are refused, not tolerated.
-    if (code_challenge_method !== 'S256' || typeof code_challenge !== 'string' || code_challenge.length < 43) {
+    if (code_challenge_method !== 'S256' || !isS256Challenge(code_challenge)) {
       res.status(400).type('text/plain').send('invalid_request: S256 code_challenge required\n');
       return;
     }
-    if (typeof state !== 'string' || state.length < 16) {
+    if (typeof state !== 'string' || state.length < MIN_STATE_LENGTH) {
       res.status(400).type('text/plain').send('invalid_request: state required\n');
       return;
     }
@@ -146,11 +164,24 @@ export function oauthProvider(client: RegisteredClient): express.Router {
   router.post('/oauth/authorize', (req, res) => {
     const body = (req.body ?? {}) as Record<string, string | undefined>;
     const clientError = validateClient(body.client_id, body.redirect_uri);
-    if (clientError || typeof body.state !== 'string' || typeof body.code_challenge !== 'string') {
+    // The same checks as the GET: the hidden form fields are client-editable,
+    // so a direct POST must not mint a code bound to a trivial challenge or
+    // a short state. Closes: PKCE downgrade at the minting step.
+    if (
+      clientError ||
+      typeof body.state !== 'string' ||
+      body.state.length < MIN_STATE_LENGTH ||
+      !isS256Challenge(body.code_challenge)
+    ) {
       res.status(400).type('text/plain').send('invalid_request\n');
       return;
     }
-    if (body.username !== DEMO_CREDENTIALS.username || body.password !== DEMO_CREDENTIALS.password) {
+    if (
+      typeof body.username !== 'string' ||
+      typeof body.password !== 'string' ||
+      !safeEqual(body.username, DEMO_CREDENTIALS.username) ||
+      !safeEqual(body.password, DEMO_CREDENTIALS.password)
+    ) {
       res.status(401).set('Cache-Control', 'no-store').type('text/html').send(
         formDocument({
           state: body.state,
@@ -163,13 +194,12 @@ export function oauthProvider(client: RegisteredClient): express.Router {
       return;
     }
     sweep();
-    const code = b64url(randomBytes(32));
+    const code = randomBytes(32).toString('base64url');
     // The code is bound to the challenge AND the redirect_uri it was issued
     // for, so the token endpoint can refuse a swap of either.
     codes.set(code, {
       codeChallenge: body.code_challenge,
       redirectUri: body.redirect_uri as string,
-      clientId: client.clientId,
       expiresAt: Date.now() + CODE_TTL_MS,
       used: false,
     });
@@ -180,10 +210,18 @@ export function oauthProvider(client: RegisteredClient): express.Router {
     const body = (req.body ?? {}) as Record<string, string | undefined>;
     if (body.grant_type !== 'authorization_code') { res.status(400).json({ error: 'unsupported_grant_type' }); return; }
     // Closes: a public caller using a confidential client's id.
-    if (body.client_id !== client.clientId || body.client_secret !== client.clientSecret) {
+    if (
+      body.client_id !== client.clientId ||
+      typeof body.client_secret !== 'string' ||
+      !safeEqual(body.client_secret, client.clientSecret)
+    ) {
+      // No `WWW-Authenticate` here: this endpoint authenticates the client
+      // from the form body only (RFC 6749 §2.3.1), and advertising a Basic
+      // scheme it does not parse would mislead a copier.
       res.status(401).json({ error: 'invalid_client' });
       return;
     }
+    sweep();
     const issued = typeof body.code === 'string' ? codes.get(body.code) : undefined;
     // Closes: replay — a code is consumed on first use, whether or not the
     // exchange then succeeds.
@@ -198,11 +236,11 @@ export function oauthProvider(client: RegisteredClient): express.Router {
     }
     // Closes: authorization-code injection — only the party that generated
     // the verifier can redeem the code (RFC 7636).
-    if (typeof body.code_verifier !== 'string' || s256(body.code_verifier) !== issued.codeChallenge) {
+    if (typeof body.code_verifier !== 'string' || !safeEqual(s256(body.code_verifier), issued.codeChallenge)) {
       res.status(400).json({ error: 'invalid_grant', error_description: 'code_verifier does not match code_challenge' });
       return;
     }
-    const accessToken = b64url(randomBytes(32));
+    const accessToken = randomBytes(32).toString('base64url');
     tokens.set(accessToken, { sub: DEMO_USER.id, expiresAt: Date.now() + TOKEN_TTL_MS });
     res.set('Cache-Control', 'no-store').json({
       access_token: accessToken,
@@ -214,7 +252,11 @@ export function oauthProvider(client: RegisteredClient): express.Router {
   router.get('/oauth/userinfo', (req, res) => {
     const auth = req.get('authorization') ?? '';
     const token = auth.startsWith('Bearer ') ? tokens.get(auth.slice(7)) : undefined;
-    if (!token || token.expiresAt < Date.now()) { res.status(401).json({ error: 'invalid_token' }); return; }
+    if (!token || token.expiresAt < Date.now()) {
+      // RFC 6750 §3: a bearer-protected resource says how to authenticate.
+      res.status(401).set('WWW-Authenticate', 'Bearer realm="demo", error="invalid_token"').json({ error: 'invalid_token' });
+      return;
+    }
     res.set('Cache-Control', 'no-store').json({ sub: token.sub, name: DEMO_USER.name });
   });
 

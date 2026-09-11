@@ -8,10 +8,11 @@
  * rewriting itself on load.
  *
  * Everything this entry needs to know about the page it landed on is on
- * the `#app` root the server emitted, so one entry serves every page:
+ * the `#app` root the server emitted (`ROOT_ATTRS` in `cartridge.ts` names
+ * the attributes on both sides), so one entry serves every page:
  *
  *   data-airo-mode             'hydrate' adopts the server's markup; 'csr'
- *                              paints fresh into an empty root (the 401 shell).
+ *                              paints fresh into the root (the 401 shell).
  *   data-airo-source           'members' → mount with the members DataSource,
  *                              which asks /api/members/me with the cookie.
  *   data-airo-gates-satisfied  gate ids the server's private render already
@@ -33,41 +34,50 @@
 
 import { mountCartridge } from '@airo-js/runtime';
 
-import { docSiteCartridge, docSiteTemplate, signInPanel, type DocSiteConfig, type DocSiteData } from './cartridge.js';
+import {
+  MEMBERS_SOURCE_ID,
+  ROOT_ATTRS,
+  docSiteCartridge,
+  docSiteTemplate,
+  sessionEndedHandler,
+  type DocSiteConfig,
+  type DocSiteData,
+} from './cartridge.js';
 import { SITE } from './content.js';
 
 const host = document.getElementById('app');
 if (!host) throw new Error('[full-site] no #app host element');
 
-const mode = host.dataset.airoMode === 'csr' ? 'csr' : 'hydrate';
-const source = host.dataset.airoSource === 'members' ? 'members' : 'content';
-const satisfiedGates = (host.dataset.airoGatesSatisfied ?? '').split(',').filter(Boolean);
+const mode = host.getAttribute(ROOT_ATTRS.mode) === 'csr' ? 'csr' : 'hydrate';
+const source = host.getAttribute(ROOT_ATTRS.source) === MEMBERS_SOURCE_ID ? MEMBERS_SOURCE_ID : 'content';
+const satisfiedGates = (host.getAttribute(ROOT_ATTRS.gatesSatisfied) ?? '').split(',').filter(Boolean);
 const slug = window.location.pathname.split('/')[2];
 const config: DocSiteConfig = { locale: 'en-GB', siteUrl: SITE.url, siteName: SITE.name };
 
-const result = await mountCartridge<DocSiteData, DocSiteConfig>({
-  cartridge: docSiteCartridge,
-  config,
-  template: docSiteTemplate,
-  host,
-  mode,
-  styleIsolation: 'light',
-  enableRouter: { mode: 'path', basePath: '/', entryPageId: 'home', pathContextKey: 'slug' },
-  dataSourceId: source,
-  dataSourceInput: { kind: 'custom', payload: { slug } },
-  satisfiedGates,
-  onError(phase) {
-    // The one failure a visitor can act on: the session expired between the
-    // server's render and this fetch. The API said 401; show the panel.
-    if (phase === 'fetch' && source === 'members') {
-      host.innerHTML = signInPanel(`${window.location.pathname}${window.location.search}`, {
-        error: 'Your session has ended. Sign in again to continue.',
-      });
-    }
-  },
-});
-
 // Host-side markers for the browser checks: which mode this page mounted
-// in, and whether a gate blocked it. Not framework signals.
-document.documentElement.setAttribute('data-airo-mounted', mode);
-document.documentElement.setAttribute('data-airo-blocked', result.blocked ? result.blockedBy : '');
+// in, and whether a gate blocked it or the mount failed. Not framework
+// signals. The runtime rethrows after `onError`, so the expired-session
+// path (panel painted by `sessionEndedHandler`) lands in the catch — a
+// top-level `await` outside it would end the module on an unhandled
+// rejection with no marker set.
+try {
+  const result = await mountCartridge<DocSiteData, DocSiteConfig>({
+    cartridge: docSiteCartridge,
+    config,
+    template: docSiteTemplate,
+    host,
+    mode,
+    styleIsolation: 'light',
+    enableRouter: { mode: 'path', basePath: '/', entryPageId: 'home', pathContextKey: 'slug' },
+    dataSourceId: source,
+    dataSourceInput: { kind: 'custom', payload: { slug } },
+    satisfiedGates,
+    onError: source === MEMBERS_SOURCE_ID ? sessionEndedHandler(host) : undefined,
+  });
+  document.documentElement.setAttribute('data-airo-mounted', mode);
+  document.documentElement.setAttribute('data-airo-blocked', result.blocked ? result.blockedBy : '');
+} catch (err) {
+  document.documentElement.setAttribute('data-airo-mounted', mode);
+  document.documentElement.setAttribute('data-airo-blocked', 'error');
+  console.error('[full-site] mount failed', err);
+}

@@ -71,17 +71,22 @@ import { renderAppWithPublication, renderDocument, runPublicationAdapters, headF
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 
-import { DOCS, MEMBER_NOTES, SITE, findNote } from './content.js';
+import { DOCS, SITE, type MemberUser } from './content.js';
+import { MEMBER_NOTES, findNote } from './members-content.js';
 import {
+  MEMBERS_SOURCE_ID,
+  ROOT_ATTRS,
   SITE_CSS,
   docSiteCartridge,
   docSiteTemplate,
+  signInPanel,
+  toSummary,
   type DocSiteConfig,
   type DocSiteData,
   type MemberSlice,
 } from './cartridge.js';
 import { oauthProvider, type RegisteredClient } from './auth/oauth-provider.js';
-import { privateHeaders, readSession, relyingParty } from './auth/session.js';
+import { privateHeaders, readSession, relyingParty, type Session } from './auth/session.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_PATH = '/';
@@ -94,10 +99,15 @@ const config: DocSiteConfig = { locale: 'en-GB', siteUrl: SITE.url, siteName: SI
 const appConfig = templateToAppConfig(docSiteTemplate, docSiteCartridge.id);
 const publicationCtx = { config, locale: config.locale, country: 'GB' as const };
 
-/** The one relying party the demo provider knows. `redirect_uri` is matched exactly. */
+/**
+ * The one relying party the demo provider knows. `redirect_uri` is matched
+ * exactly. The id and secret are demo constants; pointing `AUTH_ISSUER` at
+ * a real provider means registering this client there and setting
+ * `AUTH_CLIENT_SECRET` to the secret it issues — never editing it in here.
+ */
 const client: RegisteredClient = {
-  clientId: 'full-site',
-  clientSecret: 'demo-client-secret',
+  clientId: process.env.AUTH_CLIENT_ID ?? 'full-site',
+  clientSecret: process.env.AUTH_CLIENT_SECRET ?? 'demo-client-secret',
   redirectUri: `${ORIGIN}/auth/callback`,
 };
 
@@ -118,13 +128,27 @@ function navStateFor(pathname: string): Partial<NavigationState> | undefined {
   return fragmentToState(tail, { pathContextKey: PATH_CONTEXT_KEY }) ?? undefined;
 }
 
+/** The raw public data for a request, before transformers. Never carries `member`. */
+async function rawSnapshotFor(slug?: string): Promise<DocSiteData> {
+  return docSiteCartridge.dataSources[0]!.fetch({ kind: 'custom', payload: { slug } }, { config });
+}
+
 /** The public snapshot for a request — never carries `member`. */
 async function snapshotFor(slug?: string): Promise<DocSiteData> {
-  const raw = await docSiteCartridge.dataSources[0]!.fetch(
-    { kind: 'custom', payload: { slug } },
-    { config },
-  );
-  return runTransformers(raw);
+  return runTransformers(await rawSnapshotFor(slug));
+}
+
+/**
+ * The private snapshot for a verified session: the raw public data plus
+ * the member slice, transformed ONCE. One builder for the wildcard's
+ * private branch and `/api/members/me`, so SSR and the API cannot disagree
+ * about the shape — and so the transformer chain never runs twice over one
+ * snapshot (safe today only because `anchorIds` is idempotent; a copier
+ * adding an enriching transformer would get doubled output on private pages
+ * and not on public ones).
+ */
+async function privateSnapshotFor(session: Session, slug?: string): Promise<DocSiteData> {
+  return runTransformers({ ...(await rawSnapshotFor(slug)), member: memberSliceFor(session.user, slug) });
 }
 
 // Run the transformer chain exactly as the client will, so the anchor ids
@@ -143,10 +167,10 @@ async function runTransformers(raw: DocSiteData): Promise<DocSiteData> {
  * `/api/members/me`, so SSR and the API cannot disagree about its shape.
  * Shaped to exactly what the two private views render.
  */
-function memberSliceFor(userId: string, name: string, slug?: string): MemberSlice {
+function memberSliceFor(user: MemberUser, slug?: string): MemberSlice {
   return {
-    user: { id: userId, name },
-    notes: MEMBER_NOTES.map(({ slug: s, title, description, updatedAt }) => ({ slug: s, title, description, updatedAt })),
+    user,
+    notes: MEMBER_NOTES.map(toSummary),
     ...(slug ? { note: findNote(slug) } : {}),
   };
 }
@@ -182,7 +206,7 @@ function documentFor(
       // is pinned last rather than spread over.
       lang: config.locale,
     },
-    body: mount ? `<div id="app" data-airo-mode="${mount}"${attrs}>${body}</div>` : body,
+    body: mount ? `<div id="app" ${ROOT_ATTRS.mode}="${mount}"${attrs}>${body}</div>` : body,
     bodyScripts: mount ? [{ src: '/client.js', type: 'module' }] : [],
   });
 }
@@ -219,11 +243,7 @@ app.get('/api/members/me', async (req, res) => {
   const session = readSession(req);
   if (!session) { res.status(401).json({ error: 'unauthenticated' }); return; }
   const slug = typeof req.query.slug === 'string' ? req.query.slug : undefined;
-  const snapshot = await runTransformers({
-    ...(await snapshotFor()),
-    member: memberSliceFor(session.userId, session.user.name, slug),
-  });
-  res.json(snapshot);
+  res.json(await privateSnapshotFor(session, slug));
 });
 
 // 3 ── machine surfaces, all off the same PUBLIC snapshot the humans get.
@@ -242,13 +262,25 @@ app.get('/robots.txt', (_req, res) => {
  * the host assembles it. This is that assembly, and it is 15 lines. The
  * inventory is the PUBLIC docs; member notes are not in it by construction.
  */
+//
+// Per page, in parallel: each snapshot is independent. A real site builds
+// this from an inventory or a cache rather than per request — crawlers poll
+// sitemaps on a schedule, and with a real DataSource every hit would be N
+// upstream fetches. The `max-age` is the demo's stand-in for that cache.
+const PUBLIC_SLUGS = [undefined, ...DOCS.map((d) => d.slug)];
+const MACHINE_CACHE = 'public, max-age=300';
+
 app.get('/sitemap.xml', async (_req, res) => {
+  const results = await Promise.all(
+    PUBLIC_SLUGS.map(async (slug) => {
+      const [result] = await runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+        adapterIds: ['crawler-surface'],
+      });
+      return result;
+    }),
+  );
   const entries: string[] = [];
-  for (const slug of [undefined, ...DOCS.map((d) => d.slug)]) {
-    const snapshot = await snapshotFor(slug);
-    const [result] = await runPublicationAdapters(docSiteCartridge, snapshot, publicationCtx, {
-      adapterIds: ['crawler-surface'],
-    });
+  for (const result of results) {
     // `included: false` means validate() blocked it — the unfinished draft.
     // It is absent from the sitemap for the same reason it 404s.
     if (!result?.included) continue;
@@ -259,6 +291,7 @@ app.get('/sitemap.xml', async (_req, res) => {
     );
   }
   res
+    .set('Cache-Control', MACHINE_CACHE)
     .type('application/xml')
     .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join('\n')}\n</urlset>\n`);
 });
@@ -277,17 +310,20 @@ app.get('/sitemap.xml', async (_req, res) => {
  * framework gives you per-adapter verdicts, not a site-wide policy.
  */
 app.get('/llms.txt', async (_req, res) => {
+  const perPage = await Promise.all(
+    PUBLIC_SLUGS.map(async (slug) =>
+      runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+        adapterIds: ['crawler-surface', 'llms-txt'],
+      }),
+    ),
+  );
   const lines: string[] = [];
-  for (const slug of [undefined, ...DOCS.map((d) => d.slug)]) {
-    const snapshot = await snapshotFor(slug);
-    const results = await runPublicationAdapters(docSiteCartridge, snapshot, publicationCtx, {
-      adapterIds: ['crawler-surface', 'llms-txt'],
-    });
+  for (const results of perPage) {
     const publishable = results.find((r) => r.adapterId === 'crawler-surface')?.included;
     const llms = results.find((r) => r.adapterId === 'llms-txt');
     if (publishable && llms?.included) lines.push((llms.output as { indexLine: string }).indexLine);
   }
-  res.type('text/plain').send(lines.join('\n') + '\n');
+  res.set('Cache-Control', MACHINE_CACHE).type('text/plain').send(lines.join('\n') + '\n');
 });
 
 /**
@@ -358,6 +394,8 @@ const renderPage: express.RequestHandler = async (req, res) => {
   const initialNavState = navStateFor(req.path);
   const slug = initialNavState?.[PATH_CONTEXT_KEY] as string | undefined;
   const publicSnapshot = await snapshotFor(slug);
+  // The Document is built inside the closure: the refusal call never
+  // touches one, so it never parses one.
   const render = (snapshot: DocSiteData, renderPrivate: boolean) =>
     renderAppWithPublication<DocSiteData, DocSiteConfig>({
       cartridge: docSiteCartridge,
@@ -375,7 +413,15 @@ const renderPage: express.RequestHandler = async (req, res) => {
   let snapshot = publicSnapshot;
   let isPrivate = false;
 
-  if (result.skipped?.reason === 'private') {
+  // Note 3, first half: an unknown url is a 404 BEFORE anything else — even
+  // when the page the runner fell back to is private. On a members-first
+  // template (first enabled page private) `/does-not-exist` resolves to the
+  // private default entry and comes back with BOTH `fellBack.reason ===
+  // 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped`
+  // first would answer 401 and tell a crawler the url exists.
+  const unknownPage = result.fellBack?.reason === 'unknown-page';
+
+  if (!unknownPage && result.skipped?.reason === 'private') {
     isPrivate = true;
     privateHeaders(res);
     // Only now — inside the private branch — is the cookie read. Public
@@ -383,26 +429,31 @@ const renderPage: express.RequestHandler = async (req, res) => {
     // discipline.
     const session = readSession(req);
     if (!session) {
-      // The 401 shell: an empty root the client mounts in CSR mode with the
-      // members DataSource. The gate runs before any fetch, asks
-      // `/auth/session`, and paints the sign-in panel. Bots get this too —
-      // no private byte, no bundle-free markup to index, `noindex` twice.
+      // The 401 shell: the sign-in panel server-rendered (it is public
+      // markup — no private byte in it — so the page is usable without JS
+      // and paints nothing blank), plus the client bundle, which mounts in
+      // CSR mode with the members DataSource: the gate runs before any
+      // fetch, asks `/auth/session`, and repaints the same panel. Bots get
+      // this too — nothing private to index, `noindex` twice.
       res.status(401).send(
-        documentFor({ title: `Members — ${SITE.name}`, ...NOINDEX }, '', 'csr', { 'data-airo-source': 'members' }),
+        documentFor(
+          { title: `Members — ${SITE.name}`, ...NOINDEX },
+          signInPanel(req.originalUrl),
+          'csr',
+          { [ROOT_ATTRS.source]: MEMBERS_SOURCE_ID },
+        ),
       );
       return;
     }
     // Note 5: the slice is built here and nowhere else on this route.
-    snapshot = await runTransformers({
-      ...publicSnapshot,
-      member: memberSliceFor(session.userId, session.user.name, slug),
-    });
+    snapshot = await privateSnapshotFor(session, slug);
     result = await render(snapshot, true);
   }
 
-  // Note 3: branch on the REASON. Only 'unknown-page' is a missing url.
+  // Note 3, second half: only 'unknown-page' is a missing url. A private
+  // refusal that reached here has already been answered above.
   const unknownUrl =
-    result.fellBack?.reason === 'unknown-page' ||
+    unknownPage ||
     // A doc page whose slug matched no document, or one the publish gate
     // blocked (no canonical), is equally a 404 on this surface.
     (initialNavState?.page === 'doc' && !snapshot.doc) ||
@@ -434,8 +485,8 @@ const renderPage: express.RequestHandler = async (req, res) => {
     const title = snapshot.member?.note ? `${snapshot.member.note.title} — Members` : `Members — ${SITE.name}`;
     res.status(200).send(
       documentFor({ title, ...NOINDEX }, result.html, 'hydrate', {
-        'data-airo-source': 'members',
-        'data-airo-gates-satisfied': result.gates.satisfied.join(','),
+        [ROOT_ATTRS.source]: MEMBERS_SOURCE_ID,
+        [ROOT_ATTRS.gatesSatisfied]: result.gates.satisfied.join(','),
       }),
     );
     return;

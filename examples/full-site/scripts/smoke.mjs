@@ -16,6 +16,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 
 const PORT = process.env.PORT ?? 4317;
 const BASE = `http://localhost:${PORT}`;
@@ -165,9 +166,14 @@ async function signIn(go, next = '/members', creds = { username: 'demo', passwor
   check('anonymous /members is noindex (meta)', html.includes('<meta name="robots" content="noindex, nofollow">'));
   check('401 shell carries no JSON-LD', !html.includes('ld+json'));
   check('401 shell carries no canonical', !html.includes('rel="canonical"'));
-  check('401 shell mounts CSR with the members source', html.includes('<div id="app" data-airo-mode="csr" data-airo-source="members"></div>'));
+  check('401 shell mounts CSR with the members source', html.includes('<div id="app" data-airo-mode="csr" data-airo-source="members">'));
+  check('401 shell server-renders the sign-in panel (usable without JS)', html.includes('class="fs-signin"') && html.includes('href="/auth/login?next=%2Fmembers"'));
   check('401 shell carries no satisfied-gates attribute', !html.includes('data-airo-gates-satisfied'));
-  check('401 shell ships the client bundle (the gate paints there)', html.includes('<script type="module" src="/client.js">'));
+  check('401 shell ships the client bundle (the gate repaints there)', html.includes('<script type="module" src="/client.js">'));
+  // The member notes live in a server-only module; nothing the bundle
+  // imports can reach them. Asserted on the bundle, not on the HTML routes.
+  const bundle = await (await fetch(`${BASE}/client.js`)).text();
+  check('client bundle carries no member content', !/What ships next|release-checklist|Demo Member|u_demo/.test(bundle));
   check('anonymous /note/roadmap → 401', (await go('/note/roadmap')).status === 401);
   check('anonymous /auth/session → 401', (await go('/auth/session')).status === 401);
   check('anonymous /api/members/me → 401', (await go('/api/members/me')).status === 401);
@@ -326,15 +332,29 @@ async function signIn(go, next = '/members', creds = { username: 'demo', passwor
 // /auth/login still mints state + verifier (that is local), so the callback
 // carries a valid state and reaches the token exchange, which fails.
 {
-  const port = Number(PORT) + 1;
+  // A free port, not PORT+1: anything already listening there would answer
+  // the readiness poll and the four checks below would fail confusingly.
+  const port = await new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, () => { const { port: p } = probe.address(); probe.close(() => resolve(p)); });
+  });
   const child = spawn(process.execPath, ['dist/server.js'], {
     env: { ...process.env, PORT: String(port), AUTH_ISSUER: 'http://127.0.0.1:9' },
     stdio: 'ignore',
   });
   try {
     let up = false;
-    for (let i = 0; i < 40 && !up; i++) {
-      try { up = (await fetch(`http://localhost:${port}/`)).ok; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    // Same budget as CI's readiness loop for the primary server (~10 s); a
+    // cold `node dist/server.js` plus its imports can take a while on a slow runner.
+    for (let i = 0; i < 100 && !up; i++) {
+      try {
+        const res = await fetch(`http://localhost:${port}/robots.txt`);
+        up = res.ok && (await res.text()).includes('Disallow: /members');
+      } catch {
+        // not up yet
+      }
+      if (!up) await new Promise((r) => setTimeout(r, 100));
     }
     check('provider-down: second server started', up);
     if (up) {

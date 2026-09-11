@@ -5,7 +5,7 @@ A multi-page site root-mounted on Express. Real urls, per-URL SSR, per-page cano
 ```bash
 pnpm dev              # build + serve on :3000
 PORT=4317 pnpm dev
-pnpm smoke            # 97 assertions against a running server, including the OAuth round trip
+pnpm smoke            # 99 assertions against a running server, including the OAuth round trip
 pnpm test             # happy-dom: the gate with fetch mocked
 pnpm e2e              # Playwright, Chromium: the gate paints, hydration adopts the server's DOM
 ```

@@ -71,6 +71,26 @@ export interface DocSummary {
   updatedAt: string;
 }
 
+/** The one projection from a `Doc` to its index entry, shared by the index, the member slice and the tests. */
+export function toSummary({ slug, title, description, updatedAt }: Doc): DocSummary {
+  return { slug, title, description, updatedAt };
+}
+
+/**
+ * The server → client DOM contract, in one place. `server.ts` prints these
+ * on the `#app` root, `client.ts` reads them; a rename on one side cannot
+ * silently degrade the other into "content source, no satisfied gates".
+ */
+export const ROOT_ATTRS = {
+  /** `'hydrate'` adopts the server's markup; `'csr'` paints fresh. */
+  mode: 'data-airo-mode',
+  /** Which DataSource the client mounts with: `MEMBERS_SOURCE_ID` or the default. */
+  source: 'data-airo-source',
+  /** Comma-separated gate ids the server's private render already met. */
+  gatesSatisfied: 'data-airo-gates-satisfied',
+} as const;
+export const MEMBERS_SOURCE_ID = 'members';
+
 /**
  * The private slice. Present ONLY on a snapshot the server built for a
  * verified session rendering a `private: true` page, or one the client
@@ -141,12 +161,7 @@ const contentSource: DataSource<DocSiteData, DocSiteConfig> = {
     // hatch for host-shaped input. The slug rides its payload.
     const { slug } =
       input.kind === 'custom' ? ((input.payload ?? {}) as DocSiteInput) : ({} as DocSiteInput);
-    const index: DocSummary[] = DOCS.map(({ slug: s, title, description, updatedAt }) => ({
-      slug: s,
-      title,
-      description,
-      updatedAt,
-    }));
+    const index: DocSummary[] = DOCS.map(toSummary);
     // Scoped per request — see the docblock at the top of this file.
     return { site: SITE, index, ...(slug ? { doc: findDoc(slug) } : {}) };
   },
@@ -161,7 +176,7 @@ const contentSource: DataSource<DocSiteData, DocSiteConfig> = {
  * which builds the slice in-process for the session it verified.
  */
 const membersSource: DataSource<DocSiteData, DocSiteConfig> = {
-  id: 'members',
+  id: MEMBERS_SOURCE_ID,
   displayName: 'Members API',
   onboardingShape: { kind: 'url-input' },
   async fetch(input, ctx): Promise<DocSiteData> {
@@ -361,7 +376,9 @@ const noteView: ViewDefinition<DocSiteData, DocSiteConfig> = {
   factory: defineSSRSafeRenderer<DocSitePageType, CartridgeAppContext<DocSiteData, DocSiteConfig>>({
     template(ctx) {
       const { member } = ctx.app.data;
-      if (!member) return signInPanel(`/note/${escapeAttr(String(ctx.navState.slug ?? ''))}`);
+      // `next` is a URL, not markup: `signInPanel` attribute-escapes the
+      // href once, so the slug is percent-encoded here and nothing else.
+      if (!member) return signInPanel(`/note/${encodeURIComponent(String(ctx.navState.slug ?? ''))}`);
       if (!member.note) return shell('<p class="fs-empty">Not found.</p>');
       return shell(article(member.note, '/members'));
     },
@@ -386,35 +403,63 @@ const noteView: ViewDefinition<DocSiteData, DocSiteConfig> = {
  * It decides whether to PAINT. Whether the private page is SERVED is
  * decided per request in `server.ts`, and `/api/members/me` refuses data to
  * anyone without a session — so this gate is UX, not a security boundary.
+ *
+ * The precheck's failure message travels to `mount()` keyed on the mount's
+ * own `GateContext` (the runner hands the same object to both calls), so
+ * two mounts of this cartridge on one page cannot clobber each other's
+ * copy. The session endpoint gets a short timeout: the gate runs before
+ * anything paints, and a hung `/auth/session` would otherwise leave the
+ * 401 shell blank forever.
  */
-let lastPrecheckError: string | undefined;
+const PRECHECK_TIMEOUT_MS = 5_000;
+const precheckError = new WeakMap<object, string>();
 
 export const loginGate: Gate<DocSiteConfig> = {
   id: 'login',
   displayName: 'Sign in',
   appliesTo: 'private',
   isEnabled: () => true,
-  async precheck() {
-    lastPrecheckError = undefined;
+  async precheck(ctx) {
+    precheckError.delete(ctx);
     try {
-      const res = await fetch('/auth/session', { credentials: 'same-origin' });
+      const res = await fetch('/auth/session', {
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(PRECHECK_TIMEOUT_MS),
+      });
       return res.ok ? 'allow' : 'gate-required';
     } catch {
       // Conservative pattern from the Gate docblock: surface the error in
       // the gate UI so the visitor can retry, rather than throwing.
-      lastPrecheckError = 'Could not reach the sign-in service. Check your connection and try again.';
+      precheckError.set(ctx, 'Could not reach the sign-in service. Check your connection and try again.');
       return 'gate-required';
     }
   },
-  async mount(host) {
+  async mount(host, ctx) {
     const next = `${globalThis.location?.pathname ?? '/members'}${globalThis.location?.search ?? ''}`;
-    host.innerHTML = signInPanel(next, lastPrecheckError ? { error: lastPrecheckError } : {});
+    const error = precheckError.get(ctx);
+    host.innerHTML = signInPanel(next, error ? { error } : {});
     return 'block';
   },
   destroy() {
     // The panel is static markup; nothing to tear down.
   },
 };
+
+/**
+ * The client's `onError` for a private mount: the one failure a visitor can
+ * act on is the session expiring between the server's render and the hydrate
+ * fetch — the API said 401; show the panel. Everything else is left to the
+ * runtime's rethrow. Lives here (not in `client.ts`, a top-level-await entry
+ * nothing can import) so it is testable.
+ */
+export function sessionEndedHandler(host: HTMLElement): (phase: string) => void {
+  return (phase) => {
+    if (phase !== 'fetch') return;
+    host.innerHTML = signInPanel(`${globalThis.location?.pathname ?? '/members'}${globalThis.location?.search ?? ''}`, {
+      error: 'Your session has ended. Sign in again to continue.',
+    });
+  };
+}
 
 // ───────────────────────── MCP tools ─────────────────────────
 

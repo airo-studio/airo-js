@@ -15,8 +15,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { mountCartridge } from '@airo-js/runtime';
 
-import { docSiteCartridge, docSiteTemplate, type DocSiteConfig, type DocSiteData } from '../src/cartridge.js';
-import { DEMO_USER, MEMBER_NOTES, SITE } from '../src/content.js';
+import {
+  docSiteCartridge,
+  docSiteTemplate,
+  sessionEndedHandler,
+  toSummary,
+  type DocSiteConfig,
+  type DocSiteData,
+} from '../src/cartridge.js';
+import { SITE } from '../src/content.js';
+import { DEMO_USER, MEMBER_NOTES } from '../src/members-content.js';
 
 const config: DocSiteConfig = { locale: 'en-GB', siteUrl: SITE.url, siteName: SITE.name };
 
@@ -25,7 +33,7 @@ const apiSnapshot = (): DocSiteData => ({
   index: [],
   member: {
     user: DEMO_USER,
-    notes: MEMBER_NOTES.map(({ slug, title, description, updatedAt }) => ({ slug, title, description, updatedAt })),
+    notes: MEMBER_NOTES.map(toSummary),
   },
 });
 
@@ -138,6 +146,56 @@ describe('the 401 shell: the gate runs before any fetch', () => {
 
     await expect(mountMembers({ onError })).rejects.toThrow(/members api answered 401/);
     expect(onError).toHaveBeenCalledWith('fetch', expect.any(Error), expect.anything());
+  });
+
+  test("the client's handler for that failure paints the session-ended panel, linking back to the page", async () => {
+    mockFetch({ '/api/members/me': { status: 401, body: { error: 'unauthenticated' } } });
+    host.innerHTML = '<div class="fs-page"><h1 class="fs-title">Hello, Demo Member</h1></div>';
+
+    await expect(
+      mountMembers({ mode: 'hydrate', satisfiedGates: ['login'], onError: sessionEndedHandler(host) }),
+    ).rejects.toThrow(/401/);
+
+    expect(host.querySelector('.fs-signin__error')?.textContent).toContain('Your session has ended');
+    expect(host.querySelector('a.fs-signin__button')?.getAttribute('href')).toBe('/auth/login?next=%2Fmembers');
+    expect(host.querySelector('h1.fs-title')?.textContent).toBe('Members');
+  });
+
+  test('two concurrent mounts keep their own precheck error: one offline, one signed out', async () => {
+    const other = document.createElement('div');
+    document.body.appendChild(other);
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        // First precheck fails (offline), second answers 401. Both mounts
+        // race; the copy on each panel must match its own precheck.
+        calls += 1;
+        if (calls === 1) throw new Error('offline');
+        return new Response(null, { status: 401 });
+      }),
+    );
+
+    const [a, b] = await Promise.all([
+      mountMembers(),
+      mountCartridge<DocSiteData, DocSiteConfig>({
+        cartridge: docSiteCartridge,
+        config,
+        template: docSiteTemplate,
+        host: other,
+        mode: 'csr',
+        styleIsolation: 'light',
+        initialNavState: { page: 'members' },
+        dataSourceId: 'members',
+        dataSourceInput: { kind: 'custom', payload: {} },
+      }),
+    ]);
+
+    expect(a.blocked).toBe(true);
+    expect(b.blocked).toBe(true);
+    expect(host.querySelector('.fs-signin__error')?.textContent).toContain('Could not reach');
+    expect(other.querySelector('.fs-signin__error')).toBeNull();
+    other.remove();
   });
 });
 

@@ -36,6 +36,18 @@ test('anonymous /members: the gate paints the panel, blocks, and the API is neve
   expect(problems).toEqual([]);
 });
 
+test('anonymous /members without JavaScript: the sign-in panel is server-rendered and usable', async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  const res = await page.goto('/members');
+  expect(res?.status()).toBe(401);
+  await expect(page.locator('.fs-signin')).toBeVisible();
+  await expect(page.locator('a.fs-signin__button')).toHaveAttribute('href', '/auth/login?next=%2Fmembers');
+  // Nothing mounted: no JavaScript ran, so no host marker was set.
+  expect(await page.locator('html').getAttribute('data-airo-mounted')).toBeNull();
+  await context.close();
+});
+
 test('sign in: the dashboard is server-rendered, hydrates in place, and asks the API once', async ({ page }) => {
   await observeAppMutations(page);
   await page.goto('/members');
