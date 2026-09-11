@@ -10,7 +10,7 @@ Use it when a widget cannot just be a bundle of JavaScript. An Airo cartridge ca
 
 Most micro frontend systems solve "how do I mount code on a page?" Airo adds the missing product layer around that code:
 
-- **Ultra-light by design.** The embed shell is budgeted at 5 KB minified / 2.5 KB gzip and only lazy-loads runtime code when an `<airo-app>` is actually present.
+- **Ultra-light by design.** The embed shell is budgeted at 5.25 KB minified / 2.5 KB gzip and only lazy-loads runtime code when an `<airo-app>` is actually present.
 - **Horizontal or vertical composition.** Put many cartridges on one page, or let one cartridge own an entire multi-page journey.
 - **Studio-editable by contract.** Cartridges declare templates, component schema, theme schema, style surfaces, data sources, gates, and hot-swap boundaries so a no-code studio can render safe configuration forms instead of reverse-engineering a bundle.
 - **One snapshot, many audiences.** The rendered UI, JSON-LD, XML feeds, `llms.txt`, and MCP tools consume the same post-transformer snapshot. What the user sees is what crawlers index and what agents answer from.

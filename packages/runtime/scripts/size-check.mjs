@@ -16,8 +16,9 @@
  * asked for a number to watch before 1.0. This is that number.
  *
  * Budget is measured-plus-headroom, not aspirational: 0.11.0 measures
- * ~27.6 kB / ~9.0 kB. Raising the budget is allowed and is a changelog
- * line — the gate exists so growth is a decision, not a discovery.
+ * ~27.7 kB / ~9.0 kB (28,332 B / 9,252 B at the cut). Raising the budget
+ * is allowed and is a changelog line — the gate exists so growth is a
+ * decision, not a discovery.
  *
  * Needs sibling packages built (`pnpm build` at the root) because the
  * peers resolve to their `dist` through the workspace links.
