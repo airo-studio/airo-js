@@ -1061,7 +1061,20 @@ export async function mountCartridge<
           host: renderRoot,
           events,
           enableRouter: opts.enableRouter,
-          hydrate: mode === 'hydrate',
+          // Hydration adopts markup the server painted, and that markup
+          // exists only on the INITIAL mount: a remount runs after
+          // `currentApp.destroy()` (and, under shadow isolation, an explicit
+          // `renderRoot.innerHTML = ''`), so nothing of the server's is left
+          // to adopt. Passing `true` here ran the renderer's `hydrate()`
+          // over an emptied root, which paints nothing — the widget went
+          // blank, with no error, while `update()` resolved `{ mode:
+          // 'remount' }`. Same premise as the `ssrMarkup` stash in phase 4,
+          // which has been `initial`-gated since it landed. It also keeps
+          // the chunk-recovery dispatch honest: PageManager emits
+          // `renderer:missing` with `phase: 'hydrate'` only while it is
+          // actually hydrating, so a remount's miss now recovers by
+          // repainting instead of re-hydrating an empty root.
+          hydrate: mode === 'hydrate' && initial,
           initialNavState: navState,
           registry: opts.registry,
           // 0.7.1 — forward `hostUpdate` through to `RenderContext.update`
