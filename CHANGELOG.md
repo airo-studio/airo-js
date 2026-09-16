@@ -2,6 +2,15 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why this fix is `@airo-js/runtime` 0.11.1 alone
+
+One expression in one package, no surface change, and nothing else on the line is affected — a patch on the runtime, not a new line. Reported by a consumer against 0.11.0 (`msg_mu412dxm_2c08d3`) with the cause already located in the published `dist`.
+
+## `@airo-js/runtime` 0.11.1 — 2026-09-16
+
+### Fixed
+- **A remount of a `mode: 'hydrate'` mount went blank.** Phase 7 built the new App with `hydrate: mode === 'hydrate'` — the mode captured at `mountCartridge` time. Hydration adopts markup the server painted, and that markup exists only on the initial mount: a remount runs after `currentApp.destroy()` and, under shadow isolation, an explicit `renderRoot.innerHTML = ''`. So the renderer's `hydrate()` ran over an emptied root, painted nothing, and `update()` resolved `{ mode: 'remount' }` — no throw, no `onError`, just a widget that was gone. It is now `hydrate: mode === 'hydrate' && initial`, the same `initial` gate the phase-4 `ssrMarkup` stash has carried since it landed, and the premise the comment above that stash already stated: *a remount's render root holds the destroyed app's DOM, not the server's*. CSR mounts were never affected, and neither was any host that only mounts; the exposure is anything that hydrates and then updates outside its `hotSwapKeys` — a studio on every structural edit of an SSR widget, and equally an `airo-ssr="hydrate"` embed host, whose `el.update(delta)` forwards to the same dispatcher. The fix also corrects chunk recovery on those remounts: `PageManager` emits `renderer:missing` with `phase: 'hydrate'` only while it is actually hydrating, so a missed chunk now recovers by repainting instead of re-hydrating an empty root.
+
 ## Why this line is `0.11.0`
 
 The gate reshape below changes behaviour every consumer can feel — gates run **before** the data fetch, `createCartridgeApp` no longer runs them, `runGates` returns an object — and adds the surface 1.0.0 will freeze: `Page.private`, `renderPrivate`, `Gate.appliesTo`, `satisfiedGates`, `resolveMountEntry`. A `^0.10` range must not pull that silently; the minor slot makes the upgrade deliberate, and 1.0.0 freezes the fixed gate contract rather than the one with the wrong `blockedBy`.

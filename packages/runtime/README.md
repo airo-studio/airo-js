@@ -171,6 +171,7 @@ What `mode: 'hydrate'` does:
 - Preserves the existing markup in `host` (moves it inside the shadow wrapper when isolation is `'shadow'`).
 - Drives the active page renderer's `hydrate()` instead of `render()` — listeners attach without repainting.
 - Renderers without `hydrate()` fall back to `render()` (with a `[@airo-js/core]` warning); the SSR markup is repainted client-side. Cartridges that ship to SSR pages should implement `hydrate()` on every view that's allowed to be the entry page.
+- **Applies to the initial mount only.** An `update()` / `updatePages()` remount always repaints: it runs after the previous App was destroyed, so there is no server markup left to adopt. `mode` is not a per-remount switch, and a host does not need one (fixed in runtime 0.11.1 — before it, a remount hydrated an emptied render root and the widget went blank).
 
 `mode: 'csr'` (the default) ignores any pre-existing markup and paints fresh — the v0.1 behaviour.
 
