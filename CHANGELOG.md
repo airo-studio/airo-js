@@ -2,6 +2,23 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `create-airo` ships as a beta before 1.0
+
+A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
+
+Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` at `^0.11.1` and `@airo-js/log` at `^0.3.1`. Under 0.x a caret stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.0 — 2026-09-16
+
+**First publish**, on the `beta` dist-tag: `npm create airo@beta my-app`.
+
+### Added
+- **The `create-airo` command.** `npm create airo@beta [name] -- [--template <name>] [--yes] [--dry-run] [--force]`. Zero runtime dependencies — `node:util` `parseArgs`, `node:readline/promises`, a few lines of ANSI — because this is the one package in the org that strangers run through npx with no lockfile. It never installs dependencies itself; it prints the next commands, phrased for the package manager that ran it.
+- **It writes by default, unlike the rest of this repo's tooling.** `publish.sh` and `rename-scope.sh` preview by default because they change a tree nobody asked them to touch; `create` is a verb that means "make me a thing". The safety property is kept instead: every file is listed before anything is written, a directory that is not empty is refused without `--force`, and every file is rendered before any is written, so a bad template stops with nothing on disk.
+- **Correct-by-default templates**, stored as real files under `templates/` with `__UPPER_SNAKE__` placeholders. An unknown placeholder throws rather than shipping verbatim into someone's project. `_gitignore` is renamed on write, because npm strips a literal `.gitignore` from tarballs.
+- **Names derived per identifier.** One project name becomes a package name, a cartridge id, a `__AIRO_<ID>_PAGES__` mailbox name and a custom-element name that `customElements.define` will accept — a hyphen is added when missing, and a leading digit or a spec-reserved name is handled, because that failure otherwise surfaces at runtime on the page, long after scaffolding succeeded.
+- **Gates that keep the templates honest.** The per-package version map must equal this repo's package versions, every template must name `@airo-js` versions only through the map, and `npm pack --dry-run` must list every template file — the one failure that breaks every user of a template while looking fine on disk.
+
 ## Why this fix is `@airo-js/runtime` 0.11.1 alone
 
 One expression in one package, no surface change, and nothing else on the line is affected — a patch on the runtime, not a new line. Reported by a consumer against 0.11.0 (`msg_mu412dxm_2c08d3`) with the cause already located in the published `dist`.

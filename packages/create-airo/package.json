@@ -1,0 +1,57 @@
+{
+  "name": "create-airo",
+  "version": "1.0.0-beta.0",
+  "description": "Scaffold an airo-js project — `npm create airo@beta my-app`. Starters that make the framework's easy-to-miss decisions for you.",
+  "keywords": [
+    "airo",
+    "create",
+    "scaffold",
+    "starter",
+    "template",
+    "framework"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/create-airo"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/create-airo#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "bin": {
+    "create-airo": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "templates", "README.md"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
