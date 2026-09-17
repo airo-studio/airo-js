@@ -71,6 +71,11 @@ const bundle = await get('/client.js');
 check('/client.js is served', bundle.status === 200, `got ${bundle.status}`);
 check('/client.js is JavaScript', /javascript/.test(bundle.type), bundle.type);
 check('/client.js is bundled, not raw tsc output', !/from\s*["']@airo-js\//.test(bundle.body));
+// `cartridge.server.ts` never reaches the browser. If one of these shows up,
+// something in `client.ts`'s import graph now imports the server half.
+for (const serverOnly of ['list_posts', 'llms-txt', 'schema-org-jsonld', 'dispatchTool']) {
+  check(`/client.js does not contain server-only "${serverOnly}"`, !bundle.body.includes(serverOnly));
+}
 
 // ── search-engine surfaces ────────────────────────────────────────────────
 const sitemap = await get('/sitemap.xml');
