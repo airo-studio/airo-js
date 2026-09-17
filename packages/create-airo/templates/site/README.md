@@ -77,7 +77,8 @@ spot say why.
 - Views and template pages share one `PageType` union, so a typo is a compile
   error rather than a blank page.
 - Status codes come from the renderer's reasons (`fellBack.reason`, then
-  `skipped.reason`), in that order.
+  `skipped.reason`), in that order, and unknown urls are refused
+  (`unknownPage: 'refuse'`) so nothing is rendered for a 404.
 - The adapter that puts metadata in the page is built with
   `defineCrawlerSurfaceAdapter`. A hand-written one with `format: 'custom'`
   would never run on page renders.

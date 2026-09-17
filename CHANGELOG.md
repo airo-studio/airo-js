@@ -6,11 +6,18 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
 
-Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` at `^0.11.1` and `@airo-js/log` at `^0.3.1`. Under 0.x a caret stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` and `@airo-js/ssr` at `^0.11.1` and `@airo-js/log` at `^0.3.1`. Under 0.x a caret stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.1 — 2026-09-17
+
+A packed tarball, like beta.0; not published to npm.
+
+### Changed
+- **The `site` template passes `unknownPage: 'refuse'`** (`@airo-js/ssr` 0.11.1) and depends on `@airo-js/ssr` `^0.11.1`. An unknown url now renders nothing before its 404, and the server log no longer carries a framework warning per stray request. A project scaffolded with beta.0 gets the same result with `npm update @airo-js/ssr` and that one line in `src/server.ts`.
 
 ## `create-airo` 1.0.0-beta.0 — 2026-09-16
 
-**First publish**, on the `beta` dist-tag: `npm create airo@beta my-app`.
+**Given to the first testers as a packed tarball; not published to npm.** When the CLI is published it goes to the `beta` dist-tag: `npm create airo@beta my-app`.
 
 ### Added
 - **The `create-airo` command.** `npm create airo@beta [name] -- [--template <name>] [--yes] [--dry-run] [--force]`. Zero runtime dependencies — `node:util` `parseArgs`, `node:readline/promises`, a few lines of ANSI — because this is the one package in the org that strangers run through npx with no lockfile. It never installs dependencies itself; it prints the next commands, phrased for the package manager that ran it.
@@ -19,6 +26,23 @@ Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtim
 - **Names derived per identifier.** One project name becomes a package name, a cartridge id, a `__AIRO_<ID>_PAGES__` mailbox name and a custom-element name that `customElements.define` will accept — a hyphen is added when missing, and a leading digit or a spec-reserved name is handled, because that failure otherwise surfaces at runtime on the page, long after scaffolding succeeded.
 - **One template, `site`.** An Express server that renders every page, a browser bundle that hydrates it without redrawing, and a sitemap, `llms.txt`, JSON-LD and two agent tools that read the same snapshot the pages render. The mistakes that fail without an error are decided in the template, each with its reason at the spot: the data source calls `schema.parse()`; views and pages share one `PageType` union; status codes come from `fellBack.reason` before `skipped.reason`; page metadata uses `defineCrawlerSurfaceAdapter`; only fields an adapter cannot do without are `required: 'always'`; adapters and tools live in a server-only file; transformers get the navigation state the runtime computes; a failed tool call's `cause` is logged, never returned. `widget` and `cartridge` templates follow in later betas.
 - **Gates that keep the templates honest.** The per-package version map must equal this repo's package versions, every template must name `@airo-js` versions only through the map, and `npm pack --dry-run` must list every template file — the one failure that breaks every user of a template while looking fine on disk. `pnpm e2e:create-airo`, in CI on Node 20 and 24, scaffolds each template outside the repo, installs it from packed tarballs with strict peers and no auto-installed peers, then typechecks, builds, tests, serves and smoke-tests it, and in Chromium checks that hydration adopts the server's DOM and attaches its listeners. Template sources and `scripts/*.mjs` are now linted.
+## Why `unknownPage` ships as `@airo-js/ssr` 0.11.1
+
+It adds one optional field whose default leaves every result, and every log line, exactly as 0.11.0 produced them. So it is a patch on the one package that owns it, not a new line: a project on `^0.11.0` picks it up with an ordinary install and opts in with one line. That includes projects scaffolded by the `create-airo` beta, which pin `^0.11`. The field is part of what 1.0 freezes.
+
+## `@airo-js/ssr` 0.11.1 — 2026-09-17
+
+### Added
+- **`unknownPage?: 'fallback' | 'refuse'`** on `renderAppWithPublication` and on `renderAppToHTML`'s deps. A surface that owns its urls reads `fellBack.reason === 'unknown-page'` and answers 404, and the runner could not tell it had. So for every unknown url a crawler or scanner requested, it rendered the fallback page, ran its adapters, and logged a five-line `warn` telling the host to do what it already did. `'refuse'` returns `{ html: '', fellBack }` instead (plus `adapterResults: []` and empty `gates` on the full runner): nothing rendered, nothing published, and the narration drops to `debug`. It is decided before the private check, so on a members-first template an unknown url no longer also carries `skipped.reason === 'private'`. Only `'unknown-page'` is refused; `'disabled'`, `'subpage'` and `'gate-page'` are real urls and fall back as before. `'fallback'` stays the default because on a customer's page the fallback is mandatory. The warning now names the option. Best practices §5.10a and §4.9 are updated.
+
+**Upgrading:** nothing is required. If your server answers 404 from `fellBack`, add `unknownPage: 'refuse'` to the call. Never add it on an embed or query surface.
+
+### Examples
+- **`full-site` no longer ships its adapters and MCP tools to the browser.** They lived in `cartridge.ts`, which `client.ts` imports, so `client.js` carried all four adapters and both tools. They now live in `cartridge.server.ts`, which spreads the browser cartridge and is imported only by `server.ts`. `client.js` is 84,938 → 75,321 bytes, and the smoke checks the bundle for each adapter id and tool name.
+- **`full-site` transformers get the navigation state the runtime computes.** The server passed `navState: { page: '' }` on every route; the runtime passes `{ ...entry.navState, page: entry.page.id }` from `resolveMountEntry`. Harmless while `anchorIds` ignores `navState`; a hydration mismatch for the first transformer that does not. The server now uses `resolveMountEntry` and `createPipeline`, and every snapshot, machine routes included, is keyed on the url state it is for. A new test records what each route passes and fails on the old code.
+- **`full-site`'s `/api/members/me` returns untransformed data.** The client's members source hands the response to the runtime, which runs the transformers itself, so the chain ran twice on every private mount, which was harmless only because `anchorIds` is idempotent.
+- **`full-site`'s public data source parses what it builds** with the cartridge schema, as the members source already did. The framework never calls `schema.parse()`.
+- **`full-site` passes `unknownPage: 'refuse'`**, and its server log no longer carries a warning per 404.
 
 ## Why this fix is `@airo-js/runtime` 0.11.1 alone
 

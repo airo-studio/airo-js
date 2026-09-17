@@ -21,6 +21,8 @@
  *    `fellBack.reason === 'unknown-page'` (404) before `skipped.reason`
  *    (`'private'` is 401). Check the reason, never just whether the field is
  *    there: `fellBack` is also set for a disabled page, which is a real page.
+ *    Because this server answers that 404 itself, it passes
+ *    `unknownPage: 'refuse'`, and nothing is rendered for an unknown url.
  *
  * 4. **Every request gets its own snapshot**, built for the page it names.
  *    That is what gives each page its own canonical url, and lets one
@@ -242,11 +244,15 @@ const renderPage: express.RequestHandler = async (req, res) => {
     publicationCtx,
     document: freshDocument(),
     initialNavState,
+    // This site answers 404 for unknown urls itself (just below), so the
+    // renderer is told not to render the page it would fall back to. Without
+    // this it renders the home page, runs its adapters and logs a warning,
+    // all for a response that is thrown away. Leave it out only for an app
+    // embedded in someone else's page, where the url is not yours.
+    unknownPage: 'refuse',
   });
 
   // Note 3, first: a url that names no page is a 404, whatever else is set.
-  // The renderer also logs a warning for each of these, because it cannot
-  // tell that you handled it. Here you have; the warning can be ignored.
   if (result.fellBack?.reason === 'unknown-page') {
     notFound(res, req.path);
     return;

@@ -21,7 +21,7 @@ export const AIRO_VERSIONS = {
   '@airo-js/core': '0.11.0',
   '@airo-js/cartridge-kit': '0.11.0',
   '@airo-js/runtime': '0.11.1',
-  '@airo-js/ssr': '0.11.0',
+  '@airo-js/ssr': '0.11.1',
   '@airo-js/embed': '0.11.0',
   '@airo-js/mcp': '0.11.0',
   '@airo-js/log': '0.3.1',

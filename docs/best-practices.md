@@ -829,7 +829,7 @@ A members area is the opposite of everything else this framework does. Public pa
 ```ts
 // 1. Render as an anonymous request would. Public pages come back rendered;
 //    a private entry comes back refused, with nothing run and nothing inlined.
-let result = await renderAppWithPublication({ cartridge, appConfig, snapshot: publicSnapshot, publicationCtx, document, initialNavState });
+let result = await renderAppWithPublication({ cartridge, appConfig, snapshot: publicSnapshot, publicationCtx, document, initialNavState, unknownPage: 'refuse' });
 
 // 2. An unknown url is a 404 before anything else — even when the page the
 //    runner fell back to is private (the two reasons can co-occur).
@@ -848,7 +848,7 @@ if (!unknownPage && result.skipped?.reason === 'private') {
 
 Two runner calls on a signed-in private request; the first is entry resolution and a refusal, the second the render. The host never re-derives which page the URL names — the runner did — and the private branch is the only place the cookie is read.
 
-The order of the three reads matters. **First `fellBack.reason === 'unknown-page'` → 404**: on a template whose first enabled page is private, `/does-not-exist` resolves to that private default entry and the result carries *both* `fellBack.reason === 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped` first would answer 401 and tell a crawler the url exists. **Then `skipped.reason === 'private'` → 401** (or the private render). **Then `headFromPublication`**, never before `skipped`: a private refusal has no canonical, and a "no canonical → 404" rule written for public pages will misfire on it.
+The order of the three reads matters. **First `fellBack.reason === 'unknown-page'` → 404**: on a template whose first enabled page is private, `/does-not-exist` resolves to that private default entry and the result carries *both* `fellBack.reason === 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped` first would answer 401 and tell a crawler the url exists. (`unknownPage: 'refuse'`, as above, refuses before the private decision, so only `fellBack` is set, but keep the order: it is what stays correct if the option is dropped.) **Then `skipped.reason === 'private'` → 401** (or the private render). **Then `headFromPublication`**, never before `skipped`: a private refusal has no canonical, and a "no canonical → 404" rule written for public pages will misfire on it.
 
 **`renderPrivate` is the one explicit unlock.** The framework verifies nothing (rendering-only) and reads no other input — a host that passes country or locale into anything must never unlock a private page by accident, so the unlock is this flag and only this flag. Set it after your handler has verified the session for this request. With it the page renders as HTML only; adapters never run for a private entry, so there is no JSON-LD, no head-meta, nothing for the sitemap or `llms.txt`, by construction rather than by remembering. The low-level `renderAppToHTML` keeps the same promise through the same option on its deps: the flag lives on the page graph, not on one runner.
 
@@ -1515,6 +1515,8 @@ function navStateFor(pathname: string) {
 
 The runner also narrates this: an `unknown-page` fallback logs a `warn` (the others log at `debug`, being legitimate states). It fires only when a host actually requested a page, so a correctly-gated embed surface stays silent.
 
+**Once you answer 404 from `fellBack`, pass `unknownPage: 'refuse'`** (0.11.1, on `renderAppWithPublication` and on `renderAppToHTML`'s deps). Without it the runner cannot tell that you handled the fallback: it still renders the fallback page and runs its adapters for every unknown url a crawler or scanner requests, and it still logs the warning, so a correct site logs one on every stray request. With it, the result is `{ html: '', fellBack }` (plus `adapterResults: []` and empty `gates` on the full runner), nothing is rendered or published, and the log line drops to `debug`. It is checked before the private decision, so on a members-first template an unknown url no longer also carries `skipped.reason === 'private'`. Only `'unknown-page'` is refused: `'disabled'`, `'subpage'` and `'gate-page'` are real urls and fall back as before. Never pass it on an embed or query surface; there, the fallback is the requirement.
+
 So the framework reports the decision it already made and stops. On `RenderToHTMLResult` and `RenderWithPublicationResult`:
 
 ```ts
@@ -1531,7 +1533,10 @@ const result = await renderAppWithPublication({ cartridge, appConfig, snapshot, 
 // ❌ — 404s a disabled page and an age gate
 if (result.fellBack) return new Response(html, { status: 404 });
 
-// ✅ — only an id that names nothing is missing
+// ✅ — only an id that names nothing is missing. A surface that owns its
+// urls also passes `unknownPage: 'refuse'` to the call above, so `html` is
+// empty here and nothing was rendered for the page it would have fallen
+// back to.
 if (result.fellBack?.reason === 'unknown-page' && surfaceOwnsItsUrls) {
   const notFound = await renderAppWithPublication({ ...same, initialNavState: { page: 'notFound' } });
   return new Response(

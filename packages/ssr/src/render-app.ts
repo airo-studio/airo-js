@@ -82,6 +82,23 @@ export interface RenderToHTMLDeps<
    * verifies nothing and reads no other input to decide.
    */
   renderPrivate?: boolean;
+  /**
+   * What to do when `initialNavState.page` names no page in the graph.
+   *
+   * `'fallback'` (default) renders the default entry instead and reports
+   * `fellBack: { reason: 'unknown-page' }`. Mandatory for a widget on a
+   * customer's page, where the url is theirs. Narrated as a `warn`: on a
+   * surface that owns its urls, an unread `fellBack` is a soft 404 that
+   * nothing else reports.
+   *
+   * `'refuse'` renders nothing and returns `{ html: '', fellBack }`. For a
+   * surface that owns its urls and answers 404 from `fellBack`: the fallback
+   * render would be thrown away, so it is not done, and the narration drops
+   * to `debug` because the host has said it reads the field. Only
+   * `'unknown-page'` is refused. A disabled page, a subpage and a gate page
+   * are real urls and still fall back.
+   */
+  unknownPage?: 'fallback' | 'refuse';
 }
 
 export interface RenderToHTMLResult {
@@ -166,13 +183,23 @@ export function renderAppToHTML<
   // ship, and it is invisible otherwise — the page renders, the status is
   // 200, and nothing is obviously wrong. Two consumers shipped it, one of
   // them twice. The other three reasons are legitimate states (a config
-  // switch, a subpage, a gate) and only narrate at debug.
+  // switch, a subpage, a gate) and only narrate at debug. So does a refused
+  // unknown page: a host that passed `unknownPage: 'refuse'` reads the field.
+  const refused = resolution.fellBack?.reason === 'unknown-page' && deps.unknownPage === 'refuse';
   if (resolution.fellBack) {
     const { requested, reason } = resolution.fellBack;
+    if (refused) {
+      log.debug(`entry page "${requested}" is not in the page graph; refused (unknownPage: 'refuse'). Nothing rendered.`, {
+        requested,
+        reason,
+        phase: 'entry-resolution',
+      });
+      return { html: '', ...fellBack };
+    }
     const detail = { requested, reason, resolved: entry?.id, phase: 'entry-resolution' };
     if (reason === 'unknown-page') {
       log.warn(
-        `entry page "${requested}" is not in the page graph; rendered "${entry?.id ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. See best-practices §5.10a.`,
+        `entry page "${requested}" is not in the page graph; rendered "${entry?.id ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. Pass \`unknownPage: 'refuse'\` once you do. See best-practices §5.10a.`,
         detail,
       );
     } else {
