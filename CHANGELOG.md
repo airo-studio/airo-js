@@ -2,6 +2,49 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `create-airo` ships as a beta before 1.0
+
+A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
+
+Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` and `@airo-js/ssr` at `^0.11.1` and `@airo-js/log` at `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.2 — 2026-09-17
+
+A packed tarball, like the betas before it; not published to npm. Everything here comes from the first outside tester's report. Nothing they ran failed; these are the things that surprised them or that they changed before the result felt like their own.
+
+### Fixed
+- **A fresh `site` scaffold printed "6 vulnerabilities (3 moderate, 1 high, 2 critical)"** on its first `npm install`, all in dev tooling (happy-dom 15, esbuild 0.21, vitest 2 and its vite). The template now ships esbuild `^0.28.2`, happy-dom `^20.14.5`, vitest `^5.0.1` and vite `^8.3.0`, and a fresh install reports none. vitest 4.1.11, the other patched line, was ruled out: every npm 11 up to 11.19.1 crashes installing it (`Cannot read properties of null (reading 'edgesOut')`). vitest 5 needs Node `^22.12 || >=24`, so the template's `engines` now says that; Node 20 reached end of life in April. `vite` is listed explicitly because vitest 5 declares it as a peer, and a project must not rely on a package manager installing peers for it.
+- **The `site` build did not minify.** `build` and `dev` now pass `--minify`: the client bundle is roughly 18 kB gzipped without it and 11 kB with it. The smoke checks the bundle is minified and fails above a 15 kB gzip budget (`CLIENT_JS_GZIP_BUDGET` in `scripts/smoke.mjs`).
+- **A CamelCase directory lost its casing** in the display name (`GreenGrocer` became `Greengrocer`, `iPhoneRepair` became `Iphonerepair`). The display name is now built from the name as typed: words the user capitalised keep their capitals, lowercase words get a capital first letter, and letters outside ASCII survive. Package name, cartridge id and mailbox are unchanged.
+- **Two pieces of copy lived outside `content.ts`.** The 404 page, the sign-in refusal and the post view's back link now read a `COPY` object there, and the listen banner lists the urls the sitemap walks instead of hand-written sample paths.
+
+### Added
+- **`npm run verify`**: typecheck, tests, build and the smoke in one command. The smoke now hosts the built server itself on a free port (`server.ts` already exported `app` and listened only when run directly); `BASE_URL` still points it at a server that is already running.
+- **`--exact`** writes `@airo-js` versions without the `^`, for teams that pin a pre-1.0 framework exactly. Templates now hold the whole spec in one placeholder (`"__V_CORE__"`).
+- **`--force` names what it replaces.** The file list marks each file that already exists with `(overwrites)`, the refusal says how many, and a forced run prints the count before writing. `--dry-run` now previews a non-empty directory instead of refusing it, since it writes nothing.
+- The e2e check resolves every scaffold with the machine's npm and runs `npm audit --audit-level=high`, as well as the strict pnpm install. It runs on Node 22 and 24.
+
+### Changed
+- The generated README no longer says the `^` ranges mean nothing upgrades on its own. They take patch releases on the same line when you install; neither they nor an exact pin move to a new line.
+
+## `create-airo` 1.0.0-beta.1 — 2026-09-17
+
+A packed tarball, like beta.0; not published to npm.
+
+### Changed
+- **The `site` template passes `unknownPage: 'refuse'`** (`@airo-js/ssr` 0.11.1) and depends on `@airo-js/ssr` `^0.11.1`. An unknown url now renders nothing before its 404, and the server log no longer carries a framework warning per stray request. A project scaffolded with beta.0 gets the same result with `npm update @airo-js/ssr` and that one line in `src/server.ts`.
+
+## `create-airo` 1.0.0-beta.0 — 2026-09-16
+
+**Given to the first testers as a packed tarball; not published to npm.** When the CLI is published it goes to the `beta` dist-tag: `npm create airo@beta my-app`.
+
+### Added
+- **The `create-airo` command.** `npm create airo@beta [name] -- [--template <name>] [--yes] [--dry-run] [--force]`. Zero runtime dependencies — `node:util` `parseArgs`, `node:readline/promises`, a few lines of ANSI — because this is the one package in the org that strangers run through npx with no lockfile. It never installs dependencies itself; it prints the next commands, phrased for the package manager that ran it.
+- **It writes by default, unlike the rest of this repo's tooling.** `publish.sh` and `rename-scope.sh` preview by default because they change a tree nobody asked them to touch; `create` is a verb that means "make me a thing". The safety property is kept instead: every file is listed before anything is written, a directory that is not empty is refused without `--force`, and every file is rendered before any is written, so a bad template stops with nothing on disk.
+- **Correct-by-default templates**, stored as real files under `templates/` with `__UPPER_SNAKE__` placeholders. An unknown placeholder throws rather than shipping verbatim into someone's project. `_gitignore` is renamed on write, because npm strips a literal `.gitignore` from tarballs.
+- **Names derived per identifier.** One project name becomes a package name, a cartridge id, a `__AIRO_<ID>_PAGES__` mailbox name and a custom-element name that `customElements.define` will accept — a hyphen is added when missing, and a leading digit or a spec-reserved name is handled, because that failure otherwise surfaces at runtime on the page, long after scaffolding succeeded.
+- **One template, `site`.** An Express server that renders every page, a browser bundle that hydrates it without redrawing, and a sitemap, `llms.txt`, JSON-LD and two agent tools that read the same snapshot the pages render. The mistakes that fail without an error are decided in the template, each with its reason at the spot: the data source calls `schema.parse()`; views and pages share one `PageType` union; status codes come from `fellBack.reason` before `skipped.reason`; page metadata uses `defineCrawlerSurfaceAdapter`; only fields an adapter cannot do without are `required: 'always'`; adapters and tools live in a server-only file; transformers get the navigation state the runtime computes; a failed tool call's `cause` is logged, never returned. `widget` and `cartridge` templates follow in later betas.
+- **Gates that keep the templates honest.** The per-package version map must equal this repo's package versions, every template must name `@airo-js` versions only through the map, and `npm pack --dry-run` must list every template file — the one failure that breaks every user of a template while looking fine on disk. `pnpm e2e:create-airo`, in CI on Node 20 and 24, scaffolds each template outside the repo, installs it from packed tarballs with strict peers and no auto-installed peers, then typechecks, builds, tests, serves and smoke-tests it, and in Chromium checks that hydration adopts the server's DOM and attaches its listeners. Template sources and `scripts/*.mjs` are now linted.
 ## Why `unknownPage` ships as `@airo-js/ssr` 0.11.1
 
 It adds one optional field whose default leaves every result, and every log line, exactly as 0.11.0 produced them. So it is a patch on the one package that owns it, not a new line: a project on `^0.11.0` picks it up with an ordinary install and opts in with one line. That includes projects scaffolded by the `create-airo` beta, which pin `^0.11`. The field is part of what 1.0 freezes.

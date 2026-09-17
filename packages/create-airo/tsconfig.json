@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    // Node executes this package's output directly, so resolve the way Node
+    // does. The base's `Bundler` resolution accepts extensionless relative
+    // imports that compile and then fail at `node dist/cli.js`.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // No DOM: this is CLI code for a browser framework, and `document` or
+    // `window` typechecking in here would be a bug waiting to happen.
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"]
+}
