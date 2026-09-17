@@ -2,6 +2,24 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `unknownPage` ships as `@airo-js/ssr` 0.11.1
+
+It adds one optional field whose default leaves every result, and every log line, exactly as 0.11.0 produced them. So it is a patch on the one package that owns it, not a new line: a project on `^0.11.0` picks it up with an ordinary install and opts in with one line. That includes projects scaffolded by the `create-airo` beta, which pin `^0.11`. The field is part of what 1.0 freezes.
+
+## `@airo-js/ssr` 0.11.1 — 2026-09-17
+
+### Added
+- **`unknownPage?: 'fallback' | 'refuse'`** on `renderAppWithPublication` and on `renderAppToHTML`'s deps. A surface that owns its urls reads `fellBack.reason === 'unknown-page'` and answers 404, and the runner could not tell it had. So for every unknown url a crawler or scanner requested, it rendered the fallback page, ran its adapters, and logged a five-line `warn` telling the host to do what it already did. `'refuse'` returns `{ html: '', fellBack }` instead (plus `adapterResults: []` and empty `gates` on the full runner): nothing rendered, nothing published, and the narration drops to `debug`. It is decided before the private check, so on a members-first template an unknown url no longer also carries `skipped.reason === 'private'`. Only `'unknown-page'` is refused; `'disabled'`, `'subpage'` and `'gate-page'` are real urls and fall back as before. `'fallback'` stays the default because on a customer's page the fallback is mandatory. The warning now names the option. Best practices §5.10a and §4.9 are updated.
+
+**Upgrading:** nothing is required. If your server answers 404 from `fellBack`, add `unknownPage: 'refuse'` to the call. Never add it on an embed or query surface.
+
+### Examples
+- **`full-site` no longer ships its adapters and MCP tools to the browser.** They lived in `cartridge.ts`, which `client.ts` imports, so `client.js` carried all four adapters and both tools. They now live in `cartridge.server.ts`, which spreads the browser cartridge and is imported only by `server.ts`. `client.js` is 84,938 → 75,321 bytes, and the smoke checks the bundle for each adapter id and tool name.
+- **`full-site` transformers get the navigation state the runtime computes.** The server passed `navState: { page: '' }` on every route; the runtime passes `{ ...entry.navState, page: entry.page.id }` from `resolveMountEntry`. Harmless while `anchorIds` ignores `navState`; a hydration mismatch for the first transformer that does not. The server now uses `resolveMountEntry` and `createPipeline`, and every snapshot, machine routes included, is keyed on the url state it is for. A new test records what each route passes and fails on the old code.
+- **`full-site`'s `/api/members/me` returns untransformed data.** The client's members source hands the response to the runtime, which runs the transformers itself, so the chain ran twice on every private mount, which was harmless only because `anchorIds` is idempotent.
+- **`full-site`'s public data source parses what it builds** with the cartridge schema, as the members source already did. The framework never calls `schema.parse()`.
+- **`full-site` passes `unknownPage: 'refuse'`**, and its server log no longer carries a warning per 404.
+
 ## Why this fix is `@airo-js/runtime` 0.11.1 alone
 
 One expression in one package, no surface change, and nothing else on the line is affected — a patch on the runtime, not a new line. Reported by a consumer against 0.11.0 (`msg_mu412dxm_2c08d3`) with the cause already located in the published `dist`.
