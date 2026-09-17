@@ -34,15 +34,20 @@
  *    cannot reach a renderer. See best-practices §5.10a.
  *
  * 3. **404 branches on `fellBack.reason`, never on its presence** — and
- *    `skipped` is read BEFORE `fellBack`. Only `'unknown-page'` means the
+ *    `fellBack` is read BEFORE `skipped`. Only `'unknown-page'` means the
  *    url does not exist. `'disabled'` is a config state and `'gate-page'`
  *    is a real page — both legitimate 200s. `skipped.reason === 'private'`
  *    is a 401, and a private refusal has no canonical, so a "no canonical
- *    → 404" rule written for public pages would misfire on it.
+ *    → 404" rule written for public pages would misfire on it. Because this
+ *    route answers the 404 itself, it passes `unknownPage: 'refuse'`: the
+ *    runner then renders nothing for an unknown url instead of the home
+ *    page this route would throw away.
  *
- * 4. **The snapshot is per request.** The DataSource takes the requested
- *    slug, so canonicals are per-page and `validate()` gates one url rather
- *    than the whole site.
+ * 4. **The snapshot is per request, and transformed as the browser will
+ *    transform it.** The DataSource takes the requested slug, so canonicals
+ *    are per-page and `validate()` gates one url rather than the whole site.
+ *    Transformers get the navigation state the runtime computes for that url
+ *    (`resolveMountEntry`), so server markup and the client's data agree.
  *
  * 5. **Member data never enters a snapshot built for a machine route, and
  *    it is keyed on the PAGE, never on the session.** Adapters and MCP tools
@@ -66,7 +71,14 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { parseHTML } from 'linkedom';
 
-import { escapeHtml, extractPathTail, fragmentToState, type NavigationState } from '@airo-js/core';
+import {
+  createPipeline,
+  escapeHtml,
+  extractPathTail,
+  fragmentToState,
+  resolveMountEntry,
+  type NavigationState,
+} from '@airo-js/core';
 import { renderAppWithPublication, renderDocument, runPublicationAdapters, headFromPublication } from '@airo-js/ssr';
 import { templateToAppConfig } from '@airo-js/cartridge-kit';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
@@ -77,7 +89,6 @@ import {
   MEMBERS_SOURCE_ID,
   ROOT_ATTRS,
   SITE_CSS,
-  docSiteCartridge,
   docSiteTemplate,
   signInPanel,
   toSummary,
@@ -85,6 +96,9 @@ import {
   type DocSiteData,
   type MemberSlice,
 } from './cartridge.js';
+// The server half: the browser cartridge plus adapters and MCP tools.
+// `client.ts` imports `./cartridge.js` only, so none of these reach it.
+import { docSiteServerCartridge } from './cartridge.server.js';
 import { oauthProvider, type RegisteredClient } from './auth/oauth-provider.js';
 import { privateHeaders, readSession, relyingParty, type Session } from './auth/session.js';
 
@@ -96,7 +110,7 @@ const ORIGIN = process.env.SITE_ORIGIN ?? `http://localhost:${PORT}`;
 const AUTH_ISSUER = process.env.AUTH_ISSUER ?? ORIGIN;
 
 const config: DocSiteConfig = { locale: 'en-GB', siteUrl: SITE.url, siteName: SITE.name };
-const appConfig = templateToAppConfig(docSiteTemplate, docSiteCartridge.id);
+const appConfig = templateToAppConfig(docSiteTemplate, docSiteServerCartridge.id);
 const publicationCtx = { config, locale: config.locale, country: 'GB' as const };
 
 /**
@@ -128,37 +142,64 @@ function navStateFor(pathname: string): Partial<NavigationState> | undefined {
   return fragmentToState(tail, { pathContextKey: PATH_CONTEXT_KEY }) ?? undefined;
 }
 
-/** The raw public data for a request, before transformers. Never carries `member`. */
-async function rawSnapshotFor(slug?: string): Promise<DocSiteData> {
-  return docSiteCartridge.dataSources[0]!.fetch({ kind: 'custom', payload: { slug } }, { config });
-}
+/** The url state for a document page, for routes that name one by slug. */
+const docState = (slug: string): Partial<NavigationState> => ({ page: 'doc', [PATH_CONTEXT_KEY]: slug });
+const slugOf = (state?: Partial<NavigationState>) => state?.[PATH_CONTEXT_KEY] as string | undefined;
 
-/** The public snapshot for a request — never carries `member`. */
-async function snapshotFor(slug?: string): Promise<DocSiteData> {
-  return runTransformers(await rawSnapshotFor(slug));
+/**
+ * The raw public data for a request: the DataSource's output, before
+ * transformers. Never carries `member`.
+ */
+async function rawSnapshotFor(slug?: string): Promise<DocSiteData> {
+  return docSiteServerCartridge.dataSources[0]!.fetch({ kind: 'custom', payload: { slug } }, { config });
 }
 
 /**
- * The private snapshot for a verified session: the raw public data plus
- * the member slice, transformed ONCE. One builder for the wildcard's
- * private branch and `/api/members/me`, so SSR and the API cannot disagree
- * about the shape — and so the transformer chain never runs twice over one
- * snapshot (safe today only because `anchorIds` is idempotent; a copier
- * adding an enriching transformer would get doubled output on private pages
- * and not on public ones).
+ * The private data for a verified session, before transformers: the raw
+ * public data plus the member slice. `/api/members/me` returns exactly
+ * this, because the client's members source hands it to the runtime, which
+ * runs the transformers itself — the same contract as any DataSource's
+ * upstream. Until 0.11.1 the API returned transformed data and the chain
+ * ran twice on every private mount, harmless only while every transformer
+ * is idempotent.
  */
-async function privateSnapshotFor(session: Session, slug?: string): Promise<DocSiteData> {
-  return runTransformers({ ...(await rawSnapshotFor(slug)), member: memberSliceFor(session.user, slug) });
+async function rawPrivateSnapshotFor(session: Session, slug?: string): Promise<DocSiteData> {
+  return { ...(await rawSnapshotFor(slug)), member: memberSliceFor(session.user, slug) };
 }
 
-// Run the transformer chain exactly as the client will, so the anchor ids
-// a crawler indexes are the ones a reader clicks.
-async function runTransformers(raw: DocSiteData): Promise<DocSiteData> {
-  let data = raw;
-  for (const t of docSiteCartridge.transformers ?? []) {
-    if (t.isEnabled(config)) data = await t.transform(data, { config, navState: { page: '' }, locale: config.locale });
-  }
-  return data;
+const pipeline = createPipeline<DocSiteData, DocSiteConfig>(docSiteServerCartridge.transformers ?? []);
+
+/**
+ * Transform a snapshot exactly as the browser will: the runtime's pipeline
+ * (so `isEnabled` and `errorPolicy` behave identically), and the navigation
+ * state the runtime computes for the page this url mounts. `resolveMountEntry`
+ * is the function the runtime calls. A transformer that reads `navState.page`
+ * — strip a slice unless the page is private, say — then shapes the same data
+ * on both sides. Until 0.11.1 this passed `{ page: '' }`: harmless while
+ * `anchorIds` ignores `navState`, and a hydration mismatch waiting for the
+ * first transformer that does not.
+ */
+function transform(raw: DocSiteData, initialNavState?: Partial<NavigationState>): Promise<DocSiteData> {
+  const entry = resolveMountEntry({ pages: appConfig.pages, initialNavState });
+  return pipeline.runTransformers(raw, {
+    config,
+    locale: config.locale,
+    navState: { ...entry.navState, page: entry.page?.id ?? entry.navState.page },
+  });
+}
+
+/** The public snapshot for the page a url names — never carries `member`. */
+async function snapshotFor(initialNavState?: Partial<NavigationState>): Promise<DocSiteData> {
+  return transform(await rawSnapshotFor(slugOf(initialNavState)), initialNavState);
+}
+
+/**
+ * The private snapshot for a verified session, transformed once, for the
+ * wildcard's private render. Built from the same raw data the API returns,
+ * so SSR and the client's refetch cannot disagree about its shape.
+ */
+async function privateSnapshotFor(session: Session, initialNavState?: Partial<NavigationState>): Promise<DocSiteData> {
+  return transform(await rawPrivateSnapshotFor(session, slugOf(initialNavState)), initialNavState);
 }
 
 /**
@@ -243,7 +284,8 @@ app.get('/api/members/me', async (req, res) => {
   const session = readSession(req);
   if (!session) { res.status(401).json({ error: 'unauthenticated' }); return; }
   const slug = typeof req.query.slug === 'string' ? req.query.slug : undefined;
-  res.json(await privateSnapshotFor(session, slug));
+  // Untransformed: the client's pipeline transforms it, once.
+  res.json(await rawPrivateSnapshotFor(session, slug));
 });
 
 // 3 ── machine surfaces, all off the same PUBLIC snapshot the humans get.
@@ -267,13 +309,13 @@ app.get('/robots.txt', (_req, res) => {
 // this from an inventory or a cache rather than per request — crawlers poll
 // sitemaps on a schedule, and with a real DataSource every hit would be N
 // upstream fetches. The `max-age` is the demo's stand-in for that cache.
-const PUBLIC_SLUGS = [undefined, ...DOCS.map((d) => d.slug)];
+const PUBLIC_STATES = [undefined, ...DOCS.map((d) => docState(d.slug))];
 const MACHINE_CACHE = 'public, max-age=300';
 
 app.get('/sitemap.xml', async (_req, res) => {
   const results = await Promise.all(
-    PUBLIC_SLUGS.map(async (slug) => {
-      const [result] = await runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+    PUBLIC_STATES.map(async (state) => {
+      const [result] = await runPublicationAdapters(docSiteServerCartridge, await snapshotFor(state), publicationCtx, {
         adapterIds: ['crawler-surface'],
       });
       return result;
@@ -311,8 +353,8 @@ app.get('/sitemap.xml', async (_req, res) => {
  */
 app.get('/llms.txt', async (_req, res) => {
   const perPage = await Promise.all(
-    PUBLIC_SLUGS.map(async (slug) =>
-      runPublicationAdapters(docSiteCartridge, await snapshotFor(slug), publicationCtx, {
+    PUBLIC_STATES.map(async (state) =>
+      runPublicationAdapters(docSiteServerCartridge, await snapshotFor(state), publicationCtx, {
         adapterIds: ['crawler-surface', 'llms-txt'],
       }),
     ),
@@ -332,13 +374,13 @@ app.get('/llms.txt', async (_req, res) => {
  * markup rather than a script block, not a different set of facts.
  */
 app.get('/microdata/:slug', async (req, res) => {
-  const snapshot = await snapshotFor(req.params.slug);
+  const snapshot = await snapshotFor(docState(req.params.slug));
   if (!snapshot.doc) { res.status(404).type('text/plain').send('not found\n'); return; }
   // Same coordination as /llms.txt, and for the same reason. The microdata
   // adapter validates only its OWN output — a non-empty fragment — so it
   // happily publishes a page the crawler adapter blocked. One publication
   // decision, honoured by every surface, is host work.
-  const results = await runPublicationAdapters(docSiteCartridge, snapshot, publicationCtx, {
+  const results = await runPublicationAdapters(docSiteServerCartridge, snapshot, publicationCtx, {
     adapterIds: ['crawler-surface', 'schema-org-microdata'],
   });
   const publishable = results.find((r) => r.adapterId === 'crawler-surface')?.included;
@@ -353,21 +395,21 @@ app.get('/microdata/:slug', async (req, res) => {
  * This used to map `mcpTools` by hand, with a cast per field because no
  * typed helper existed. `buildToolManifest` emits MCP's `tools/list` shape
  * from the cartridge directly, and `dispatchTool` answers a call against the
- * same `snapshotFor(slug)` the HTML route renders — which is the whole
+ * same `snapshotFor(docState(slug))` the HTML route renders — which is the whole
  * snapshot-fidelity claim, made checkable on one page. It never reads a
  * cookie, so an agent can never be handed a member's notes.
  */
 app.get('/mcp/tools', (_req, res) => {
-  res.json(buildToolManifest(docSiteCartridge));
+  res.json(buildToolManifest(docSiteServerCartridge));
 });
 
 app.post('/mcp/call', async (req, res) => {
   const { name, arguments: args, slug } = req.body ?? {};
   if (typeof name !== 'string') { res.status(400).json({ error: 'missing tool name' }); return; }
 
-  const snapshot = await snapshotFor(typeof slug === 'string' ? slug : undefined);
-  const out = await dispatchTool(docSiteCartridge, name, args ?? {}, snapshot, {
-    config: docSiteCartridge.defaultConfig,
+  const snapshot = await snapshotFor(typeof slug === 'string' ? docState(slug) : undefined);
+  const out = await dispatchTool(docSiteServerCartridge, name, args ?? {}, snapshot, {
+    config: docSiteServerCartridge.defaultConfig,
   });
 
   // A tool the agent got wrong is a 400, not a 500 — the dispatcher returns
@@ -392,19 +434,23 @@ app.post('/mcp/call', async (req, res) => {
 // site most needs to serve. Caught by curling `/` rather than by any test.
 const renderPage: express.RequestHandler = async (req, res) => {
   const initialNavState = navStateFor(req.path);
-  const slug = initialNavState?.[PATH_CONTEXT_KEY] as string | undefined;
-  const publicSnapshot = await snapshotFor(slug);
+  const publicSnapshot = await snapshotFor(initialNavState);
   // The Document is built inside the closure: the refusal call never
   // touches one, so it never parses one.
   const render = (snapshot: DocSiteData, renderPrivate: boolean) =>
     renderAppWithPublication<DocSiteData, DocSiteConfig>({
-      cartridge: docSiteCartridge,
+      cartridge: docSiteServerCartridge,
       appConfig,
       snapshot,
       publicationCtx,
       document: freshDocument(),
       initialNavState,
       renderPrivate,
+      // This surface owns its urls and answers 404 from `fellBack` below,
+      // so an unknown url renders nothing, runs no adapter and logs no
+      // warning. Never pass this on a widget embedded in someone else's
+      // page: there, the fallback is the requirement.
+      unknownPage: 'refuse',
     });
 
   // Note 6: refuse first. Public pages come back rendered; a private entry
@@ -415,10 +461,12 @@ const renderPage: express.RequestHandler = async (req, res) => {
 
   // Note 3, first half: an unknown url is a 404 BEFORE anything else — even
   // when the page the runner fell back to is private. On a members-first
-  // template (first enabled page private) `/does-not-exist` resolves to the
-  // private default entry and comes back with BOTH `fellBack.reason ===
-  // 'unknown-page'` and `skipped.reason === 'private'`; reading `skipped`
-  // first would answer 401 and tell a crawler the url exists.
+  // template (first enabled page private) and without `unknownPage:
+  // 'refuse'`, `/does-not-exist` resolves to the private default entry and
+  // comes back with BOTH `fellBack.reason === 'unknown-page'` and
+  // `skipped.reason === 'private'`; reading `skipped` first would answer 401
+  // and tell a crawler the url exists. `'refuse'` stops that co-occurring,
+  // and this order is what keeps the route right if the option is removed.
   const unknownPage = result.fellBack?.reason === 'unknown-page';
 
   if (!unknownPage && result.skipped?.reason === 'private') {
@@ -446,7 +494,7 @@ const renderPage: express.RequestHandler = async (req, res) => {
       return;
     }
     // Note 5: the slice is built here and nowhere else on this route.
-    snapshot = await privateSnapshotFor(session, slug);
+    snapshot = await privateSnapshotFor(session, initialNavState);
     result = await render(snapshot, true);
   }
 

@@ -49,6 +49,14 @@
  * is satisfied by the render that required it). The host prints the latter
  * on the mount root and the client passes it to
  * `mountCartridge({ satisfiedGates })`.
+ *
+ * ## Unknown urls (0.11.1)
+ *
+ * A requested page id that names nothing falls back to the default entry
+ * and reports `fellBack: { reason: 'unknown-page' }`, because on a
+ * customer's page the url is not the widget's to refuse. A surface that owns
+ * its urls reads that and answers 404, and passes `unknownPage: 'refuse'` so
+ * the fallback page is neither rendered nor published first.
  */
 
 import {
@@ -161,6 +169,22 @@ export interface RenderWithPublicationOptions<
    * page on a branch where no session was verified.
    */
   renderPrivate?: boolean | { satisfiedGates: ReadonlyArray<string> };
+  /**
+   * What to do when `initialNavState.page` names no page in the graph.
+   * `'fallback'` (default) renders the default entry and reports
+   * `fellBack: { reason: 'unknown-page' }`, as it always has. `'refuse'`
+   * returns `{ html: '', adapterResults: [], gates: { pending: [],
+   * satisfied: [] }, fellBack }` with no render and no adapter run, and
+   * narrates at `debug` instead of `warn`.
+   *
+   * Pass `'refuse'` on a surface that owns its urls and answers 404 from
+   * `fellBack`: every unknown url a crawler or scanner requests otherwise
+   * costs a full render and adapter run that the 404 throws away. Only
+   * `'unknown-page'` is refused; `skipped` is never set for it, because the
+   * page it would describe was never chosen. See
+   * `RenderToHTMLDeps.unknownPage`.
+   */
+  unknownPage?: 'fallback' | 'refuse';
 }
 
 export interface RenderWithPublicationResult {
@@ -210,7 +234,9 @@ export interface RenderWithPublicationResult {
    * private render already met (emit them as
    * `data-airo-gates-satisfied` and pass them to
    * `mountCartridge({ satisfiedGates })`). Both empty when the cartridge
-   * has no gates or no entry page resolved.
+   * has no gates, and when an unknown page was refused (nothing will
+   * mount). With no entry page resolved, every enabled gate is `pending`:
+   * the client fails closed and runs them all.
    */
   gates: { pending: string[]; satisfied: string[] };
 }
@@ -272,6 +298,19 @@ export async function renderAppWithPublication<
   // answering 404 must not have that decision depend on whether the
   // fallback page happened to be server-renderable.
   const fellBack = entryResolution.fellBack ? { fellBack: entryResolution.fellBack } : {};
+
+  // A host that answers 404 from `fellBack` asked for nothing to be done
+  // about an unknown url. Checked before the private decision: an unknown
+  // url is a 404 whatever the fallback page's privacy, so `skipped` would
+  // only describe a page nobody asked for.
+  if (entryResolution.fellBack?.reason === 'unknown-page' && opts.unknownPage === 'refuse') {
+    log.debug(
+      `entry page "${entryResolution.fellBack.requested}" is not in the page graph; refused (unknownPage: 'refuse'). Nothing rendered, nothing published.`,
+      { requested: entryResolution.fellBack.requested, reason: 'unknown-page', phase: 'entry-resolution' },
+    );
+    return { html: '', adapterResults: [], gates: { pending: [], satisfied: [] }, ...fellBack };
+  }
+
   const hostSatisfied =
     typeof opts.renderPrivate === 'object' && opts.renderPrivate !== null
       ? opts.renderPrivate.satisfiedGates
