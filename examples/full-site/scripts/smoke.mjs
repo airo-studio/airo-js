@@ -103,6 +103,13 @@ const fav = await get('/favicon.ico');
 check('favicon is not decoded as a page', fav.status === 204);
 const clientJs = await fetch(`${BASE}/client.js`);
 check('client bundle is served as JavaScript', clientJs.status === 200 && /javascript/.test(clientJs.headers.get('content-type') ?? ''));
+// The two-envelope split: adapters and tools live in `cartridge.server.ts`,
+// which only `server.ts` imports. Until 0.11.1 every one of these was in
+// the bundle.
+const clientBody = await clientJs.text();
+for (const serverOnly of ['list_pages', 'llms-txt', 'schema-org-jsonld', 'schema-org-microdata', 'dispatchTool']) {
+  check(`client bundle carries no server-only "${serverOnly}"`, !clientBody.includes(serverOnly));
+}
 
 // ═══════════════════════ the members area ═══════════════════════════
 //

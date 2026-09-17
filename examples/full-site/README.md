@@ -5,8 +5,8 @@ A multi-page site root-mounted on Express. Real urls, per-URL SSR, per-page cano
 ```bash
 pnpm dev              # build + serve on :3000
 PORT=4317 pnpm dev
-pnpm smoke            # 99 assertions against a running server, including the OAuth round trip
-pnpm test             # happy-dom: the gate with fetch mocked
+pnpm smoke            # 104 assertions against a running server, including the OAuth round trip
+pnpm test             # the gate with fetch mocked, the auth clock, the transformers’ navigation state
 pnpm e2e              # Playwright, Chromium: the gate paints, hydration adopts the server's DOM
 ```
 
@@ -15,7 +15,7 @@ pnpm e2e              # Playwright, Chromium: the gate paints, hydration adopts 
 | `/` | index — `200` |
 | `/doc/why-snapshots` | a document — `200` |
 | `/doc/unfinished-draft` | **`404`** — blocked by the publish gate |
-| `/does-not-exist` | **`404`** — `fellBack.reason === 'unknown-page'` |
+| `/does-not-exist` | **`404`** — `fellBack.reason === 'unknown-page'`; `unknownPage: 'refuse'` means nothing is rendered first |
 | `/members` | **`401`** shell + sign-in gate; **`200`** server-rendered for a session (`demo` / `demo`) |
 | `/note/roadmap` | a member note — private, same rule |
 | `/microdata/:slug` | Schema.org microdata — same facts, different encoding |
@@ -26,7 +26,7 @@ pnpm e2e              # Playwright, Chromium: the gate paints, hydration adopts 
 
 `@airo-js/ssr` is pure functions over a `Document`. **There is no HTTP server in the framework, no file-based routing, no bundler, no dev server** — that is deliberate, not missing.
 
-`src/server.ts` is ~530 lines of Express — the page route, the machine routes, the members API — and none of it is framework-specific; the OAuth provider and relying party beside it in `src/auth/` (~580 lines) are host code too. Swap it for Hono, Fastify, a Cloudflare Worker or bare `node:http` and *nothing else changes*: the cartridge, the client entry and every surface are identical. The sibling [`shopify-edge-worker`](../shopify-edge-worker) example is the same framework calls behind a Worker `fetch` handler.
+`src/server.ts` is ~570 lines of Express — the page route, the machine routes, the members API — and none of it is framework-specific; the OAuth provider and relying party beside it in `src/auth/` (~580 lines) are host code too. Swap it for Hono, Fastify, a Cloudflare Worker or bare `node:http` and *nothing else changes*: the cartridge, the client entry and every surface are identical. The sibling [`shopify-edge-worker`](../shopify-edge-worker) example is the same framework calls behind a Worker `fetch` handler.
 
 So the honest framing is **"your server + airo-js"**, and the server is genuinely any server.
 
@@ -34,9 +34,11 @@ So the honest framing is **"your server + airo-js"**, and the server is genuinel
 
 **One cartridge owns the whole site.** Four routable pages — `home` and `doc` public, `members` and `note` private — with the slug in the second path segment via `pathContextKey: 'slug'`. `enableRouter: { mode: 'path', basePath: '/', entryPageId: 'home' }` root-mounts it — and `entryPageId` is what gives the index **one** url instead of answering on both `/` and `/home`.
 
-**The snapshot is per request.** The DataSource takes the requested slug and returns a snapshot scoped to *that* page. This is the load-bearing decision: it makes canonicals per-page, and it makes `validate()` a per-page gate rather than a per-feed one. Get it wrong and one unfinished entry blocks the entire site.
+**The snapshot is per request.** The DataSource takes the requested slug, parses what it built with the cartridge schema (the framework never does), and returns a snapshot scoped to *that* page. The server runs it through the runtime's transformer pipeline with the navigation state the runtime computes for that url (`resolveMountEntry`), so server markup and the client's data agree. This is the load-bearing decision: it makes canonicals per-page, and it makes `validate()` a per-page gate rather than a per-feed one. Get it wrong and one unfinished entry blocks the entire site.
 
 **The publish gate is real, and visible.** `content.ts` ships a doc with an empty `updatedAt`. The crawler adapter's `select.canonical` returns `''` for it, `validate()` blocks on a missing canonical, and the url 404s, stays out of the sitemap, and stays out of `llms.txt` — while every other page publishes normally. No custom validator: *"an unfinished page must not reach a crawler"* and *"a page that cannot say where it canonically lives must not reach a crawler"* turn out to be one rule.
+
+**Two envelopes.** `src/cartridge.ts` is the browser half: schema, data sources, transformer, views, gate, template. `src/cartridge.server.ts` spreads it and adds the adapters and MCP tools, and only `server.ts` imports it — so `client.js` carries none of them, which the smoke checks by name.
 
 **Four publication adapters, one snapshot.** Inline JSON-LD, the crawler bundle (canonical / OpenGraph / Twitter Card / sitemap entry), `llms.txt`, and Schema.org microdata. The last two are different *encodings* of the same facts for different readers — not different data — and the smoke suite asserts that the microdata headline, the `og:title` and the rendered `<h1>` are the same string.
 
