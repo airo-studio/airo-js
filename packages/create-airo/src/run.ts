@@ -12,11 +12,13 @@
  * did not ask them to touch. `create` is the opposite: the user typed a verb
  * that means "make me a thing", in a place that does not exist yet. So this
  * writes by default and keeps the safety property those scripts protect
- * instead: it lists every file first, and it refuses a directory that is not
- * empty unless `--force` is passed. `--dry-run` is there for a preview.
+ * instead: it lists every file first, marking each one that already exists,
+ * and it refuses a directory that is not empty unless `--force` is passed.
+ * `--dry-run` is there for a preview, and previews a non-empty directory too.
  * Please don't "fix" this back to dry-run-by-default.
  */
 
+import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { type CliArgs, parseCliArgs, UsageError, usage } from './args.js';
@@ -77,22 +79,39 @@ export async function run(argv: readonly string[], io: Io, opts: RunOptions = {}
     const rel = relative(io.cwd, names.targetDir) || '.';
 
     const files = planScaffold(join(templatesRoot, template.name));
+    // Marked in the list itself, so `--force` says exactly what it replaces
+    // rather than only that the directory was not empty.
+    const overwrites = files.filter((file) => existsSync(join(names.targetDir, file.path)));
+    const replaced = new Set(overwrites);
     io.stdout(`\nScaffolding ${style(io, 'bold', template.name)} into ${style(io, 'cyan', rel)}\n`);
-    for (const file of files) io.stdout(`  ${style(io, 'dim', file.path)}\n`);
+    for (const file of files) {
+      const mark = replaced.has(file) ? `  ${style(io, 'yellow', '(overwrites)')}` : '';
+      io.stdout(`  ${style(io, 'dim', file.path)}${mark}\n`);
+    }
 
-    if (!isEmptyTarget(names.targetDir) && !args.force) {
+    const notEmpty = !isEmptyTarget(names.targetDir);
+    // A dry run writes nothing, so it previews a non-empty target instead of
+    // refusing it: that preview is how you decide whether --force is safe.
+    if (notEmpty && !args.force && !args.dryRun) {
       io.stderr(
-        `\n${style(io, 'red', 'error')} ${rel} is not empty. ` +
+        `\n${style(io, 'red', 'error')} ${rel} is not empty` +
+          (overwrites.length ? `, and ${plural(overwrites.length, 'file')} above would be replaced. ` : '. ') +
           'Choose another name, empty it, or pass --force to write into it anyway.\n',
       );
       return 1;
+    }
+    if (notEmpty && overwrites.length) {
+      io.stdout(
+        `\n${style(io, 'yellow', `${plural(overwrites.length, 'existing file')} will be replaced`)}` +
+          `${args.dryRun && !args.force ? ' (a real run also needs --force)' : ''}.\n`,
+      );
     }
 
     // Render everything before writing anything: an unknown placeholder
     // throws here, while the target is still untouched.
     const rendered = renderScaffold(files, {
       ...nameVars(names),
-      ...versionVars(),
+      ...versionVars({ exact: args.exact }),
       CREATE_AIRO_VERSION: VERSION,
       TEMPLATE: template.name,
       TARGET_LINE: targetLine(),
@@ -111,6 +130,10 @@ export async function run(argv: readonly string[], io: Io, opts: RunOptions = {}
     io.stderr(`${style(io, 'red', 'error')} ${err instanceof Error ? err.message : String(err)}\n`);
     return 1;
   }
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 function usageFailure(io: Io, err: UsageError, templates: readonly TemplateInfo[]): number {

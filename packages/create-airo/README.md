@@ -39,8 +39,9 @@ command asks for a name and, if there is more than one, a template.
 |---|---|
 | `-t, --template <name>` | Which starter to use |
 | `-y, --yes` | Accept defaults and never prompt (`airo-app`, `site`) |
-| `--dry-run` | List the files that would be written; write nothing |
-| `--force` | Write into a directory that is not empty |
+| `--dry-run` | List the files that would be written, marking any it would replace; write nothing |
+| `--force` | Write into a directory that is not empty, replacing the files marked `(overwrites)` |
+| `--exact` | Pin `@airo-js` packages to exact versions instead of `^` ranges |
 | `-h, --help` | Show help |
 | `-v, --version` | Show the version |
 
@@ -51,7 +52,7 @@ phrased for the package manager you used.
 
 | Template | What you get |
 |---|---|
-| `site` | A server-rendered, multi-page site that hydrates in the browser, with search-engine and agent surfaces served from the same data |
+| `site` | A server-rendered, multi-page site that hydrates in the browser, with search-engine and agent surfaces served from the same data. Needs Node 22.12+ |
 
 More starters follow in later betas. The command only offers templates that
 are in the build you are running.
@@ -62,12 +63,15 @@ This command creates files without asking first. Tools that change an
 existing tree should preview by default; a command whose whole job is "make
 me a new project" should not. What it does instead:
 
-- lists every file before writing,
-- refuses a directory that is not empty unless you pass `--force`,
+- lists every file before writing, marking each one that already exists
+  with `(overwrites)`,
+- refuses a directory that is not empty unless you pass `--force`, and says
+  how many files a forced run would replace,
 - renders every file before writing any, so a problem stops it with nothing
   on disk.
 
-`--dry-run` is there if you want the preview.
+`--dry-run` is there if you want the preview, and previews a directory that
+is not empty as well.
 
 ## License
 

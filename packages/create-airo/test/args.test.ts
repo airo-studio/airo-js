@@ -10,18 +10,20 @@ describe('parseCliArgs', () => {
       yes: false,
       dryRun: false,
       force: false,
+      exact: false,
       help: false,
       version: false,
     });
   });
 
   test('reads a name and every long flag', () => {
-    expect(parseCliArgs(['my-app', '--template', 'site', '--yes', '--dry-run', '--force'])).toMatchObject({
+    expect(parseCliArgs(['my-app', '--template', 'site', '--yes', '--dry-run', '--force', '--exact'])).toMatchObject({
       name: 'my-app',
       template: 'site',
       yes: true,
       dryRun: true,
       force: true,
+      exact: true,
     });
   });
 

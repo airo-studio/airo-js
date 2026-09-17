@@ -14,4 +14,4 @@
 
 export const PACKAGE_NAME = 'create-airo';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '1.0.0-beta.1';
+export const VERSION = '1.0.0-beta.2';

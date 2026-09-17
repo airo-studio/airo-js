@@ -51,9 +51,9 @@ import { headFromPublication, renderAppWithPublication, renderDocument, runPubli
 import express from 'express';
 import { parseHTML } from 'linkedom';
 
-import { ROOT_ATTRS, SITE_CSS, siteTemplate, type SiteConfig, type SiteData, type SiteInput } from './cartridge.js';
+import { ROOT_ATTRS, SITE_CSS, isPublished, siteTemplate, type SiteConfig, type SiteData, type SiteInput } from './cartridge.js';
 import { siteServerCartridge as cartridge, type LlmsTxtOutput } from './cartridge.server.js';
-import { POSTS, SITE } from './content.js';
+import { COPY, POSTS, SITE, findPost } from './content.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_PATH = '/';
@@ -122,10 +122,10 @@ function documentFor(head: HeadPatch, body: string, mount: 'hydrate' | 'csr' | f
 function notFound(res: express.Response, path: string): void {
   res.status(404).send(
     documentFor(
-      { title: `Not found — ${SITE.name}` },
-      `<div class="site-page"><h1 class="site-title">Not found</h1>
-       <p class="site-tagline">Nothing lives at <code>${escapeHtml(path)}</code>.</p>
-       <a class="site-back" href="/">← all posts</a></div>`,
+      { title: `${COPY.notFound} — ${SITE.name}` },
+      `<div class="site-page"><h1 class="site-title">${escapeHtml(COPY.notFound)}</h1>
+       <p class="site-tagline">${escapeHtml(COPY.nothingAt)} <code>${escapeHtml(path)}</code>.</p>
+       <a class="site-back" href="/">${escapeHtml(COPY.backToIndex)}</a></div>`,
       false,
     ),
   );
@@ -268,8 +268,8 @@ const renderPage: express.RequestHandler = async (req, res) => {
       .set('Cache-Control', 'private, no-store')
       .send(
         documentFor(
-          { title: `Sign in — ${SITE.name}`, meta: [{ name: 'robots', content: 'noindex, nofollow' }] },
-          '<div class="site-page"><h1 class="site-title">Sign-in required</h1></div>',
+          { title: `${COPY.signInRequired} — ${SITE.name}`, meta: [{ name: 'robots', content: 'noindex, nofollow' }] },
+          `<div class="site-page"><h1 class="site-title">${escapeHtml(COPY.signInRequired)}</h1></div>`,
           false,
         ),
       );
@@ -306,13 +306,22 @@ const renderPage: express.RequestHandler = async (req, res) => {
 app.get('/', renderPage);
 app.get('/*splat', renderPage);
 
-// Listen only when run directly, so tests can import `app` and bind their own port.
+/** `/` and `/post/<slug>`: the url a `PAGE_STATES` entry names. */
+function urlFor(state: Partial<NavigationState> | undefined): string {
+  return state ? `/${state.page}/${String(state[PATH_CONTEXT_KEY])}` : '/';
+}
+
+// Listen only when run directly, so `scripts/smoke.mjs` and tests can import
+// `app` and bind their own port.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   app.listen(PORT, () => {
     console.log(`${SITE.name} on http://localhost:${PORT}`);
-    console.log('  /                     the index');
-    console.log('  /post/hello           a post');
-    console.log('  /post/unfinished      404 — kept off search engines until it has a date');
+    // The same list the sitemap walks, so it changes when your content does.
+    for (const state of PAGE_STATES) {
+      const post = state ? findPost(String(state[PATH_CONTEXT_KEY])) : undefined;
+      const note = !state ? 'the index' : post && isPublished(post) ? post.title : '404 until it has an updatedAt';
+      console.log(`  ${urlFor(state).padEnd(22)} ${note}`);
+    }
     console.log('  /sitemap.xml /llms.txt /robots.txt /mcp/tools');
   });
 }

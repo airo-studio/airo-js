@@ -8,24 +8,31 @@ AI-agent surfaces built from the same data.
 > uses `@airo-js` __TARGET_LINE__. The framework's API freezes at 1.0; when it
 > ships, the [changelog](https://github.com/airo-studio/airo-js/blob/main/CHANGELOG.md)
 > will carry migration notes for projects created with this beta. Your
-> `package.json` records which build created it under `"airo"`. Nothing
-> upgrades on its own: the `^` ranges here stay on __TARGET_LINE__.
+> `package.json` records which build created it under `"airo"`. The
+> `@airo-js` versions stay on the __TARGET_LINE__ line: a `^` range (the default)
+> takes __TARGET_LINE__.x fixes when you install, an exact version (scaffolded
+> with `--exact`) takes nothing until you change it, and neither moves to a new
+> line on its own.
 
 ## Run it
+
+Needs Node 22.12 or later (or 24+).
 
 ```bash
 npm install
 npm run dev          # build, then serve on http://localhost:3000
+npm run verify       # typecheck, tests, build and the smoke, in one go
 ```
 
 | Command | |
 |---|---|
 | `npm run dev` | Build and serve |
-| `npm run build` | Compile the server and bundle `src/client.ts` into `dist/public/client.js` |
+| `npm run build` | Compile the server and bundle `src/client.ts`, minified, into `dist/public/client.js` |
 | `npm start` | Serve the last build |
 | `npm test` | Check the server and browser render identical markup |
 | `npm run typecheck` | Type-check source and tests |
-| `npm run smoke` | HTTP checks against a running server (start it first) |
+| `npm run smoke` | HTTP checks against the built server, which it starts itself. `BASE_URL=…` checks one already running |
+| `npm run verify` | All of the above that check something: typecheck, test, build, smoke |
 
 `PORT` changes the port.
 
@@ -85,7 +92,10 @@ spot say why.
 - Only fields an adapter truly cannot do without are `required: 'always'`.
   Over-declaring one silently stops that adapter publishing.
 - Adapters and agent tools live in `cartridge.server.ts`, so browsers never
-  download them.
+  download them. The smoke checks the bundle for their names.
+- The browser bundle is minified, and the smoke fails if it grows past
+  `CLIENT_JS_GZIP_BUDGET` (15 kB gzipped; about 11 kB as scaffolded).
+- Every visible string, including the 404 page, is in `content.ts`.
 - A failed agent call is logged on the server, and its underlying error is
   never sent back to the caller.
 
@@ -100,6 +110,9 @@ spot say why.
 
 ## Tooling versions
 
-The dev dependencies (`typescript`, `vitest`, `esbuild`, `happy-dom`) are
-pinned to the versions this starter is tested with. Upgrading them is
-fine; run `npm test` and `npm run smoke` afterwards.
+The dev dependencies (`typescript`, `vitest`, `vite`, `esbuild`, `happy-dom`)
+are the versions this starter is tested with, chosen so a fresh
+`npm install` reports no known vulnerabilities. `vitest` 5 is why Node
+22.12+ is required. `vite` is listed because `vitest` needs it and does not
+install it for you under every package manager. Upgrading them is fine;
+run `npm run verify` afterwards.

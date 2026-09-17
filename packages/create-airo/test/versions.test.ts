@@ -79,7 +79,7 @@ describe('AIRO_VERSIONS', () => {
           if (!name.startsWith('@airo-js/')) continue;
           const where = `${relative(PKG_ROOT, path)} ${block}.${name}`;
           expect(name in AIRO_VERSIONS, `${where} is not in AIRO_VERSIONS`).toBe(true);
-          expect(spec, where).toBe(`^__${versionToken(name)}__`);
+          expect(spec, where).toBe(`__${versionToken(name)}__`);
         }
       }
     }
@@ -92,10 +92,11 @@ describe('version helpers', () => {
     expect(versionToken('@airo-js/cartridge-kit')).toBe('V_CARTRIDGE_KIT');
   });
 
-  test('versionVars covers every mapped package', () => {
+  test('versionVars covers every mapped package, as ^ ranges unless exact', () => {
     const vars = versionVars();
     expect(Object.keys(vars)).toHaveLength(Object.keys(AIRO_VERSIONS).length);
-    expect(vars.V_RUNTIME).toBe(AIRO_VERSIONS['@airo-js/runtime']);
+    expect(vars.V_RUNTIME).toBe(`^${AIRO_VERSIONS['@airo-js/runtime']}`);
+    expect(versionVars({ exact: true }).V_RUNTIME).toBe(AIRO_VERSIONS['@airo-js/runtime']);
   });
 
   test('targetLine is the major.minor the framework packages share', () => {

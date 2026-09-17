@@ -206,9 +206,10 @@ function caretAccepts(range, version) {
 /** What each template must pass once installed. A template without an entry fails loudly. */
 const VERIFY = {
   site: async (app) => {
-    sh('pnpm', ['run', 'typecheck'], { cwd: app });
-    sh('pnpm', ['run', 'build'], { cwd: app });
-    sh('pnpm', ['test'], { cwd: app });
+    // The one command the template tells people to run: typecheck, tests,
+    // build, and the smoke hosting the built server itself.
+    sh('pnpm', ['run', 'verify'], { cwd: app });
+    // Then the same smoke against a separately started server, and the browser.
     await serveAndCheck(app);
   },
 };
@@ -290,6 +291,21 @@ try {
       ],
       { cwd: app },
     );
+
+    // Most people install with npm, and npm resolves differently: a release of
+    // a dev tool once made every npm 11 crash on a fresh install of this
+    // template. Resolve the same manifest with this machine's npm, then audit
+    // it — a first `npm install` that prints "critical" is the first thing a
+    // stranger learns about the framework.
+    // In a directory of its own holding only the manifest: npm reads an
+    // existing node_modules even with `--package-lock-only`, and pnpm's
+    // layout is not one it understands.
+    step(`resolve "${name}" with npm, and audit it`);
+    const npmDir = join(work, `${name}-npm`);
+    mkdirSync(npmDir);
+    writeFileSync(join(npmDir, 'package.json'), readFileSync(pkgPath));
+    sh('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-fund', '--no-audit'], { cwd: npmDir });
+    sh('npm', ['audit', '--audit-level=high'], { cwd: npmDir });
 
     step(`verify "${name}"`);
     await VERIFY[name](app);

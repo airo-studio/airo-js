@@ -29,7 +29,7 @@ import {
 } from '@airo-js/cartridge-kit';
 import { escapeAttr, escapeHtml } from '@airo-js/core';
 
-import { POSTS, SITE, findPost, type Post, type Section, type Site } from './content.js';
+import { COPY, POSTS, SITE, findPost, type Post, type Section, type Site } from './content.js';
 
 // ─────────────────────────── types ───────────────────────────
 
@@ -235,7 +235,7 @@ const postView: ViewDefinition<SiteData, SiteConfig> = {
   factory: defineSSRSafeRenderer<PageType, Ctx>({
     template(ctx) {
       const { post } = ctx.app.data;
-      if (!post) return page('<p class="site-empty">Not found.</p>');
+      if (!post) return page(`<p class="site-empty">${escapeHtml(COPY.notFound)}</p>`);
       const toc = post.sections
         .map((s) => `<li><a href="#${escapeAttr(s.id)}">${escapeHtml(s.title)}</a></li>`)
         .join('');
@@ -250,7 +250,7 @@ const postView: ViewDefinition<SiteData, SiteConfig> = {
         .join('');
       return page(`
       <article>
-        <a class="site-back" href="/">← all posts</a>
+        <a class="site-back" href="/">${escapeHtml(COPY.backToIndex)}</a>
         <h1 class="site-title">${escapeHtml(post.title)}</h1>
         <p class="site-tagline">${escapeHtml(post.description)}</p>
         <nav class="site-toc"><ol>${toc}</ol></nav>

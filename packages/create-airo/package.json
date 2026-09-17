@@ -1,6 +1,6 @@
 {
   "name": "create-airo",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "Scaffold an airo-js project — `npm create airo@beta my-app`. Starters that make the framework's easy-to-miss decisions for you.",
   "keywords": [
     "airo",

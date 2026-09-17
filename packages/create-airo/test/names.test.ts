@@ -72,6 +72,28 @@ describe('deriveNames', () => {
     expect(names.packageName).toBe('shop-front');
   });
 
+  test.each([
+    ['my-app', 'My App'],
+    ['GreenGrocer', 'GreenGrocer'],
+    ['iPhoneRepair', 'iPhoneRepair'],
+    ['GreenGrocer-site', 'GreenGrocer Site'],
+    ['my_app', 'My App'],
+    ['café-bar', 'Café Bar'],
+    ['ACME', 'ACME'],
+    ['___', 'Airo App'],
+  ])('the display name for %j is %j — casing the user typed is kept', (dir, display) => {
+    expect(deriveNames(dir, cwd).displayName).toBe(display);
+  });
+
+  test('the display name keeps its casing while every identifier is still lowercase', () => {
+    expect(deriveNames('GreenGrocer', cwd)).toMatchObject({
+      packageName: 'greengrocer',
+      displayName: 'GreenGrocer',
+      cartridgeId: 'greengrocer',
+      mailboxName: '__AIRO_GREENGROCER_PAGES__',
+    });
+  });
+
   test('the mailbox name follows __AIRO_<ID_UPPER>_PAGES__', () => {
     expect(deriveNames('docs-site', cwd).mailboxName).toBe('__AIRO_DOCS_SITE_PAGES__');
   });

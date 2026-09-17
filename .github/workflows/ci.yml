@@ -142,14 +142,16 @@ jobs:
   # tarballs with strict peers and no auto-installed peers, then typechecked,
   # built, tested, served, smoked and — on 24 — hydrated in a real browser.
   # See the header of `scripts/e2e-create-airo.mjs` for why tarballs and not
-  # the registry. The scaffolded project claims `node >=20`, so both ends run.
+  # the registry. The scaffolded project claims `node ^22.12 || >=24` (its
+  # test runner needs it), so both ends of that run. The CLI itself still
+  # runs on 20; the verify job covers that.
   create-airo:
     name: create-airo e2e (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '24']
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

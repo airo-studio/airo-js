@@ -6,7 +6,26 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
 
-Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` and `@airo-js/ssr` at `^0.11.1` and `@airo-js/log` at `^0.3.1`. Under 0.x a caret stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` and `@airo-js/ssr` at `^0.11.1` and `@airo-js/log` at `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.2 — 2026-09-17
+
+A packed tarball, like the betas before it; not published to npm. Everything here comes from the first outside tester's report. Nothing they ran failed; these are the things that surprised them or that they changed before the result felt like their own.
+
+### Fixed
+- **A fresh `site` scaffold printed "6 vulnerabilities (3 moderate, 1 high, 2 critical)"** on its first `npm install`, all in dev tooling (happy-dom 15, esbuild 0.21, vitest 2 and its vite). The template now ships esbuild `^0.28.2`, happy-dom `^20.14.5`, vitest `^5.0.1` and vite `^8.3.0`, and a fresh install reports none. vitest 4.1.11, the other patched line, was ruled out: every npm 11 up to 11.19.1 crashes installing it (`Cannot read properties of null (reading 'edgesOut')`). vitest 5 needs Node `^22.12 || >=24`, so the template's `engines` now says that; Node 20 reached end of life in April. `vite` is listed explicitly because vitest 5 declares it as a peer, and a project must not rely on a package manager installing peers for it.
+- **The `site` build did not minify.** `build` and `dev` now pass `--minify`: the client bundle is roughly 18 kB gzipped without it and 11 kB with it. The smoke checks the bundle is minified and fails above a 15 kB gzip budget (`CLIENT_JS_GZIP_BUDGET` in `scripts/smoke.mjs`).
+- **A CamelCase directory lost its casing** in the display name (`GreenGrocer` became `Greengrocer`, `iPhoneRepair` became `Iphonerepair`). The display name is now built from the name as typed: words the user capitalised keep their capitals, lowercase words get a capital first letter, and letters outside ASCII survive. Package name, cartridge id and mailbox are unchanged.
+- **Two pieces of copy lived outside `content.ts`.** The 404 page, the sign-in refusal and the post view's back link now read a `COPY` object there, and the listen banner lists the urls the sitemap walks instead of hand-written sample paths.
+
+### Added
+- **`npm run verify`**: typecheck, tests, build and the smoke in one command. The smoke now hosts the built server itself on a free port (`server.ts` already exported `app` and listened only when run directly); `BASE_URL` still points it at a server that is already running.
+- **`--exact`** writes `@airo-js` versions without the `^`, for teams that pin a pre-1.0 framework exactly. Templates now hold the whole spec in one placeholder (`"__V_CORE__"`).
+- **`--force` names what it replaces.** The file list marks each file that already exists with `(overwrites)`, the refusal says how many, and a forced run prints the count before writing. `--dry-run` now previews a non-empty directory instead of refusing it, since it writes nothing.
+- The e2e check resolves every scaffold with the machine's npm and runs `npm audit --audit-level=high`, as well as the strict pnpm install. It runs on Node 22 and 24.
+
+### Changed
+- The generated README no longer says the `^` ranges mean nothing upgrades on its own. They take patch releases on the same line when you install; neither they nor an exact pin move to a new line.
 
 ## `create-airo` 1.0.0-beta.1 — 2026-09-17
 

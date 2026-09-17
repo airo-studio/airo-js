@@ -5,33 +5,35 @@
   "description": "An airo-js site: server-rendered pages that hydrate, with search-engine and agent surfaces served from the same data.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "^22.12.0 || >=24.0.0"
   },
   "scripts": {
-    "dev": "tsc -p tsconfig.json && esbuild src/client.ts --bundle --format=esm --target=es2022 --outfile=dist/public/client.js --log-level=warning && node dist/server.js",
-    "build": "tsc -p tsconfig.json && esbuild src/client.ts --bundle --format=esm --target=es2022 --outfile=dist/public/client.js --log-level=warning",
+    "dev": "npm run build && node dist/server.js",
+    "build": "tsc -p tsconfig.json && esbuild src/client.ts --bundle --minify --format=esm --target=es2022 --outfile=dist/public/client.js --log-level=warning",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run smoke"
   },
   "dependencies": {
-    "@airo-js/cartridge-kit": "^__V_CARTRIDGE_KIT__",
-    "@airo-js/core": "^__V_CORE__",
-    "@airo-js/log": "^__V_LOG__",
-    "@airo-js/mcp": "^__V_MCP__",
-    "@airo-js/runtime": "^__V_RUNTIME__",
-    "@airo-js/ssr": "^__V_SSR__",
+    "@airo-js/cartridge-kit": "__V_CARTRIDGE_KIT__",
+    "@airo-js/core": "__V_CORE__",
+    "@airo-js/log": "__V_LOG__",
+    "@airo-js/mcp": "__V_MCP__",
+    "@airo-js/runtime": "__V_RUNTIME__",
+    "@airo-js/ssr": "__V_SSR__",
     "express": "^5.1.0",
     "linkedom": "^0.18.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
-    "esbuild": "^0.21.0",
-    "happy-dom": "^15.0.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
     "typescript": "^5.5.0",
-    "vitest": "^2.1.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
   },
   "airo": {
     "scaffoldedWith": "create-airo@__CREATE_AIRO_VERSION__",

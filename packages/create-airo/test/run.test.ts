@@ -32,7 +32,7 @@ beforeEach(() => {
   writeTree(join(templatesRoot, 'demo'), {
     'package.json': JSON.stringify({
       name: '__PKG_NAME__',
-      dependencies: { '@airo-js/core': '^__V_CORE__', '@airo-js/log': '^__V_LOG__' },
+      dependencies: { '@airo-js/core': '__V_CORE__', '@airo-js/log': '__V_LOG__' },
       airo: { scaffoldedWith: 'create-airo@__CREATE_AIRO_VERSION__', template: '__TEMPLATE__' },
     }),
     'README.md': '# __DISPLAY_NAME__\n\nmailbox: __MAILBOX_NAME__, line __TARGET_LINE__\n',
@@ -111,6 +111,21 @@ describe('scaffolding', () => {
     expect(readFileSync(join(dir, 'src/cartridge.ts'), 'utf8')).toBe("export const id = 'my-app';\n");
   });
 
+  test('--exact pins @airo-js versions instead of writing ^ ranges', async () => {
+    expect(await run(['app', '-t', 'demo', '--exact'], fakeIo(cwd), { templates: both, templatesRoot })).toBe(0);
+    const pkg = JSON.parse(readFileSync(join(cwd, 'app/package.json'), 'utf8'));
+    expect(pkg.dependencies).toEqual({
+      '@airo-js/core': AIRO_VERSIONS['@airo-js/core'],
+      '@airo-js/log': AIRO_VERSIONS['@airo-js/log'],
+    });
+  });
+
+  test('a CamelCase directory keeps its casing as the display name', async () => {
+    await run(['GreenGrocer', '-t', 'demo'], fakeIo(cwd), { templates: both, templatesRoot });
+    expect(readFileSync(join(cwd, 'GreenGrocer/README.md'), 'utf8')).toMatch(/^# GreenGrocer\n/);
+    expect(JSON.parse(readFileSync(join(cwd, 'GreenGrocer/package.json'), 'utf8')).name).toBe('greengrocer');
+  });
+
   test('_gitignore is written as .gitignore', async () => {
     await run(['app', '-t', 'demo'], fakeIo(cwd), { templates: both, templatesRoot });
     expect(readFileSync(join(cwd, 'app/.gitignore'), 'utf8')).toBe('node_modules\ndist\n');
@@ -185,6 +200,36 @@ describe('the target directory', () => {
     expect(await run(['app', '-t', 'demo', '--force'], fakeIo(cwd), { templates: both, templatesRoot })).toBe(0);
     expect(existsSync(join(cwd, 'app/package.json'))).toBe(true);
     expect(readFileSync(join(cwd, 'app/mine.txt'), 'utf8')).toBe('keep');
+  });
+
+  test('the file list marks every file that already exists, and the refusal counts them', async () => {
+    writeTree(join(cwd, 'app'), { 'README.md': 'mine', 'mine.txt': 'keep' });
+    const io = fakeIo(cwd);
+    expect(await run(['app', '-t', 'demo'], io, { templates: both, templatesRoot })).toBe(1);
+    expect(io.out).toContain('  README.md  (overwrites)\n');
+    expect(io.out).toContain('  package.json\n');
+    expect(io.err).toMatch(/app is not empty, and 1 file above would be replaced/);
+    expect(readFileSync(join(cwd, 'app/README.md'), 'utf8')).toBe('mine');
+  });
+
+  test('--force says how many existing files it replaces, then replaces them', async () => {
+    writeTree(join(cwd, 'app'), { 'README.md': 'mine', 'package.json': '{}' });
+    const io = fakeIo(cwd);
+    expect(await run(['app', '-t', 'demo', '--force'], io, { templates: both, templatesRoot })).toBe(0);
+    expect(io.out).toContain('  package.json  (overwrites)\n');
+    expect(io.out).toMatch(/2 existing files will be replaced\./);
+    expect(readFileSync(join(cwd, 'app/README.md'), 'utf8')).not.toBe('mine');
+  });
+
+  test('--dry-run previews a non-empty directory instead of refusing it, and writes nothing', async () => {
+    writeTree(join(cwd, 'app'), { 'README.md': 'mine' });
+    const io = fakeIo(cwd);
+    expect(await run(['app', '-t', 'demo', '--dry-run'], io, { templates: both, templatesRoot })).toBe(0);
+    expect(io.out).toContain('  README.md  (overwrites)\n');
+    expect(io.out).toMatch(/1 existing file will be replaced \(a real run also needs --force\)/);
+    expect(io.out).toMatch(/Dry run — nothing was written/);
+    expect(readFileSync(join(cwd, 'app/README.md'), 'utf8')).toBe('mine');
+    expect(existsSync(join(cwd, 'app/package.json'))).toBe(false);
   });
 
   test('a directory holding only .git counts as empty', async () => {

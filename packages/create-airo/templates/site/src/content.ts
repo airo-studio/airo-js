@@ -47,6 +47,18 @@ export const SITE: Site = {
 };
 
 /**
+ * The words that are not content but still show on the page: the back link,
+ * and what `server.ts` writes itself for a 404 or a sign-in refusal. Kept
+ * here so every visible string is in this file.
+ */
+export const COPY = {
+  backToIndex: '← all posts',
+  notFound: 'Not found',
+  nothingAt: 'Nothing lives at',
+  signInRequired: 'Sign-in required',
+};
+
+/**
  * The third post has an empty `updatedAt`, deliberately. The crawler adapter
  * refuses to publish a page that cannot say when it last changed, so that one
  * url answers 404 and stays out of the sitemap while the others publish

@@ -21,6 +21,8 @@ export interface CliArgs {
   yes: boolean;
   dryRun: boolean;
   force: boolean;
+  /** Pin `@airo-js/*` to exact versions instead of `^` ranges. */
+  exact: boolean;
   help: boolean;
   version: boolean;
 }
@@ -30,6 +32,7 @@ const OPTIONS = {
   yes: { type: 'boolean', short: 'y' },
   'dry-run': { type: 'boolean' },
   force: { type: 'boolean' },
+  exact: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
 } as const;
@@ -56,6 +59,7 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
     yes: values.yes === true,
     dryRun: values['dry-run'] === true,
     force: values.force === true,
+    exact: values.exact === true,
     help: values.help === true,
     version: values.version === true,
   };
@@ -76,7 +80,9 @@ Options:
   -t, --template <name>  Which starter to use
   -y, --yes              Accept defaults and never prompt
       --dry-run          List the files that would be written; write nothing
-      --force            Write into a directory that is not empty
+      --force            Write into a directory that is not empty,
+                         replacing the files marked (overwrites)
+      --exact            Pin @airo-js packages to exact versions, not ^ ranges
   -h, --help             Show this help
   -v, --version          Show the version
 

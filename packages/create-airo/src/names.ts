@@ -13,7 +13,7 @@ export interface ProjectNames {
   targetDir: string;
   /** npm package name: lowercase, `[a-z0-9-]`. */
   packageName: string;
-  /** Human title for READMEs and page headings: `my-app` → `My App`. */
+  /** Human title for READMEs and page headings: `my-app` → `My App`, `GreenGrocer` → `GreenGrocer`. */
   displayName: string;
   /** `Cartridge.id`. */
   cartridgeId: string;
@@ -59,21 +59,30 @@ export function toElementName(slug: string): string {
   return name;
 }
 
-function toDisplayName(slug: string): string {
-  return slug
-    .split('-')
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+/**
+ * `my-app` → `My App`, built from the name as typed rather than from the
+ * slug, because the slug has already lost the casing. A word the user
+ * capitalised keeps its capitals (`GreenGrocer` stays `GreenGrocer`, not
+ * `Greengrocer`; `iPhoneRepair` stays as typed); an all-lowercase word gets
+ * its first letter raised. Letters outside ASCII survive here, even though
+ * the slug drops them.
+ */
+function toDisplayName(raw: string): string {
+  const words = raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return toDisplayName(FALLBACK);
+  return words
+    .map((word) => (/\p{Lu}/u.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))
     .join(' ');
 }
 
 export function deriveNames(input: string, cwd: string): ProjectNames {
   const targetDir = resolve(cwd, input);
-  const slug = toSlug(basename(targetDir));
+  const raw = basename(targetDir);
+  const slug = toSlug(raw);
   return {
     targetDir,
     packageName: slug,
-    displayName: toDisplayName(slug),
+    displayName: toDisplayName(raw),
     cartridgeId: slug,
     mailboxName: `__AIRO_${slug.toUpperCase().replace(/-/g, '_')}_PAGES__`,
     elementName: toElementName(slug),
