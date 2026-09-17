@@ -19,7 +19,13 @@ export interface TemplateInfo {
   nextScripts: readonly string[];
 }
 
-export const TEMPLATES: readonly TemplateInfo[] = [];
+export const TEMPLATES: readonly TemplateInfo[] = [
+  {
+    name: 'site',
+    description: 'A server-rendered site that hydrates, with search-engine and AI-agent surfaces',
+    nextScripts: ['dev'],
+  },
+];
 
 /** Used by `--yes` when no `--template` is given. */
 export const DEFAULT_TEMPLATE = 'site';
