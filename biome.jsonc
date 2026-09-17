@@ -9,7 +9,14 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
-			"examples/*/src/**/*.ts"
+			"examples/*/src/**/*.ts",
+			// create-airo's templates are copied into strangers' projects, so
+			// a lint finding there ships to every one of them. Placeholders are
+			// all inside strings, so the sources lint as ordinary TypeScript.
+			"packages/create-airo/templates/*/src/**/*.ts",
+			"packages/create-airo/templates/*/test/**/*.ts",
+			// The release and e2e scripts gate what ships; they get the same rules.
+			"scripts/**/*.mjs"
 		]
 	},
 

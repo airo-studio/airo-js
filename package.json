@@ -26,6 +26,7 @@
     "lint:fix": "biome check . --write",
     "knip": "knip",
     "knip:audit": "knip --include-entry-exports",
+    "e2e:create-airo": "node scripts/e2e-create-airo.mjs",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "yalc:publish": "pnpm build && node scripts/yalc-publish.mjs publish",
     "yalc:push": "pnpm build && node scripts/yalc-publish.mjs push"
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "knip": "^6.34.0",
+    "playwright": "^1.63.0",
     "typescript": "^5.5.0"
   }
 }
