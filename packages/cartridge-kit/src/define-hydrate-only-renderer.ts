@@ -79,15 +79,19 @@ export interface HydrateOnlyRendererOptions<
   ) => HydrateCleanup | void;
 }
 
+/**
+ * One short message, because it ships in every browser bundle that uses
+ * this factory — the long version, with the table of paths that reach it
+ * and what to do about each, is best-practices §5.4a. It names the page,
+ * the method and the package, which is what a stack trace in a stranger's
+ * app needs.
+ */
 function refuse(
   method: 'render' | 'renderSSR',
   ctx: RenderContext<string, unknown>,
 ): never {
-  const where = `page "${ctx.page.id}" (pageType "${ctx.page.type}")`;
   throw new Error(
-    method === 'renderSSR'
-      ? `[@airo-js/cartridge-kit] renderSSR() on a hydrate-only view: ${where} carries listeners, not a template, so it cannot render on the server. This is the browser half of a split view — the server cartridge needs the full renderer (defineSSRSafeRenderer).`
-      : `[@airo-js/cartridge-kit] render() on a hydrate-only view: ${where} carries listeners, not a template, so it cannot paint. Something asked it to: a mode 'csr' mount, a remount from update(), a client-side navigation, or a view whose SSR was skipped. Give this page a full renderer in this bundle, or drop it from views[] and load one through resolveView / the chunk mailbox.`,
+    `[@airo-js/cartridge-kit] ${method}() on a hydrate-only view: page "${ctx.page.id}" (pageType "${ctx.page.type}") holds listeners, not a template. Give it a full renderer here, or load one through resolveView. See best-practices §5.4a.`,
   );
 }
 

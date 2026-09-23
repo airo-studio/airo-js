@@ -90,7 +90,7 @@ describe('the paths that would need a template', () => {
   });
 
   test('renderSSR() throws, saying this is the browser half', () => {
-    expect(() => renderer().renderSSR?.(root(), ctx())).toThrow(/renderSSR\(\).*browser half/s);
+    expect(() => renderer().renderSSR?.(root(), ctx())).toThrow(/renderSSR\(\) on a hydrate-only view/);
   });
 
   test('the error names this package, so a stack in a consumer app is placeable', () => {
