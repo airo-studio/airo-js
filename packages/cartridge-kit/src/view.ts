@@ -48,8 +48,16 @@ export interface ViewDefinition<TData, TConfig> {
   /** Host-app template picker affordance. Optional. */
   preview?: { thumbnail: string; description: string };
 
-  /** Capabilities the host app cares about for filtering / SSR routing. */
-  capabilities?: ('responsive' | 'ssr-safe' | 'hydratable' | 'csr-only')[];
+  /**
+   * Capabilities the host app cares about for filtering / SSR routing.
+   *
+   * `'hydrate-only'` (0.11.2) marks the BROWSER half of a split view: it
+   * attaches listeners to server-rendered markup and holds no template, so
+   * it cannot paint. Declared by views built with
+   * `defineHydrateOnlyRenderer`; the server cartridge keeps the full
+   * renderer for the same page type.
+   */
+  capabilities?: ('responsive' | 'ssr-safe' | 'hydratable' | 'csr-only' | 'hydrate-only')[];
 
   /**
    * Optional raw CSS string the view declares for its own markup. The

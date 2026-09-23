@@ -2,6 +2,23 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why the hydrate-only renderer is a patch, on two packages
+
+Both changes are additive: a new helper and a new capability value in `@airo-js/cartridge-kit`, a field `@airo-js/ssr` already received but ignored. No existing signature moves, nothing renders differently unless a consumer asks for it, so each package takes its own patch rather than the line taking a minor — `@airo-js/cartridge-kit` 0.11.1 and `@airo-js/ssr` 0.11.2, with core, runtime, embed, mcp and log where they were. `CONTRACT_VERSION` stays `0.10.0`: a helper and a widened capability union help consumers implement the existing contract, they do not move it.
+
+Both come from the same consumer report on a live site. The bytes one saves are theirs to measure, so the numbers below are theirs.
+
+## `@airo-js/cartridge-kit` 0.11.1 — 2026-09-23
+
+### Added
+- **`defineHydrateOnlyRenderer({ hydrate })` — the browser half of a view.** On a server-rendered site the browser never calls `template`: `PageManager.hydrateEntry` calls `hydrate()` and never `render()`. But `defineSSRSafeRenderer` takes `template` as a plain field and closes over it, so the browser bundle holds every template and everything templates import — markup helpers, UI components, copy. A consumer serving full-page SSR measured **67% of a 44 kB gzip entry bundle as markup machinery that never runs**, against 25% for the framework itself. Chunking cannot remove it: reaching `hydrate()` means resolving the view, which means fetching the chunk the template sits in, and that consumer measured the split as *bigger* on three of five pages. The template has to be absent from the browser's module graph, so this factory builds a renderer from a `hydrate` handler alone. Both halves import the same handler, so listeners cannot drift; only the server half imports the template. `render` and `renderSSR` throw, naming the page and the ways out — they are reachable only from a `csr` mount, a remount, a client-side navigation, a `csr-only` view, or the browser cartridge reaching the SSR runner by mistake. Best practices §5.4a has the table of those paths and when each bites.
+- **`capabilities: ['hydrate-only']`** on `ViewDefinition`, to declare that half in the page graph. Nothing in the framework branches on it yet; it is the honest declaration, and what a lint or a build check can read.
+
+## `@airo-js/ssr` 0.11.2 — 2026-09-23
+
+### Fixed
+- **`headFromPublication` dropped the crawler surface's `alternates`, so hreflang never reached `<head>`.** `defineCrawlerSurfaceAdapter` has emitted `alternates: [{ hreflang, href }]` since 0.11.0, `DocumentHead.links` has had the shape for it just as long, and this helper — the one seam between them — ignored the field and warned about nothing. A two-language site served a canonical and no `<link rel="alternate">`: the duplicate-content shape, on the language axis. Reported against a live site that had mapped it in host code instead. The fold keys on shape like everything else here (`hreflang` and `href`, both non-empty strings), respects the publish gate (an output `validate()` rejected contributes nothing), and merges by `hreflang` across adapters so a later one overrides a language without dropping the others. The patch replaces `links` rather than merging into a host's own — spread it first and put your `links` after it, or feed them through the adapter's `alternates` selector.
+
 ## Why `unknownPage` ships as `@airo-js/ssr` 0.11.1
 
 It adds one optional field whose default leaves every result, and every log line, exactly as 0.11.0 produced them. So it is a patch on the one package that owns it, not a new line: a project on `^0.11.0` picks it up with an ordinary install and opts in with one line. That includes projects scaffolded by the `create-airo` beta, which pin `^0.11`. The field is part of what 1.0 freezes.

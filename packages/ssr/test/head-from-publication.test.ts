@@ -92,6 +92,52 @@ describe('headFromPublication', () => {
     expect(patch.jsonLd).toEqual([{ '@type': 'Product' }]);
   });
 
+  test('folds alternates into hreflang links — the field the factory emits', () => {
+    const patch = headFromPublication([
+      result({
+        output: {
+          canonical: 'https://x.test/a',
+          alternates: [
+            { hreflang: 'pt-PT', href: 'https://x.test/a' },
+            { hreflang: 'en-GB', href: 'https://x.test/en/a' },
+            { hreflang: 'x-default', href: 'https://x.test/a' },
+          ],
+        },
+      }),
+    ]);
+    expect(patch.links).toEqual([
+      { rel: 'alternate', href: 'https://x.test/a', attrs: { hreflang: 'pt-PT' } },
+      { rel: 'alternate', href: 'https://x.test/en/a', attrs: { hreflang: 'en-GB' } },
+      { rel: 'alternate', href: 'https://x.test/a', attrs: { hreflang: 'x-default' } },
+    ]);
+  });
+
+  test('alternates obey the publish gate like everything else', () => {
+    const output = { canonical: '', alternates: [{ hreflang: 'pt-PT', href: 'https://x.test/a' }] };
+    expect(headFromPublication([result({ output, included: false })]).links).toBeUndefined();
+  });
+
+  test('a later adapter overrides one language without dropping the others', () => {
+    const patch = headFromPublication([
+      result({ output: { alternates: [{ hreflang: 'pt-PT', href: 'https://x.test/old' }, { hreflang: 'en-GB', href: 'https://x.test/en' }] } }),
+      result({ output: { alternates: [{ hreflang: 'pt-PT', href: 'https://x.test/new' }] } }),
+    ]);
+    expect(patch.links).toEqual([
+      { rel: 'alternate', href: 'https://x.test/new', attrs: { hreflang: 'pt-PT' } },
+      { rel: 'alternate', href: 'https://x.test/en', attrs: { hreflang: 'en-GB' } },
+    ]);
+  });
+
+  test('ignores a malformed or empty alternates field rather than emitting junk links', () => {
+    for (const alternates of [[], 'pt-PT', [{ hreflang: 'pt-PT' }], [{ hreflang: '', href: 'https://x.test/a' }], [null]]) {
+      expect(headFromPublication([result({ output: { canonical: 'https://x.test/a', alternates } })]).links).toBeUndefined();
+    }
+  });
+
+  test('no alternates, no links key — pages that are not translated are untouched', () => {
+    expect(headFromPublication([result()]).links).toBeUndefined();
+  });
+
   test('an empty result set yields an empty patch', () => {
     expect(headFromPublication([])).toEqual({});
   });
@@ -136,6 +182,42 @@ describe('adapter → head → document, end to end', () => {
     expect(html).toContain('<link rel="canonical" href="https://label.test/first">');
     expect(html).toContain('<meta property="og:title" content="First">');
     expect(html).toContain('<meta name="twitter:card" content="summary">');
+  });
+
+  test('a two-language site gets its hreflang links in <head> (msg_mu8bej8p_30c6c0)', async () => {
+    // Until 0.11.2 the factory emitted `alternates` and this path dropped
+    // them, so a translated page served a canonical and no hreflang.
+    const translated = defineCrawlerSurfaceAdapter<Doc, Cfg>({
+      requires: [],
+      select: {
+        canonical: (d, c) => `${c.config.siteUrl}/${d.slug}`,
+        title: (d) => d.title,
+        description: () => 'A record.',
+        alternates: (d, c) => [
+          { hreflang: 'pt-PT', href: `${c.config.siteUrl}/${d.slug}` },
+          { hreflang: 'en-GB', href: `${c.config.siteUrl}/en/${d.slug}` },
+          { hreflang: 'x-default', href: `${c.config.siteUrl}/${d.slug}` },
+        ],
+      },
+    });
+    const output = await translated.generate({ title: 'First', slug: 'first' }, ctx);
+    const validation = translated.validate(output);
+
+    const html = renderDocument({
+      head: {
+        lang: 'pt-PT',
+        title: 'First',
+        ...headFromPublication([
+          { adapterId: translated.id, format: 'head-meta', delivery: 'inline-in-host', output, validation, included: true } as AdapterRunResult,
+        ]),
+      },
+      body: '<main>olá</main>',
+    });
+
+    expect(html).toContain('<link rel="canonical" href="https://label.test/first">');
+    expect(html).toContain('<link rel="alternate" href="https://label.test/first" hreflang="pt-PT">');
+    expect(html).toContain('<link rel="alternate" href="https://label.test/en/first" hreflang="en-GB">');
+    expect(html).toContain('<link rel="alternate" href="https://label.test/first" hreflang="x-default">');
   });
 
   test('a bundle blocked by validate() NEVER reaches the document', async () => {
