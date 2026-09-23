@@ -70,6 +70,28 @@ my-cartridge/
 
 This is **transparent**: no build-time magic, no conditional exports tooling. Cartridge author writes the split once. Bundlers tree-shake at the package boundary; nothing leaks.
 
+### The browser half of a view: listeners without templates (0.11.1)
+
+The two-envelope split above keeps adapters and MCP tools out of the browser. It does not keep out **view templates**, and on a server-rendered site those are usually bigger: `defineSSRSafeRenderer` takes `template` as a plain field and closes over it, so the bundle holds the template and everything it imports — markup helpers, UI components, copy. A consumer measured two-thirds of their entry bundle as markup code that a hydrate mount never calls.
+
+Chunking does not remove it. Reaching `hydrate()` means resolving the view, which means fetching the chunk the template sits in. The template has to be **absent from the browser's module graph**, not deferred inside it.
+
+So split the view the same way as the cartridge — one `hydrate` handler, imported by both halves:
+
+```ts
+// hydrate.ts — shared, so listeners cannot drift
+export function hydrateProduct(root: HTMLElement, ctx: Ctx) { … }
+
+// cartridge.server.ts
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct })
+
+// cartridge.browser.ts — nothing in its graph imports the template
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct })
+capabilities: [hydrate-only]
+```
+
+`PageManager.hydrateEntry` calls `hydrate()` and never `render()`, so a `mode: hydrate` mount needs nothing else. `render` and `renderSSR` on the browser half throw, naming the page: they are reachable only from a `mode: csr` mount, a remount after `update()`, a client-side navigation, a `csr-only` view, or the browser cartridge reaching the SSR runner by mistake. If your site takes one of those paths, give that page a full renderer in the browser too, or leave it out of `views[]` and load one through `resolveView` / the chunk mailbox.
+
 ### errorPolicy on Transformers
 
 Each Transformer can declare `errorPolicy: 'fail-render' | 'skip'`. Default is `'fail-render'` — when a transform throws, the render breaks. Pick `'skip'` only for transforms whose absence degrades gracefully (sort, enrichment). **Never** use `'skip'` for filters whose absence widens visibility past a tenant's configured scope.

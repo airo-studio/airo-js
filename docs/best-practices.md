@@ -999,6 +999,46 @@ function paint(host: HTMLElement, html: string): void {
 
 If you need a `Document` without a host element (a pure utility that emits markup), accept the document as a parameter. Never read `globalThis.document` directly from cartridge code — make the environment the caller's concern.
 
+### 5.4a The browser half of a view — listeners without templates (0.11.1)
+
+**On a site whose pages are rendered by the server, the browser never calls `template`.** `PageManager.hydrateEntry` calls `hydrate()`; `render()` is for a fresh client-side paint. Yet `defineSSRSafeRenderer` takes `template` as a plain field and closes over it, so every bundle that builds the view holds the template **and everything the template imports** — markup helpers, UI components, copy, icons.
+
+A consumer serving full-page SSR measured their entry bundle at 44 kB gzip and attributed **67% of it to markup machinery that never runs in a browser**. The framework's own share was 25%.
+
+**Chunking cannot remove it.** Moving the view into a per-page chunk still leaves the template in the bytes that page downloads, because reaching `hydrate()` means resolving the view, which means fetching that chunk — and the split costs the sharing that kept one copy of the UI helpers. The same consumer measured it: bigger on three of five pages. The template must be **absent from the browser's module graph**, not deferred inside it.
+
+So split the view, not the chunk. One `hydrate` handler, imported by both halves:
+
+```ts
+// hydrate.ts — shared by both halves, so listeners cannot drift
+export function hydrateProduct(root: HTMLElement, ctx: Ctx): () => void { … }
+
+// cartridge.server.ts — the full renderer, with the template
+import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct })
+
+// cartridge.browser.ts — nothing in its import graph reaches the template
+import { defineHydrateOnlyRenderer } from '@airo-js/cartridge-kit';
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct })
+capabilities: ['hydrate-only']
+```
+
+This is §2.5's two-envelope pattern applied to a view instead of a cartridge: `runtime.ts` builds its views with `defineHydrateOnlyRenderer`, `full.ts` with `defineSSRSafeRenderer`. Both cartridges declare the same page types, so the page graph is identical on both sides.
+
+**What you give up, and when it bites.** `render` and `renderSSR` on the browser half throw, naming the page. They are reachable only from paths a server-rendered page does not take:
+
+| path | reached when | if you need it |
+|---|---|---|
+| `mode: 'csr'` mount | a shell paints from scratch (a 401 sign-in shell whose gate *allows*) | full renderer for that page in the browser |
+| remount | `update()` / `updatePages()` outside `hotSwapKeys` | full renderer, or accept a server round trip |
+| client-side navigation | a router is enabled and the visitor moves pages | full renderer for every reachable page |
+| `csr-only` view | SSR skipped the page by capability | that page was never server-rendered — keep it full |
+| SSR runner | the browser cartridge reached the server by mistake | a bug: pass the server cartridge |
+
+A page that needs one can keep its full renderer, or leave `views[]` and arrive through `resolveView` / the chunk mailbox (§2.5b) — one request on a path that is rare by construction, instead of bytes on every visit. Throwing is deliberate: the alternative is a page that silently paints nothing.
+
+**Do not reach for this on a widget embedded in someone else's page.** There the host may mount CSR, remount on every edit, and navigate — the template belongs in the browser. This is for surfaces that render every page on the server.
+
 ### 5.5 Capability flags — when a view can't SSR
 
 Some renderers can't run server-side: they depend on `IntersectionObserver`, `requestAnimationFrame`, `window.navigator.geolocation`, third-party libraries that need a real browser (maps, video players, WebGL canvases). Declare the limitation honestly on the `ViewDefinition`:

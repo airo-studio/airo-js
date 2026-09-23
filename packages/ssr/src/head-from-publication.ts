@@ -46,11 +46,27 @@ interface CrawlerSurfaceLike {
   canonical?: unknown;
   openGraph?: unknown;
   twitterCard?: unknown;
+  alternates?: unknown;
+}
+
+interface AlternateLike {
+  hreflang: string;
+  href: string;
 }
 
 function isRecordOfStrings(v: unknown): v is Record<string, string> {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   return Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
+}
+
+/** `[{ hreflang, href }]`, both non-empty strings. Keyed on shape, like the rest. */
+function isAlternates(v: unknown): v is readonly AlternateLike[] {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  return v.every((entry) => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const { hreflang, href } = entry as Partial<AlternateLike>;
+    return typeof hreflang === 'string' && hreflang !== '' && typeof href === 'string' && href !== '';
+  });
 }
 
 /**
@@ -63,6 +79,14 @@ function isRecordOfStrings(v: unknown): v is Record<string, string> {
  * records merge key-by-key rather than replacing wholesale — so one
  * adapter can contribute `og:image` without clobbering another's
  * `og:title`.
+ *
+ * `alternates: [{ hreflang, href }]` becomes `links: [{ rel: 'alternate',
+ * href, attrs: { hreflang } }]` (0.11.2). `defineCrawlerSurfaceAdapter`
+ * emits that field, and until 0.11.2 this function dropped it, so a
+ * multi-language site served a canonical and no hreflang unless the host
+ * mapped it itself. The patch REPLACES `links` rather than merging into
+ * yours: spread it first and put your own `links` after it if you have any,
+ * or fold your links into the adapter's `alternates` selector.
  */
 export function headFromPublication(
   results: readonly AdapterRunResult[],
@@ -72,6 +96,10 @@ export function headFromPublication(
   const openGraph: Record<string, string> = {};
   const twitter: Record<string, string> = {};
   const jsonLd: unknown[] = [];
+  // Keyed by hreflang so a later adapter overrides an earlier one's href for
+  // the same language, the way `openGraph` merges key-by-key. Insertion order
+  // is the emitted order.
+  const alternates = new Map<string, string>();
 
   for (const result of results) {
     // The hard publish gate. Never serve output that failed validation.
@@ -90,11 +118,21 @@ export function headFromPublication(
     }
     if (isRecordOfStrings(output.openGraph)) Object.assign(openGraph, output.openGraph);
     if (isRecordOfStrings(output.twitterCard)) Object.assign(twitter, output.twitterCard);
+    if (isAlternates(output.alternates)) {
+      for (const { hreflang, href } of output.alternates) alternates.set(hreflang, href);
+    }
   }
 
   if (Object.keys(openGraph).length > 0) patch.openGraph = openGraph;
   if (Object.keys(twitter).length > 0) patch.twitter = twitter;
   if (jsonLd.length > 0) patch.jsonLd = jsonLd;
+  if (alternates.size > 0) {
+    patch.links = [...alternates].map(([hreflang, href]) => ({
+      rel: 'alternate',
+      href,
+      attrs: { hreflang },
+    }));
+  }
 
   return patch;
 }

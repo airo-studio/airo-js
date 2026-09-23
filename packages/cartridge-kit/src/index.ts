@@ -171,6 +171,9 @@ export type {
 } from './define-ssr-safe-renderer.js';
 export { defineSSRSafeRenderer } from './define-ssr-safe-renderer.js';
 
+export type { HydrateOnlyRendererOptions } from './define-hydrate-only-renderer.js';
+export { defineHydrateOnlyRenderer } from './define-hydrate-only-renderer.js';
+
 export type { DeepPartial } from './deep-partial.js';
 export type { CartridgeRenderContext } from './render-context.js';
 
@@ -181,7 +184,7 @@ export {
 
 export const PACKAGE_NAME = '@airo-js/cartridge-kit';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.11.0';
+export const VERSION = '0.11.1';
 /**
  * Cartridge contract surface version. Ticks ONLY when the contract
  * surface changes in a way consumers must adapt to — interface
