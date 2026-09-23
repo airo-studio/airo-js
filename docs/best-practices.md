@@ -868,6 +868,22 @@ The order of the three reads matters. **First `fellBack.reason === 'unknown-page
 
 ---
 
+### 4.10 Time-dependent data — the clock is an input, and it decides your cache
+
+A price that moves, a countdown, an offer that expires: the value depends on *when* you rendered, and `template(ctx)` may not read a clock (§5.1). So the host picks the instant, once, and hands it in.
+
+**Choose `now` per request, in the host, and put it in the snapshot.** The DataSource takes it as input; the snapshot carries the derived values *and the instant they are for* (`asOf`). Every surface — the page, the JSON-LD, `llms.txt`, an MCP tool — then reads one set of numbers that cannot disagree, and a test can pin an instant. Never compute the time inside a transformer: transformers are pure and shape-preserving, and `now` is an input.
+
+**Print the value the current window opened at, not the value at `now`.** A page that says what the price *became* at the start of the window it belongs to is true for the whole life of that window — including in a shared cache — while a page that says `priceAt(now)` is stale a second after it is served. That is the difference between a cache you can reason about and one you cannot.
+
+**The browser must adopt the server's instant, not its own.** A hydrating mount runs your DataSource again in the browser; if it picks up a fresh clock, the snapshot no longer matches the markup it just adopted. Either embed the snapshot the page was rendered from and pass it as `preloadedData`, or print `asOf` on the mount root and feed it back through `dataSourceInput`. A ticking display belongs in `hydrate()`, which may read the clock — return a cleanup that clears the interval.
+
+**Cache to the end of the window.** `Cache-Control: public, max-age=<seconds until the window ends>` (and the same `s-maxage`), falling back to `no-store` when that is under a second or two. The HTML and its JSON-LD came from one snapshot, so a cached copy is internally consistent; the only risk is that it outlives its window. Machine routes quoting the same values — `llms.txt`, a feed — need the same ceiling, or should leave the moving value out.
+
+**Expiry is data, not validation.** `validate(output)` sees only the adapter's output: no snapshot, no context, no clock. "Sold", "ended", "withdrawn" belong in the snapshot, and each surface decides from there — an `Offer` carrying `availability: SoldOut`, or a `generate()` that omits the price so `validate()` blocks that block while the page still renders (§5.10a's canonical rule, applied to time).
+
+**One caveat outside the framework:** schema.org types `priceValidUntil` as a `Date`, not a `DateTime`. A window that closes in minutes cannot be stated precisely there, and today's date claims the price holds all day. Check it against your own search requirements before emitting it.
+
 ## 5. SSR-safe rendering
 
 SSR-safe rendering is the discipline that lets a cartridge produce identical HTML on a server (Node, Deno, edge function — anywhere with a DOM polyfill) and in a browser, then hydrate listeners against that server-painted markup without re-rendering. Three audiences benefit:
