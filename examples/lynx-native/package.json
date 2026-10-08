@@ -1,0 +1,28 @@
+{
+  "name": "@airo-js-examples/lynx-native",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An airo-js cartridge's server-rendered pages as native Lynx UI: @airo-js/lynx/build normalises the CSS, @airo-js/lynx/runtime mounts the HTML and runs the hydrate handlers through the DOM facade. The pages come from an in-bundle stand-in for the server, so the card runs with no backend.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "rsbuild build",
+    "dev": "rsbuild dev",
+    "check": "node scripts/check-build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@airo-js/cartridge-kit": "workspace:*",
+    "@airo-js/core": "workspace:*",
+    "@airo-js/log": "workspace:*",
+    "@airo-js/lynx": "workspace:*"
+  },
+  "devDependencies": {
+    "@lynx-js/rsbuild-plugin": "0.1.3",
+    "@lynx-js/vanilla-rsbuild-plugin": "0.1.2",
+    "@rsbuild/core": "2.2.12",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

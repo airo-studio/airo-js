@@ -1,0 +1,728 @@
+/**
+ * The bounded DOM facade: the element objects hydrate code receives on
+ * device, and the event system behind them.
+ *
+ * A cartridge's hydrate handlers were written against the browser DOM. On
+ * Lynx there is no DOM, but most of what those handlers do — find elements,
+ * read data attributes, show and hide, change text, listen for taps — maps
+ * onto the node model and Element PAPI directly. So they run unchanged
+ * against this fixed subset:
+ *
+ * | member | on device |
+ * |---|---|
+ * | `querySelector(All)`, `closest`, `matches`, `contains` | answered from the node model (`matcher.ts`) |
+ * | `getAttribute`, `setAttribute`, `removeAttribute`, `hasAttribute`, `toggleAttribute`, `dataset`, `hidden`, `disabled`, `id`, `className`, `classList` | the model's attributes; every write also updates the element's mirror classes |
+ * | `textContent`, `innerHTML`, `insertAdjacentHTML` | the model, re-projected through the tokenizer and tree pass |
+ * | `value` | form controls: mirrored from the Lynx `input` event, pushed with `setValue` |
+ * | `addEventListener`, `removeEventListener` | `click`, `input`, `change`, `submit`, `focus`, `blur` (below) |
+ * | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only, from the model |
+ *
+ * Every other member, and every browser global that is not DOM (`window`,
+ * `document`, `location`, `history`, storage, `navigator`, observers,
+ * `fetch`), throws a `LynxRefusalError` naming it, after logging it and
+ * reporting it to the host. The subset does not grow by accident: a new
+ * member is a new line in the table above.
+ *
+ * ## Events
+ *
+ * ```
+ *  Lynx (native)                          facade (what hydrate code sees)
+ *  tap on any element ──────────────────► click, bubbling from the tapped element
+ *                                           └─ not prevented: <a href> → onNavigate (link)
+ *                                              submit button → submit on its form
+ *                                                 └─ not prevented → onNavigate (form)
+ *  focus on input/textarea ─────────────► focus     (value remembered)
+ *  input ───────────────────────────────► input     (value mirrored first)
+ *  blur ────────────────────────────────► change if the value differs from focus, then blur
+ *  confirm (return key) ────────────────► change if it differs; in an input inside a form,
+ *                                           the form's default button is clicked, or a
+ *                                           one-field form submits
+ * ```
+ *
+ * One native `tap` listener on the page element feeds every `click`; the
+ * facade walks the model from the tapped element to the root itself, so
+ * `event.target`, `currentTarget` and `stopPropagation` behave as in a
+ * browser whatever Lynx's own bubbling does.
+ *
+ * ## Failing
+ *
+ * Listeners attached during a hydrate call are recorded; if the call throws,
+ * they are removed again, so a page is never half wired. A listener that
+ * throws during an event is reported and the dispatch carries on, as a
+ * browser's does.
+ */
+
+import { type ErrorReporter, type LynxErrorPhase, refuse, report } from './errors.js';
+import { closest, matches, querySelector, querySelectorAll } from './matcher.js';
+import {
+  type NavigateRequest,
+  blockingFields,
+  defaultButton,
+  formOf,
+  formRequest,
+  isSubmitButton,
+  linkRequest,
+} from './navigation.js';
+import {
+  contains,
+  fromParsed,
+  insertChildren,
+  type LynxElement,
+  type LynxNode,
+  LynxText,
+  serializeChildren,
+  textContent,
+} from './node-model.js';
+import type { NativeEvent } from './papi.js';
+import { tokenize } from './tokenize.js';
+import type { ControlEvent, NativeTree } from './tree.js';
+
+/** The events a listener can be added for on device. */
+const SUPPORTED_EVENTS = new Set(['click', 'input', 'change', 'submit', 'focus', 'blur']);
+
+/** Elements whose `value` reflects their `value` attribute. */
+const VALUE_ATTRIBUTE_TAGS = new Set(['button', 'data', 'option', 'li', 'param', 'meter', 'progress']);
+
+/** Keys that are introspection, not DOM use: answered as absent, never refused. */
+const INERT_KEYS = new Set(['then', 'toJSON', 'asymmetricMatch', '$$typeof', 'constructor', 'nodeValue']);
+
+type Listener = (event: FacadeEventLike) => unknown;
+
+interface Registered {
+  fn: Listener;
+  once: boolean;
+}
+
+interface Recording {
+  added: { el: LynxElement; type: string; fn: Listener }[];
+}
+
+/** What a listener receives. */
+export interface FacadeEventLike {
+  readonly type: string;
+  readonly target: unknown;
+  readonly currentTarget: unknown;
+  readonly bubbles: boolean;
+  readonly cancelable: boolean;
+  readonly defaultPrevented: boolean;
+  readonly submitter?: unknown;
+  readonly timeStamp: number;
+  preventDefault(): void;
+  stopPropagation(): void;
+  stopImmediatePropagation(): void;
+}
+
+export interface FacadeHostOptions {
+  tree: NativeTree;
+  reporter?: ErrorReporter;
+  /** A link was tapped or a form submitted, and nothing prevented it. */
+  navigate: (request: NavigateRequest) => void;
+}
+
+const camel = (dataName: string): string => dataName.slice(5).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+const kebab = (key: string): string => `data-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+
+/**
+ * One per mount: the element facades, the listener registry and the event
+ * loop between Lynx and hydrate code.
+ */
+export class FacadeHost {
+  readonly tree: NativeTree;
+  /** Which phase a refusal belongs to, for the host's `onError`. */
+  phase: LynxErrorPhase = 'hydrate';
+  private readonly proxies = new WeakMap<LynxElement, object>();
+  private readonly unwrapped = new WeakMap<object, LynxElement>();
+  private readonly listeners = new Map<LynxElement, Map<string, Registered[]>>();
+  private readonly recordings = new Set<Recording>();
+
+  constructor(private readonly opts: FacadeHostOptions) {
+    this.tree = opts.tree;
+  }
+
+  // ── refusals ──────────────────────────────────────────────────────────────
+
+  refuse(member: string, detail?: string): never {
+    return refuse(this.opts.reporter, this.phase, member, detail);
+  }
+
+  /** Run `fn`; a refusal or parse error is reported (once) and rethrown. */
+  guard<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (err) {
+      throw report(this.opts.reporter, this.phase, err);
+    }
+  }
+
+  // ── facades ───────────────────────────────────────────────────────────────
+
+  /** The object hydrate code holds for `el`. The same one every time. */
+  facade(el: LynxElement): object {
+    const hit = this.proxies.get(el);
+    if (hit) return hit;
+    const target = new ElementFacade(el, this);
+    const proxy = refusingProxy(target, 'Element', ELEMENT_MEMBERS, ELEMENT_SETTABLE, this);
+    this.proxies.set(el, proxy);
+    this.unwrapped.set(proxy, el);
+    return proxy;
+  }
+
+  /** The model element behind a facade, or null for anything else. */
+  unwrap(value: unknown): LynxElement | null {
+    return (typeof value === 'object' && value !== null && this.unwrapped.get(value)) || null;
+  }
+
+  // ── attributes: the one write path, so mirror classes never lag ───────────
+
+  setAttribute(el: LynxElement, name: string, value: string): void {
+    const key = el.foreign ? name : name.toLowerCase();
+    el.attrs.set(key, value);
+    if (key === 'value' && (el.tag === 'input' || el.tag === 'textarea') && !el.valueDirty) {
+      el.value = value;
+      this.tree.pushValue(el);
+    }
+    this.tree.refreshAttributes(el, key);
+  }
+
+  removeAttribute(el: LynxElement, name: string): void {
+    const key = el.foreign ? name : name.toLowerCase();
+    if (!el.attrs.delete(key)) return;
+    this.tree.refreshAttributes(el, key);
+  }
+
+  // ── content ───────────────────────────────────────────────────────────────
+
+  /** Parse and check markup before anything changes, so a refusal leaves the page as it was. */
+  parse(html: string): LynxNode[] {
+    const nodes = fromParsed(tokenize(html));
+    this.tree.validate(nodes);
+    return nodes;
+  }
+
+  replaceChildren(el: LynxElement, nodes: LynxNode[]): void {
+    for (const child of el.children) child.parent = null;
+    el.children = [];
+    insertChildren(el, nodes);
+    this.tree.reproject(el);
+  }
+
+  // ── listeners ─────────────────────────────────────────────────────────────
+
+  addListener(el: LynxElement, type: string, fn: Listener, once: boolean): void {
+    const byType = this.listeners.get(el) ?? new Map<string, Registered[]>();
+    const list = byType.get(type) ?? [];
+    if (list.some((r) => r.fn === fn)) return;
+    list.push({ fn, once });
+    byType.set(type, list);
+    this.listeners.set(el, byType);
+    for (const r of this.recordings) r.added.push({ el, type, fn });
+  }
+
+  removeListener(el: LynxElement, type: string, fn: Listener): void {
+    const list = this.listeners.get(el)?.get(type);
+    if (!list) return;
+    const i = list.findIndex((r) => r.fn === fn);
+    if (i !== -1) list.splice(i, 1);
+  }
+
+  /** Start recording the listeners attached from now on. */
+  record(): Recording {
+    const r: Recording = { added: [] };
+    this.recordings.add(r);
+    return r;
+  }
+
+  stopRecording(r: Recording): void {
+    this.recordings.delete(r);
+  }
+
+  /** Remove every listener a recording saw added. */
+  rollback(r: Recording): void {
+    this.recordings.delete(r);
+    for (const { el, type, fn } of r.added) this.removeListener(el, type, fn);
+  }
+
+  /** How many listeners are attached in total; for tests and the device script. */
+  listenerCount(): number {
+    let n = 0;
+    for (const byType of this.listeners.values()) for (const list of byType.values()) n += list.length;
+    return n;
+  }
+
+  // ── dispatch ──────────────────────────────────────────────────────────────
+
+  /** Dispatch a facade event at `target`, bubbling to the root when it bubbles. */
+  dispatch(
+    target: LynxElement,
+    type: string,
+    init: { bubbles: boolean; cancelable: boolean; submitter?: LynxElement | null },
+  ): FacadeEventLike {
+    const event = new FacadeEvent(type, this.facade(target), init.bubbles, init.cancelable, init.submitter ? this.facade(init.submitter) : undefined);
+    const proxy = refusingProxy(event, 'Event', EVENT_MEMBERS, EVENT_SETTABLE, this) as FacadeEventLike;
+    const path: LynxElement[] = [];
+    for (let n: LynxElement | null = target; n; n = n.parent) {
+      path.push(n);
+      if (!init.bubbles) break;
+    }
+    const prior = this.phase;
+    this.phase = 'event';
+    try {
+      for (const el of path) {
+        const list = this.listeners.get(el)?.get(type);
+        if (!list?.length) continue;
+        event.currentTarget = this.facade(el);
+        for (const registered of [...list]) {
+          if (registered.once) this.removeListener(el, type, registered.fn);
+          try {
+            registered.fn.call(event.currentTarget, proxy);
+          } catch (err) {
+            report(this.opts.reporter, 'event', err);
+          }
+          if (event.immediateStopped) break;
+        }
+        if (event.stopped) break;
+      }
+    } finally {
+      this.phase = prior;
+      event.currentTarget = null;
+    }
+    return proxy;
+  }
+
+  /** A tap on `el`: `click`, then the browser's default action for links and submit buttons. */
+  click(el: LynxElement): void {
+    const button = closest(el, 'button');
+    if (button?.attrs.has('disabled')) return;
+    const event = this.dispatch(el, 'click', { bubbles: true, cancelable: true });
+    if (event.defaultPrevented) return;
+    const link = closest(el, 'a[href]');
+    if (link) {
+      const request = linkRequest(link);
+      if (request) this.opts.navigate(request);
+      return;
+    }
+    if (button && isSubmitButton(button)) {
+      const form = formOf(button);
+      if (form) this.submit(form, button);
+    }
+  }
+
+  /** Submit `form`: a cancellable `submit`, then the request. */
+  submit(form: LynxElement, submitter: LynxElement | null): void {
+    const event = this.dispatch(form, 'submit', { bubbles: true, cancelable: true, submitter });
+    if (event.defaultPrevented) return;
+    const request = formRequest(form, submitter);
+    if (request) this.opts.navigate(request);
+  }
+
+  /** The page's native `tap`, as Lynx delivers it. */
+  onTap(native: NativeEvent): void {
+    const target = native.target;
+    let el = typeof target?.uid === 'number' ? this.tree.byUid.get(target.uid) : undefined;
+    if (!el && target?.elementRefptr) {
+      el = this.tree.byUid.get(this.tree.papi.uniqueId(target.elementRefptr as object));
+    }
+    if (!el) return;
+    this.click(el);
+  }
+
+  /** A form control's native event (registered by the tree pass). */
+  onControlEvent(el: LynxElement, kind: ControlEvent, native: NativeEvent): void {
+    const value = native.detail?.value;
+    const update = (): void => {
+      if (typeof value === 'string' && value !== el.value) {
+        el.value = value;
+        el.valueDirty = true;
+      }
+    };
+    const commit = (): void => {
+      if (el.valueAtFocus !== null && el.value !== el.valueAtFocus) {
+        this.dispatch(el, 'change', { bubbles: true, cancelable: false });
+      }
+      el.valueAtFocus = el.value;
+    };
+    switch (kind) {
+      case 'focus':
+        update();
+        el.valueAtFocus = el.value;
+        this.dispatch(el, 'focus', { bubbles: false, cancelable: false });
+        break;
+      case 'input':
+        el.valueAtFocus ??= el.value;
+        update();
+        this.dispatch(el, 'input', { bubbles: true, cancelable: false });
+        break;
+      case 'blur':
+        update();
+        commit();
+        el.valueAtFocus = null;
+        this.dispatch(el, 'blur', { bubbles: false, cancelable: false });
+        break;
+      case 'confirm': {
+        update();
+        commit();
+        if (el.as !== 'input') break;
+        const form = formOf(el);
+        if (!form) break;
+        const button = defaultButton(form);
+        if (button) this.click(button);
+        else if (blockingFields(form) === 1) this.submit(form, null);
+        break;
+      }
+    }
+  }
+}
+
+// ── the element facade ───────────────────────────────────────────────────────
+
+class ClassList {
+  constructor(
+    private readonly el: LynxElement,
+    private readonly host: FacadeHost,
+  ) {}
+  private get tokens(): string[] {
+    return (this.el.attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
+  }
+  private write(tokens: string[]): void {
+    this.host.setAttribute(this.el, 'class', [...new Set(tokens)].join(' '));
+  }
+  get length(): number {
+    return this.tokens.length;
+  }
+  get value(): string {
+    return this.el.attrs.get('class') ?? '';
+  }
+  contains(token: string): boolean {
+    return this.tokens.includes(token);
+  }
+  add(...tokens: string[]): void {
+    this.write([...this.tokens, ...tokens]);
+  }
+  remove(...tokens: string[]): void {
+    this.write(this.tokens.filter((t) => !tokens.includes(t)));
+  }
+  toggle(token: string, force?: boolean): boolean {
+    const on = force ?? !this.contains(token);
+    if (on) this.add(token);
+    else this.remove(token);
+    return on;
+  }
+  toString(): string {
+    return this.value;
+  }
+}
+
+class ElementFacade {
+  readonly #el: LynxElement;
+  readonly #host: FacadeHost;
+
+  constructor(el: LynxElement, host: FacadeHost) {
+    this.#el = el;
+    this.#host = host;
+  }
+
+  // structure (read-only)
+  get nodeType(): number {
+    return 1;
+  }
+  get tagName(): string {
+    return this.#el.foreign ? this.#el.tag : this.#el.tag.toUpperCase();
+  }
+  get nodeName(): string {
+    return this.tagName;
+  }
+  get parentElement(): object | null {
+    return this.#el.parent ? this.#host.facade(this.#el.parent) : null;
+  }
+
+  // queries
+  querySelector(selector: string): object | null {
+    const el = this.#host.guard(() => querySelector(this.#el, selector));
+    return el && this.#host.facade(el);
+  }
+  querySelectorAll(selector: string): object[] {
+    return this.#host.guard(() => querySelectorAll(this.#el, selector)).map((el) => this.#host.facade(el));
+  }
+  closest(selector: string): object | null {
+    const el = this.#host.guard(() => closest(this.#el, selector));
+    return el && this.#host.facade(el);
+  }
+  matches(selector: string): boolean {
+    return this.#host.guard(() => matches(this.#el, selector));
+  }
+  contains(other: unknown): boolean {
+    const el = this.#host.unwrap(other);
+    return !!el && contains(this.#el, el);
+  }
+
+  // attributes
+  getAttribute(name: string): string | null {
+    return this.#el.attrs.get(this.#el.foreign ? name : name.toLowerCase()) ?? null;
+  }
+  setAttribute(name: string, value: unknown): void {
+    this.#host.setAttribute(this.#el, name, String(value));
+  }
+  removeAttribute(name: string): void {
+    this.#host.removeAttribute(this.#el, name);
+  }
+  hasAttribute(name: string): boolean {
+    return this.#el.attrs.has(this.#el.foreign ? name : name.toLowerCase());
+  }
+  toggleAttribute(name: string, force?: boolean): boolean {
+    const on = force ?? !this.hasAttribute(name);
+    if (on && !this.hasAttribute(name)) this.setAttribute(name, '');
+    else if (!on) this.removeAttribute(name);
+    return on;
+  }
+  get dataset(): Record<string, string | undefined> {
+    const el = this.#el;
+    const host = this.#host;
+    return new Proxy({} as Record<string, string | undefined>, {
+      get: (_, key) => (typeof key === 'string' ? el.attrs.get(kebab(key)) : undefined),
+      set: (_, key, value) => {
+        if (typeof key === 'string') host.setAttribute(el, kebab(key), String(value));
+        return true;
+      },
+      deleteProperty: (_, key) => {
+        if (typeof key === 'string') host.removeAttribute(el, kebab(key));
+        return true;
+      },
+      has: (_, key) => typeof key === 'string' && el.attrs.has(kebab(key)),
+      ownKeys: () => [...el.attrs.keys()].filter((k) => k.startsWith('data-')).map(camel),
+      getOwnPropertyDescriptor: (_, key) =>
+        typeof key === 'string' && el.attrs.has(kebab(key))
+          ? { enumerable: true, configurable: true, writable: true, value: el.attrs.get(kebab(key)) }
+          : undefined,
+    });
+  }
+  get hidden(): boolean {
+    return this.hasAttribute('hidden');
+  }
+  set hidden(on: boolean) {
+    this.toggleAttribute('hidden', !!on);
+  }
+  get disabled(): boolean {
+    return this.hasAttribute('disabled');
+  }
+  set disabled(on: boolean) {
+    this.toggleAttribute('disabled', !!on);
+  }
+  get id(): string {
+    return this.getAttribute('id') ?? '';
+  }
+  set id(value: string) {
+    this.setAttribute('id', value);
+  }
+  get className(): string {
+    return this.getAttribute('class') ?? '';
+  }
+  set className(value: string) {
+    this.setAttribute('class', value);
+  }
+  get classList(): ClassList {
+    return new ClassList(this.#el, this.#host);
+  }
+
+  // content
+  get textContent(): string {
+    return textContent(this.#el);
+  }
+  set textContent(value: string | null) {
+    const text = value === null || value === undefined ? '' : String(value);
+    this.#host.replaceChildren(this.#el, text ? [new LynxText(text)] : []);
+  }
+  get innerHTML(): string {
+    return serializeChildren(this.#el);
+  }
+  set innerHTML(html: string) {
+    const nodes = this.#host.guard(() => this.#host.parse(String(html)));
+    this.#host.replaceChildren(this.#el, nodes);
+  }
+  insertAdjacentHTML(position: string, html: string): void {
+    const el = this.#el;
+    const host = this.#host;
+    const nodes = host.guard(() => host.parse(String(html)));
+    const where = position.toLowerCase();
+    if (where === 'afterbegin' || where === 'beforeend') {
+      insertChildren(el, nodes, where === 'afterbegin' ? 0 : el.children.length);
+      host.tree.reproject(el);
+      return;
+    }
+    if (where !== 'beforebegin' && where !== 'afterend') host.refuse(`Element.insertAdjacentHTML("${position}")`, 'not a position');
+    const parent = el.parent ?? host.refuse('Element.insertAdjacentHTML', 'the root element has no siblings on device');
+    const index = parent.children.indexOf(el) + (where === 'afterend' ? 1 : 0);
+    insertChildren(parent, nodes, index);
+    host.tree.reproject(parent);
+  }
+
+  // form controls
+  get value(): string {
+    const el = this.#el;
+    if (el.tag === 'input' || el.tag === 'textarea') return el.value;
+    if (VALUE_ATTRIBUTE_TAGS.has(el.tag)) return el.attrs.get('value') ?? '';
+    return this.#host.refuse(`<${el.tag}>.value`);
+  }
+  set value(value: string) {
+    const el = this.#el;
+    if (el.tag === 'input' || el.tag === 'textarea') {
+      el.value = String(value);
+      el.valueDirty = true;
+      this.#host.tree.pushValue(el);
+      return;
+    }
+    if (VALUE_ATTRIBUTE_TAGS.has(el.tag)) {
+      this.setAttribute('value', value);
+      return;
+    }
+    this.#host.refuse(`setting <${el.tag}>.value`);
+  }
+
+  // events
+  addEventListener(type: string, fn: unknown, options?: boolean | { capture?: boolean; once?: boolean; passive?: boolean; signal?: unknown }): void {
+    const host = this.#host;
+    if (!SUPPORTED_EVENTS.has(type)) host.refuse(`addEventListener("${type}")`, `the device delivers ${[...SUPPORTED_EVENTS].join(', ')}`);
+    if (typeof fn !== 'function') host.refuse('addEventListener(type, { handleEvent })', 'pass a function');
+    const opts = typeof options === 'object' && options !== null ? options : { capture: options === true };
+    if (opts.capture) host.refuse(`addEventListener("${type}", fn, { capture: true })`, 'events bubble only on device');
+    if ('signal' in opts && opts.signal !== undefined) host.refuse(`addEventListener("${type}", fn, { signal })`);
+    host.addListener(this.#el, type, fn as Listener, !!opts.once);
+  }
+  removeEventListener(type: string, fn: unknown): void {
+    this.#host.removeListener(this.#el, type, fn as Listener);
+  }
+
+  toString(): string {
+    return `[object LynxFacadeElement <${this.#el.tag}>]`;
+  }
+}
+
+class FacadeEvent {
+  currentTarget: object | null = null;
+  defaultPrevented = false;
+  stopped = false;
+  immediateStopped = false;
+  readonly timeStamp = Date.now();
+
+  constructor(
+    readonly type: string,
+    readonly target: object,
+    readonly bubbles: boolean,
+    readonly cancelable: boolean,
+    readonly submitter: object | undefined,
+  ) {}
+
+  preventDefault(): void {
+    if (this.cancelable) this.defaultPrevented = true;
+  }
+  stopPropagation(): void {
+    this.stopped = true;
+  }
+  stopImmediatePropagation(): void {
+    this.stopped = true;
+    this.immediateStopped = true;
+  }
+}
+
+const membersOf = (proto: object): Set<string> =>
+  new Set(Object.getOwnPropertyNames(proto).filter((k) => k !== 'constructor'));
+
+const ELEMENT_MEMBERS = membersOf(ElementFacade.prototype);
+const ELEMENT_SETTABLE = new Set(['hidden', 'disabled', 'id', 'className', 'textContent', 'innerHTML', 'value']);
+const EVENT_MEMBERS = new Set([
+  ...membersOf(FacadeEvent.prototype),
+  'type',
+  'target',
+  'currentTarget',
+  'bubbles',
+  'cancelable',
+  'defaultPrevented',
+  'submitter',
+  'timeStamp',
+]);
+const EVENT_SETTABLE = new Set<string>();
+
+/**
+ * Wrap `target` so that reading or writing anything outside `members`
+ * throws a named refusal. Methods are bound to the target, so private
+ * fields work and the proxy never sees its own internals.
+ */
+function refusingProxy(target: object, kind: string, members: Set<string>, settable: Set<string>, host: FacadeHost): object {
+  return new Proxy(target, {
+    get(t, key) {
+      if (typeof key === 'symbol') return Reflect.get(t, key, t);
+      if (members.has(key)) {
+        const value = Reflect.get(t, key, t);
+        return typeof value === 'function' ? value.bind(t) : value;
+      }
+      if (INERT_KEYS.has(key)) return undefined;
+      return host.refuse(`${kind}.${key}`);
+    },
+    set(t, key, value) {
+      if (typeof key === 'string' && settable.has(key)) return Reflect.set(t, key, value, t);
+      return host.refuse(`setting ${kind}.${String(key)}`);
+    },
+    has(_, key) {
+      return typeof key === 'string' && members.has(key);
+    },
+  });
+}
+
+// ── browser globals ──────────────────────────────────────────────────────────
+
+/** Browser globals that are not DOM: host capabilities (M13) or not on device. */
+const GUARDED_GLOBALS = [
+  'window',
+  'document',
+  'location',
+  'history',
+  'localStorage',
+  'sessionStorage',
+  'navigator',
+  'fetch',
+  'XMLHttpRequest',
+  'IntersectionObserver',
+  'ResizeObserver',
+  'MutationObserver',
+  'matchMedia',
+  'getComputedStyle',
+  'requestAnimationFrame',
+  'setInterval',
+  'clearInterval',
+  'alert',
+  'confirm',
+  'prompt',
+] as const;
+
+/**
+ * Define each guarded global the main thread lacks as an object that
+ * refuses every use by name: `window.location.assign(…)` fails as
+ * "window.location is not available on device" instead of "window is not
+ * defined". Globals the engine provides are left alone. Returns the undo.
+ */
+export function installGlobalGuards(host: FacadeHost, scope: Record<string, unknown> = globalThis as unknown as Record<string, unknown>): () => void {
+  const installed: string[] = [];
+  for (const name of GUARDED_GLOBALS) {
+    if (name in scope) continue;
+    const guard = new Proxy(function guarded() {}, {
+      get(_, key) {
+        if (typeof key === 'symbol' || INERT_KEYS.has(key) || key === 'prototype') return undefined;
+        return host.refuse(`${name}.${key}`);
+      },
+      set(_, key) {
+        return host.refuse(`setting ${name}.${String(key)}`);
+      },
+      apply() {
+        return host.refuse(`${name}()`);
+      },
+      construct() {
+        return host.refuse(`new ${name}()`);
+      },
+    });
+    Object.defineProperty(scope, name, { value: guard, configurable: true, writable: true });
+    installed.push(name);
+  }
+  return () => {
+    for (const name of installed) delete scope[name];
+  };
+}
+

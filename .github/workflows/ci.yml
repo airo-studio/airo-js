@@ -162,6 +162,16 @@ jobs:
       - name: Build packages
         run: pnpm build
 
+      # @airo-js/lynx/build inside a real rsbuild + Lynx encoder run. A renamed
+      # chain entry in the vanilla plugin, or a CSS loader that runs before
+      # the normaliser, passes every unit test and still ships a bundle with
+      # CSS inheritance off (black text on device); this is where it fails
+      # instead. The encoder ships darwin and linux-x64 binaries.
+      - name: Build + check — lynx-native
+        run: |
+          pnpm --filter @airo-js-examples/lynx-native build
+          pnpm --filter @airo-js-examples/lynx-native check
+
       # Fixture-based — no network, no credentials. Asserts snapshot fidelity
       # across HTML, JSON-LD, the XML feed and MCP dispatch for two cartridges.
       - name: Smoke — shopify-edge-worker

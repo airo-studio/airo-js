@@ -8,6 +8,9 @@
 #   @airo-js/runtime       — depends on core + cartridge-kit
 #   @airo-js/embed         — depends on log + cartridge-kit + runtime (peer)
 #   @airo-js/ssr           — depends on core + cartridge-kit + log
+#   @airo-js/mcp           — peers on cartridge-kit
+#   @airo-js/lynx          — peers on core + cartridge-kit + log; own version
+#                            line (like log), outside the 1.0 freeze
 #
 # Tags:
 #   - log, core, runtime, embed, ssr  → 'latest' (default)
@@ -72,7 +75,8 @@ done
 #   - ssr depends on core + cartridge-kit + log.
 # Each entry: "<filter> [extra-flags]"
 # Dependency order: a package's peers appear above it. `@airo-js/mcp` peers on
-# cartridge-kit only, so it sits at the end.
+# cartridge-kit only; `@airo-js/lynx` peers on core, cartridge-kit and log and
+# nothing depends on it, so both sit at the end.
 PACKAGES=(
   "@airo-js/log"
   "@airo-js/core"
@@ -81,6 +85,7 @@ PACKAGES=(
   "@airo-js/embed"
   "@airo-js/ssr"
   "@airo-js/mcp"
+  "@airo-js/lynx"
 )
 
 # Flags applied to every `pnpm publish`. Drop --no-git-checks once the repo
@@ -167,7 +172,7 @@ fi
 # package.json version. Hardcoded consts instead of build stamping (no codegen
 # step); this gate is what keeps them honest. Same trust model as the
 # changelog gate; runs in dry-run too. Packages without the export are skipped
-# (none today — all six export it since the 0.8.8 line).
+# (none today: every package in PACKAGES exports it).
 
 echo
 echo "==> VERSION-const gate"

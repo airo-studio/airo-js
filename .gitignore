@@ -6,6 +6,9 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+# Source, not output: @airo-js/lynx's `./build` entry (the native build's
+# rsbuild plugin) lives here, and `build/` above would silently drop it.
+!packages/lynx/src/build/
 
 # Editor / OS
 .DS_Store

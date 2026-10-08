@@ -1,0 +1,98 @@
+/*
+ * Written for a browser, as a cartridge's stylesheet is. Every feature
+ * below reaches the device only through @airo-js/lynx/build's normaliser:
+ * the body font shorthand, type selectors, [hidden] and [aria-expanded]
+ * state, inline-flex buttons, calc() radius tokens, color-mix() hovers,
+ * oklch() literals, an aspect-ratio box with no width, and dark mode.
+ */
+:root {
+  --background: oklch(0.98 0.01 100);
+  --foreground: oklch(0.25 0.03 260);
+  --muted: oklch(0.55 0.02 260);
+  --primary: oklch(0.55 0.17 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --card: oklch(1 0 0);
+  --line: oklch(0.9 0.01 260);
+  --radius: 0.625rem;
+  --radius-lg: calc(var(--radius) + 4px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: oklch(0.2 0.02 260);
+    --foreground: oklch(0.95 0.01 100);
+    --muted: oklch(0.7 0.02 260);
+    --card: oklch(0.25 0.02 260);
+    --line: oklch(0.35 0.02 260);
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font: 400 1rem/1.5 system-ui, sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.app { padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+h1 { margin: 0; font-size: 1.75rem; line-height: 1.2; font-weight: 700; }
+p { margin: 0; }
+.lede { color: var(--muted); }
+
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.icon { width: 1.125rem; height: 1.125rem; }
+
+.btn, .counter, .panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-lg);
+  background-color: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--line);
+}
+.btn--primary { background-color: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.counter:hover, .btn:hover { background-color: color-mix(in oklab, var(--foreground) 8%, var(--card)); }
+
+.cards { display: flex; flex-direction: column; gap: 0.75rem; padding: 0; margin: 0; list-style: none; }
+.card {
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-lg);
+  background-color: var(--card);
+  border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+.card__link { color: var(--primary); font-weight: 600; text-decoration: none; }
+.card__summary { color: var(--muted); font-size: 0.9375rem; }
+
+.panel { display: flex; flex-direction: column; gap: 0.5rem; }
+.panel__toggle[aria-expanded="true"] { background-color: color-mix(in oklab, var(--primary) 14%, var(--card)); }
+.panel__body { padding: 0.75rem 1rem; border-radius: var(--radius); background-color: oklch(0.95 0.03 255); }
+
+.search { display: flex; gap: 0.5rem; }
+.search__input {
+  flex: 1;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background-color: var(--card);
+  color: var(--foreground);
+}
+.echo { font-size: 0.875rem; color: var(--muted); }
+.echo__value { color: var(--foreground); font-weight: 600; }
+
+.art { margin: 0; display: flex; flex-direction: column; gap: 0.375rem; }
+.art__frame {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  background-color: color-mix(in srgb, var(--primary) 30%, var(--background));
+}
+figcaption { font-size: 0.8125rem; color: var(--muted); }
+
+.back { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--primary); text-decoration: none; }
+.note { display: flex; flex-direction: column; gap: 0.75rem; }
+.panel__toggle:focus-visible, .counter:hover { outline: 2px solid var(--primary); }

@@ -59,4 +59,68 @@ follow-ups that have neither.
 **Priority:** P3
 **Depends on:** A second example that wants a login
 
+## Lynx
+
+Follow-ups for the planned `@airo-js/lynx` native render adapter (one package, `./build` and `./runtime`; plan reviewed 2026-10-08). The spike evidence and the review live in the local, gitignored `.claude/plans/airo-js-lynx-spike-findings.md`.
+
+### Static scan of refused DOM members and browser APIs per hydrate module
+
+**What:** `@airo-js/lynx/build` reads each hydrate module's source and lists, per module, the DOM members and browser APIs the on-device DOM facade refuses (layout reads, dialogs, location, history, storage, fetch, share, clipboard, canvas, IntersectionObserver).
+
+**Why:** the facade refuses those calls at runtime with a named, logged error, so today the rewrite list for a consumer's pages appears only as each page is exercised on a device. A scan turns that into a known budget before the work starts.
+
+**Context:** start from the facade's supported-member table. The first consumer's hydrate code already shows the shape of the output: location.assign 10, location.reload 7, history.replaceState 8, localStorage 8, fetch 7, showModal 14, getBoundingClientRect 6, canvas 16. A static scan misses dynamic access (`el[name]`) and over-reports dead code; treat it as a budget, not a guarantee. Trigger: before the step that extends the adapter beyond the tracer page.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** The facade's supported-member subset being fixed
+
+### Upstream CSS-option forwarding in `@lynx-js/vanilla-rsbuild-plugin`
+
+**What:** open a pull request on lynx-family/lynx-stack so `pluginVanillaLynx()` accepts and forwards the template plugin's CSS page options (`enableCSSInheritance`, `customCSSInheritanceList`, `enableCSSSelector`, `enableRemoveCSSScope`), then remove the adapter's chain tap.
+
+**Why:** CSS inheritance into `<text>` is off by default, and the vanilla plugin forwards only `targetSdkVersion`. The adapter switches inheritance on by tapping the internal chain entry `lynx:vanilla:template:<entry>` in a 0.1.x package, guarded by a build-time assertion. With inheritance on, text colours matching the browser went from 4 of 43 to 42 of 43 in the spike.
+
+**Context:** the workaround and its assertion keep the adapter safe in the meantime. Opening an external pull request needs its own go-ahead. Trigger: after the tracer review on device.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** Explicit approval to open the external pull request
+
+### Time HTML parsing and tree building on the UI thread
+
+**What:** add one timing row (tokenize plus tree build, per render and per facade `innerHTML` write) to the adapter's manual device script, and run it on the consumer's largest page.
+
+**Why:** pages arrive as server HTML, so every navigation and every `innerHTML` write from hydrate code is parsed on the thread that draws the screen. The tracer page has 84 elements; the consumer's largest page has 276, and its hydrate code writes `innerHTML` 18 times and `insertAdjacentHTML` 9 times. Nothing has been timed.
+
+**Context:** wrap the tokenizer and tree pass with a performance mark reported through the device script's collector. A simulator timing is indicative, not a phone measurement. Include the class strings in what is measured: the runtime mirrors every attribute into one or two classes (an `<img>` on the tracer page carries nine), and if that shows up, mirroring only the attribute names the build saw in selectors is the lever. Trigger: the step that extends the adapter beyond the tracer page.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** The manual device script in `@airo-js/lynx`
+
+### Scroll containers inside the page
+
+**What:** make an element the cartridge's CSS makes scrollable (`overflow: auto` or `scroll` on either axis) scroll on device, as the page itself does.
+
+**Why:** a Lynx `view` never scrolls. `mountLynx` puts the whole page in a vertical `scroll-view`, so long pages scroll, but a horizontal row of chips or categories inside the page is clipped. The first consumer has several (`*-scroll-x`, category rows).
+
+**Context:** the runtime cannot read CSS, so this needs the build's help: the normaliser knows which selectors set `overflow` to `auto`/`scroll` and on which axis, and could emit that list for the tree pass to project those elements as `scroll-view` with `scroll-orientation`. That is the first piece of build-to-runtime data; weigh it against a marker attribute in the markup. Trigger: the step that extends the adapter beyond the tracer page.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** The tracer review
+
+### Re-check `@media` when the Lynx encoder accepts engine 4.x
+
+**What:** when `@lynx-js/rsbuild-plugin` accepts `engineVersion` 4.0 or later, rebuild at 4.x with the `enableCSSRule` page option and re-run the `@media` probes on the iOS simulator.
+
+**Why:** the encoder in `@lynx-js/rsbuild-plugin` 0.1.3 refuses anything above 3.9 ("current compiler only support lynx version [1.0, 3.9]"), and at 3.9 media queries are dropped. Mobile-first stylesheets keep their phone layout, but breakpoint rules for tablets and landscape are lost. `prefers-color-scheme` is already handled by the normaliser as a page class.
+
+**Context:** the spike's probes `probe-media-max` and `probe-media-min` show the result in one run. Afterwards the normaliser's per-cartridge report should stop listing `@media` as dropped. Trigger: an `@lynx-js/rsbuild-plugin` release whose encoder accepts 4.x.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** An upstream encoder release
+
 ## Completed

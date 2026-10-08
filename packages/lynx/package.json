@@ -1,0 +1,94 @@
+{
+  "name": "@airo-js/lynx",
+  "version": "0.1.0",
+  "description": "Airo lynx \u2014 native render adapter for airo-js cartridges over the Lynx engine. ./build is an rsbuild plugin that normalises a cartridge's CSS for the native encoder; ./runtime mounts server-rendered pages as Lynx elements and runs the cartridge's existing hydrate handlers through a bounded DOM facade.",
+  "keywords": [
+    "airo",
+    "framework",
+    "lynx",
+    "native",
+    "ssr",
+    "hydrate",
+    "rsbuild-plugin"
+  ],
+  "author": "AI/RO contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airo-studio/airo-js.git",
+    "directory": "packages/lynx"
+  },
+  "homepage": "https://github.com/airo-studio/airo-js/tree/main/packages/lynx#readme",
+  "bugs": {
+    "url": "https://github.com/airo-studio/airo-js/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./build": {
+      "types": "./dist/build/index.d.ts",
+      "import": "./dist/build/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./device": {
+      "types": "./dist/device/index.d.ts",
+      "import": "./dist/device/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "device-check": "node ./scripts/device-check.mjs",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "rm -f dist/.tsbuildinfo dist/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "css-tree": "^3.2.1",
+    "culori": "^4.0.2"
+  },
+  "peerDependencies": {
+    "@airo-js/core": "workspace:^",
+    "@airo-js/cartridge-kit": "workspace:^",
+    "@airo-js/log": "workspace:^",
+    "@rsbuild/core": "^2.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@rsbuild/core": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@airo-js/cartridge-kit": "workspace:^",
+    "@airo-js/core": "workspace:^",
+    "@airo-js/log": "workspace:^",
+    "@lynx-js/testing-environment": "0.3.4",
+    "@rsbuild/core": "2.2.12",
+    "@types/css-tree": "^3.2.0",
+    "@types/culori": "^4.0.1",
+    "@types/node": "^22.0.0",
+    "jsdom": "^25.0.0",
+    "linkedom": "^0.18.13",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
