@@ -19,6 +19,19 @@
  *   3. After each environment compiles, it checks the emitted bundles carry
  *      the flag and writes the per-cartridge report next to them.
  *
+ * It also makes the build one the Lynx loader can run, which a default
+ * rsbuild build is not once `@airo-js/*` is installed from `node_modules`
+ * (measured on the iOS simulator, 8 Oct 2026):
+ *
+ *   - **The framework's packages are transpiled.** rsbuild compiles only
+ *     your own source and leaves `node_modules` as published (ES2022); the
+ *     encoder's main-thread compiler rejects that (`SyntaxError: expecting
+ *     ';'`). In a workspace or through `yalc` the packages resolve outside
+ *     `node_modules`, which is why it never showed there.
+ *   - **No chunk splitting.** rsbuild's default vendor group moves whatever
+ *     resolves under `node_modules` into a chunk in CommonJS form, which the
+ *     vanilla plugin loads on neither thread: the card never starts.
+ *
  * It also turns off CSS minification for the build. In the measuring
  * spike's minified build the encoder received `.a, :is(.a ~ .b, …)` — two
  * neighbouring source rules with equal declarations merged into one list,
@@ -49,6 +62,9 @@ export interface AiroLynxPluginOptions extends InheritanceOptions {
 
 export const PLUGIN_NAME = 'airo-js:lynx';
 
+/** The framework's packages as installed: transpiled like your own source. */
+const AIRO_PACKAGES = /[\\/]node_modules[\\/]@airo-js[\\/]/;
+
 export function pluginAiroLynx(options: AiroLynxPluginOptions = {}): RsbuildPlugin {
   const reportName = options.reportName ?? 'airo-lynx-report';
   /** Normaliser reports by environment, then by stylesheet path (a rebuild replaces its entry). */
@@ -63,6 +79,13 @@ export function pluginAiroLynx(options: AiroLynxPluginOptions = {}): RsbuildPlug
           ...config.output,
           minify: minify === false ? false : { ...(typeof minify === 'object' ? minify : {}), css: false },
         };
+        config.source = { ...config.source, include: [...(config.source?.include ?? []), AIRO_PACKAGES] };
+        // Not a warning: the Lynx plugins set splitting themselves, so every build would print one.
+        if (config.performance?.chunkSplit) {
+          const { chunkSplit: _dropped, ...performance } = config.performance;
+          config.performance = performance;
+        }
+        config.splitChunks = false;
       });
 
       api.transform({ test: /\.css$/ }, ({ code, resourcePath, environment }) => {

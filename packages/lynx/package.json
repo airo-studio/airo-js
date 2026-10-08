@@ -1,7 +1,7 @@
 {
   "name": "@airo-js/lynx",
   "version": "0.1.0",
-  "description": "Airo lynx \u2014 native render adapter for airo-js cartridges over the Lynx engine. ./build is an rsbuild plugin that normalises a cartridge's CSS for the native encoder; ./runtime mounts server-rendered pages as Lynx elements and runs the cartridge's existing hydrate handlers through a bounded DOM facade.",
+  "description": "Airo lynx — native render adapter for airo-js cartridges over the Lynx engine. ./build is an rsbuild plugin that normalises a cartridge's CSS for the native encoder; ./runtime mounts server-rendered pages as Lynx elements and runs the cartridge's existing hydrate handlers through a bounded DOM facade.",
   "keywords": [
     "airo",
     "framework",
@@ -65,8 +65,8 @@
     "culori": "^4.0.2"
   },
   "peerDependencies": {
-    "@airo-js/core": "workspace:^",
     "@airo-js/cartridge-kit": "workspace:^",
+    "@airo-js/core": "workspace:^",
     "@airo-js/log": "workspace:^",
     "@rsbuild/core": "^2.2.0"
   },
@@ -84,6 +84,7 @@
     "@types/css-tree": "^3.2.0",
     "@types/culori": "^4.0.1",
     "@types/node": "^22.0.0",
+    "entities": "^6.0.1",
     "jsdom": "^25.0.0",
     "linkedom": "^0.18.13",
     "vitest": "^2.1.0"

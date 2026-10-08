@@ -172,6 +172,12 @@ jobs:
           pnpm --filter @airo-js-examples/lynx-native build
           pnpm --filter @airo-js-examples/lynx-native check
 
+      # The same card from packed tarballs in a plain node_modules, as a
+      # consumer installs it. In the workspace the packages resolve outside
+      # node_modules, which hid a build that never started on device.
+      - name: Build + check — lynx-native, installed from tarballs
+        run: pnpm --filter @airo-js-examples/lynx-native check:packed
+
       # Fixture-based — no network, no credentials. Asserts snapshot fidelity
       # across HTML, JSON-LD, the XML feed and MCP dispatch for two cartridges.
       - name: Smoke — shopify-edge-worker

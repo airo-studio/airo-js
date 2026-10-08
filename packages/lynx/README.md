@@ -43,6 +43,10 @@ export default defineConfig({
 
 `pluginAiroLynx()` must come after `pluginVanillaLynx()`. Engine 3.9 is the newest the encoder in `@lynx-js/rsbuild-plugin` 0.1.3 accepts.
 
+The plugin also makes the build one a vanilla card can load, which rsbuild's defaults are not once `@airo-js/*` comes from `node_modules`: it transpiles the framework's packages like your own source (the encoder's main-thread compiler rejects them as published), and turns chunk splitting off (a split chunk is CommonJS the loader runs on neither thread, and the card never starts). If your card imports another package that ships modern syntax, add it to `source.include` yourself.
+
+**Installing before a release:** from airo-js, `pnpm yalc:publish`; then in the card's own folder run `yalc add @airo-js/lynx` with `yalc` itself (installed globally). Through `npx`, one consumer's `yalc add` wrote to the enclosing project's `package.json` instead of the card's.
+
 ### What the normaliser rewrites
 
 Every rewrite answers a gap measured on device:
@@ -56,6 +60,8 @@ Every rewrite answers a gap measured on device:
 | `display: inline-flex` | `display: flex` | falls back to linear layout |
 | `display: none` | plus `overflow: hidden` | the box is 0×0 but its text still paints |
 | `font: …` | the longhands | the encoder removes the shorthand |
+| `inset: …` | `top`, `right`, `bottom`, `left` | the encoder removes the shorthand |
+| `env(name, fallback)` | the fallback; a `safe-area-inset-*` with none is `0px` | not parsed, and it takes the whole declaration with it, a `calc()` round it included |
 | static `calc()` in `:root` tokens and `border-radius` | its value | `calc()` in a radius reads as 0 |
 | `aspect-ratio` with no width | plus `width: 100%` | Lynx applies it only to an explicit width |
 | literal `oklch()` | sRGB | not parsed in a declaration |
@@ -121,7 +127,9 @@ interface LynxPage {
 }
 ```
 
-A server that renders airo-js pages already has all three: answer native requests with them as JSON. The network call belongs to the host (it owns auth, cookies and redirects); on Lynx that is the background thread, so `onNavigate` posts the request there and resolves with the JSON that comes back. `nav.page` must name an enabled entry page of the template; if it does not, the page is shown without behaviour and `onError` says why, rather than hydrating the wrong handlers over it.
+A server that renders airo-js pages already has all three: answer native requests with them as JSON. The network call belongs to the host (it owns auth, cookies and redirects); on Lynx that is the background thread, so `onNavigate` posts the request there and resolves with the JSON that comes back.
+
+**Know where a form landed from the page itself.** Lynx's `fetch` on iOS follows a redirect without saying so: `response.url` stays the request's, `redirected` is undefined, and `redirect: 'manual'` is ignored. So a host cannot read the landing url off the response; the page data should carry its own url (the first consumer reads its snapshot's path), and the host asks for that page. The same `fetch` keeps the session cookie across requests and launches, so a server's own cookie sign-in works from the background thread. `nav.page` must name an enabled entry page of the template; if it does not, the page is shown without behaviour and `onError` says why, rather than hydrating the wrong handlers over it.
 
 ### Links and forms
 
@@ -163,7 +171,7 @@ Run a page on device, read the refusals in `onError`, and rewrite those parts of
 | the mount's root (what the server rendered into) | a vertical `scroll-view` with `.airo-lynx-viewport`: the browser's viewport scrolls, a Lynx `view` does not |
 | anything else (`select`, `details`, `dialog`, tables, checkboxes, …) | refused: `UnmappedElementError` |
 
-The tokenizer is strict on purpose. It reads what `escapeHtml` writes — the five entities `&amp; &lt; &gt; &quot; &#39;`, numeric references, void elements, raw-text `script`/`style`, `svg` as foreign content — and refuses a named entity such as `&nbsp;`, an unclosed or mis-nested element, or a stray `<` with an `HtmlParseError` that gives line and column. A conformance test holds its trees equal to a browser-grade parser's on real pages.
+The tokenizer is strict on purpose. It reads what `escapeHtml` writes — the five entities `&amp; &lt; &gt; &quot; &#39;`, numeric references, void elements, raw-text `script`/`style`, `svg` as foreign content — and a bare `&` exactly as the HTML parser does, so `href="/g?a=1&so=x"` keeps its `&`. It refuses a named entity such as `&nbsp;`, a bare `&copy` a browser would turn into ©, an unclosed or mis-nested element, or a stray `<`, with an `HtmlParseError` that gives line and column. A conformance test holds its trees equal to a browser-grade parser's on real pages.
 
 ## Device check
 

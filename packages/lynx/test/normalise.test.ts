@@ -104,6 +104,39 @@ describe('display', () => {
   });
 });
 
+describe('inset', () => {
+  it('expands to the four sides, as any box shorthand', () => {
+    expect(body('.a{inset:0}')).toBe('.a{top:0;right:0;bottom:0;left:0}');
+    expect(body('.a{inset:1px 2px}')).toBe('.a{top:1px;right:2px;bottom:1px;left:2px}');
+    expect(body('.a{inset:1px 2px 3px!important}')).toBe(
+      '.a{top:1px!important;right:2px!important;bottom:3px!important;left:2px!important}',
+    );
+    expect(body('.a{inset:auto 0 calc(1rem + 2px) 4px}')).toBe('.a{top:auto;right:0;bottom:calc(1rem + 2px);left:4px}');
+  });
+
+  it('leaves an inset whose var() hides how many sides it sets, and reports it', () => {
+    const { css, report } = normaliseCss('.a{inset:var(--edges)}');
+    expect(css).toContain('.a{inset:var(--edges)}');
+    expect(report.unresolved[0]).toMatchObject({ property: 'inset' });
+  });
+});
+
+describe('env()', () => {
+  it('becomes its fallback, so a calc() round it stands', () => {
+    expect(body('.bar{bottom:calc(0.75rem + env(safe-area-inset-bottom, 0px))}')).toBe('.bar{bottom:calc(0.75rem + 0px)}');
+  });
+
+  it('a safe-area inset with no fallback is 0px, which a token calc then resolves', () => {
+    expect(body(':root{--tab:calc(5.5rem + env(safe-area-inset-bottom))}')).toBe(':root{--tab:5.5rem}');
+  });
+
+  it('leaves an env() it cannot know, and reports it', () => {
+    const { css, report } = normaliseCss('.a{padding:env(titlebar-area-height)}');
+    expect(css).toContain('env(titlebar-area-height)');
+    expect(report.unresolved[0]!.reason).toMatch(/env\(\)/);
+  });
+});
+
 describe('font shorthand', () => {
   it('expands to longhands, resetting the omitted ones as the shorthand does', () => {
     expect(body('.t{font:600 1rem/1.4 "Outfit", sans-serif}')).toBe(
@@ -145,8 +178,8 @@ describe('calc()', () => {
   });
 
   it('leaves calc() that depends on the element or viewport, and reports it', () => {
-    const { css, report } = normaliseCss(':root{--tab:calc(5rem + env(safe-area-inset-bottom, 0px))}');
-    expect(css).toContain('--tab:calc(5rem + env(safe-area-inset-bottom, 0px))');
+    const { css, report } = normaliseCss(':root{--tab:calc(5rem + 10vh)}');
+    expect(css).toContain('--tab:calc(5rem + 10vh)');
     expect(report.unresolved).toHaveLength(1);
   });
 

@@ -14,9 +14,14 @@
  *   - `<svg>` subtrees as foreign content: case kept, `/>` closes;
  *   - comments, skipped;
  *   - the five entities `escapeHtml` writes (`&amp;` `&lt;` `&gt;` `&quot;`
- *     `&#39;`) and numeric references.
+ *     `&#39;`) and numeric references;
+ *   - a bare `&` exactly as the HTML parser reads it: text, unless it starts
+ *     one of the 106 names a browser decodes without a `;` (and in an
+ *     attribute, not even then when `=` or a letter follows the name). So
+ *     `href="/g?a=1&so=x"` is the `&` the server meant.
  *
- * Anything else — a named entity such as `&nbsp;`, an end tag that does not
+ * Anything else — a named entity such as `&nbsp;`, a bare `&copy` that a
+ * browser would turn into ©, an end tag that does not
  * close the open element, an unclosed element, a `<` that does not start a
  * tag — throws an `HtmlParseError` naming what and where. A browser would
  * recover from each of those; recovering here would mean a device tree that
@@ -81,6 +86,30 @@ const NAMED: Record<string, string> = Object.assign(Object.create(null) as Recor
   quot: '"',
 });
 
+/**
+ * The named references a browser decodes even without the `;` (HTML §13.2.5.73,
+ * the "legacy" rows of the named character references table). They decide
+ * whether a bare `&name` is a reference or text. Checked against a
+ * spec-conformant decoder in the tests.
+ */
+const LEGACY = new Set(
+  'AElig AMP Aacute Acirc Agrave Aring Atilde Auml COPY Ccedil ETH Eacute Ecirc Egrave Euml GT Iacute Icirc Igrave Iuml LT Ntilde Oacute Ocirc Ograve Oslash Otilde Ouml QUOT REG THORN Uacute Ucirc Ugrave Uuml Yacute aacute acirc acute aelig agrave amp aring atilde auml brvbar ccedil cedil cent copy curren deg divide eacute ecirc egrave eth euml frac12 frac14 frac34 gt iacute icirc iexcl igrave iquest iuml laquo lt macr micro middot nbsp not ntilde oacute ocirc ograve ordf ordm oslash otilde ouml para plusmn pound quot raquo reg sect shy sup1 sup2 sup3 szlig thorn times uacute ucirc ugrave uml uuml yacute yen yuml'.split(
+    ' ',
+  ),
+);
+
+/** The legacy names this tokenizer decodes: the ones `escapeHtml`'s own entities are. */
+const LEGACY_DECODED: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
+  amp: '&',
+  AMP: '&',
+  lt: '<',
+  LT: '<',
+  gt: '>',
+  GT: '>',
+  quot: '"',
+  QUOT: '"',
+});
+
 const TAG_NAME = /[A-Za-z][A-Za-z0-9:-]*/y;
 const ATTR_NAME = /[^\s"'>/=]+/y;
 const UNQUOTED = /[^\s"'=<>`]+/y;
@@ -99,27 +128,56 @@ export function tokenize(html: string): ParsedNode[] {
     throw new HtmlParseError(message, line, column);
   };
 
-  const decode = (text: string, offset: number): string =>
-    text.replace(/&([^;\s&<]*)(;?)/g, (whole, body: string, semi: string, index: number) => {
-      if (body === '' || !/^[A-Za-z0-9#]/.test(body)) return whole;
-      if (!semi) fail(`"&${body}" is not a complete character reference`, offset + index);
-      if (body[0] === '#') {
-        const hex = body[1] === 'x' || body[1] === 'X';
-        const digits = body.slice(hex ? 2 : 1);
-        const ok = hex ? /^[0-9a-fA-F]+$/.test(digits) : /^[0-9]+$/.test(digits);
-        const code = ok ? Number.parseInt(digits, hex ? 16 : 10) : Number.NaN;
-        if (!ok || code > 0x10ffff || code === 0) fail(`"&${body};" is not a valid numeric reference`, offset + index);
-        return String.fromCodePoint(code);
+  /** Character references in text or an attribute value, by the HTML parser's rules, or a refusal. */
+  const decode = (text: string, offset: number, inAttribute: boolean): string => {
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+      const amp = text.indexOf('&', i);
+      if (amp === -1) {
+        out += text.slice(i);
+        break;
       }
-      const char = NAMED[body];
+      out += text.slice(i, amp);
+      const at = offset + amp;
+      const rest = text.slice(amp + 1);
+      if (rest[0] === '#') {
+        const m = /^#(?:[xX]([0-9a-fA-F]+)|([0-9]+));/.exec(rest);
+        const code = m ? Number.parseInt((m[1] ?? m[2])!, m[1] ? 16 : 10) : Number.NaN;
+        if (!m || code === 0 || code > 0x10ffff) fail(`"&${rest.slice(0, 10)}" is not a valid numeric reference`, at);
+        out += String.fromCodePoint(code);
+        i = amp + 1 + m![0].length;
+        continue;
+      }
+      const run = /^[A-Za-z0-9]*/.exec(rest)![0];
+      if (run && rest[run.length] === ';') {
+        const char = NAMED[run];
+        if (char === undefined) {
+          fail(`the entity "&${run};" is not one escapeHtml writes; send the character itself or a numeric reference`, at);
+        }
+        out += char;
+        i = amp + 2 + run.length;
+        continue;
+      }
+      // No `;`: the longest legacy name the run starts with is a reference,
+      // unless this is an attribute and `=` or a letter or digit follows it.
+      let legacy = '';
+      for (let n = Math.min(run.length, 6); n >= 2 && !legacy; n--) if (LEGACY.has(run.slice(0, n))) legacy = run.slice(0, n);
+      const next = rest[legacy.length] ?? '';
+      if (!legacy || (inAttribute && /[A-Za-z0-9=]/.test(next))) {
+        out += '&';
+        i = amp + 1;
+        continue;
+      }
+      const char = LEGACY_DECODED[legacy];
       if (char === undefined) {
-        fail(
-          `the entity "&${body};" is not one escapeHtml writes; send the character itself or a numeric reference`,
-          offset + index,
-        );
+        fail(`"&${legacy}" without ";" is a character a browser decodes and this tokenizer does not carry; write the character itself, or the "&" as &amp;`, at);
       }
-      return char!;
-    });
+      out += char;
+      i = amp + 1 + legacy.length;
+    }
+    return out;
+  };
 
   const match = (re: RegExp): string | null => {
     re.lastIndex = pos;
@@ -151,11 +209,11 @@ export function tokenize(html: string): ParsedNode[] {
   while (pos < html.length) {
     const lt = html.indexOf('<', pos);
     if (lt === -1) {
-      pushText(decode(html.slice(pos), pos));
+      pushText(decode(html.slice(pos), pos, false));
       pos = html.length;
       break;
     }
-    pushText(decode(html.slice(pos, lt), pos));
+    pushText(decode(html.slice(pos, lt), pos, false));
     pos = lt;
 
     if (html.startsWith('<!--', pos)) {
@@ -223,11 +281,11 @@ export function tokenize(html: string): ParsedNode[] {
         if (quote === '"' || quote === "'") {
           const end = html.indexOf(quote, pos + 1);
           if (end === -1) fail(`unclosed attribute value for "${name}" on <${tag}>`);
-          value = decode(html.slice(pos + 1, end), pos + 1);
+          value = decode(html.slice(pos + 1, end), pos + 1, true);
           pos = end + 1;
         } else {
           const valueAt = pos;
-          value = decode(match(UNQUOTED) ?? fail(`missing value for "${name}" on <${tag}>`), valueAt);
+          value = decode(match(UNQUOTED) ?? fail(`missing value for "${name}" on <${tag}>`), valueAt, true);
         }
       }
       el.attrs.push([name, value]);
@@ -247,7 +305,7 @@ export function tokenize(html: string): ParsedNode[] {
       const m = close.exec(html);
       if (!m) fail(`unclosed <${tag}>`, at);
       const body = html.slice(pos, m!.index);
-      const text = RAW_TEXT.has(tag) ? body : decode(body, pos);
+      const text = RAW_TEXT.has(tag) ? body : decode(body, pos, false);
       if (text) el.children.push({ kind: 'text', text });
       pos = m!.index + m![0].length;
       continue;

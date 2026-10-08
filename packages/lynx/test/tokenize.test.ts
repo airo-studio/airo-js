@@ -33,6 +33,8 @@ describe('tokenize: what it accepts', () => {
     ['<img src="a.png" alt=""><br><input value="1"/>', 'img[src=a.png alt=], br, input[value=1]'],
     ['a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39; &#233; &#x1F600;', '"a & b <c> \\"d\\" \'e\' é 😀"'],
     ['a & b', '"a & b"'],
+    ['AT&T &so &ampx', '"AT&T &so &x"'],
+    ['<a href="/g?a=1&so=x&apagar" title="&copy=1 &amp;">x</a>', 'a[href=/g?a=1&so=x&apagar title=&copy=1 &]("x")'],
     ['<p title="a &amp; b">x</p>', 'p[title=a & b]("x")'],
     ['<!-- note --><p>x</p>', 'p("x")'],
     ['<script type="application/ld+json">{"a":"<b>"}</script>', 'script[type=application/ld+json]("{\\"a\\":\\"<b>\\"}")'],
@@ -55,10 +57,29 @@ describe('tokenize: what it accepts', () => {
   });
 });
 
+describe('the legacy names, against a spec-conformant decoder', () => {
+  it('every name in the tokenizer list decodes without a ";", and nothing else it treats as text does', async () => {
+    const { decodeHTML } = await import('entities');
+    const source = readFileSync(new URL('../src/runtime/tokenize.ts', import.meta.url), 'utf8');
+    const names = /const LEGACY = new Set\(\s*'([^']+)'/.exec(source)![1]!.split(' ');
+    expect(names).toHaveLength(106);
+    for (const name of names) expect(decodeHTML(`&${name} `)).not.toBe(`&${name} `);
+    for (const text of ['&so ', '&apagar ', '&T ', '&nbs ', '&cop ']) expect(decodeHTML(text)).toBe(text);
+  });
+
+  it('a page full of bare ampersands parses as a browser-grade parser parses it', () => {
+    const html = '<p class="x">AT&T &so <a href="/g?a=1&so=x&apagar&ampx&copy=2">&ampx</a></p>';
+    expect(fromTokenizer(tokenize(html))).toEqual(fromLinkedom(html));
+  });
+});
+
 describe('tokenize: what it refuses, by name and position', () => {
   it.each([
     ['a&nbsp;b', /"&nbsp;" is not one escapeHtml writes/],
-    ['AT&T', /"&T" is not a complete character reference/],
+    ['a &copy b', /"&copy" without ";" is a character a browser decodes/],
+    ['&notin;', /"&notin;" is not one escapeHtml writes/],
+    ['x &notin y', /"&not" without ";"/],
+    ['&#39 x', /not a valid numeric reference/],
     ['&#xZZ;', /not a valid numeric reference/],
     ['<div><p>x</div>', /<\/div> does not close the open <p>/],
     ['<ul><li>a<li>b</ul>', /<\/ul> does not close the open <li>/],

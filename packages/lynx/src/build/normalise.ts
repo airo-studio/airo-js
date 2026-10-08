@@ -16,6 +16,8 @@
  * | the HTML UA rule `[hidden] { display: none }`, as `.a-hidden` | there is no UA stylesheet on device |
  * | `.airo-lynx-viewport` fills the page | the mount's scroller stands in for the viewport, which is the size of the screen |
  * | `font` shorthand → longhands | the encoder removes the shorthand |
+ * | `inset` → `top` / `right` / `bottom` / `left` | the encoder removes the shorthand |
+ * | `env(name, fallback)` → the fallback; a safe-area inset with none → `0px` | `env()` is not parsed, and takes the declaration (a `calc()` round it included) with it |
  * | static `calc()` in `:root` tokens and `border-radius` → its value | `calc()` in a radius reads as 0 |
  * | `aspect-ratio` with no width → plus `width: 100%` | Lynx applies `aspect-ratio` only to an explicit width |
  * | literal `oklch()` → sRGB | not parsed in a declaration (it is through a token) |
@@ -83,6 +85,8 @@ export type RewriteKind =
   | 'inline-flex'
   | 'display-none-clip'
   | 'font-shorthand'
+  | 'inset'
+  | 'env'
   | 'calc'
   | 'aspect-ratio-width'
   | 'oklch'
@@ -292,6 +296,8 @@ class Normaliser {
         'inline-flex': 0,
         'display-none-clip': 0,
         'font-shorthand': 0,
+        inset: 0,
+        env: 0,
         calc: 0,
         'aspect-ratio-width': 0,
         oklch: 0,
@@ -511,6 +517,32 @@ class Normaliser {
       let value = valueText(d);
       const loc = this.loc(d);
 
+      if (/(^|[^\w-])env\(/i.test(value)) {
+        let unknown = false;
+        value = replaceCalls(value, 'env', (call) => {
+          const [name, ...fallback] = splitTopLevel(call.inner, ',');
+          if (fallback.length) return fallback.join(',').trim();
+          // A browser with no inset there uses 0 (CSS Environment Variables §3).
+          if (/^safe-area-inset-(top|right|bottom|left)$/i.test(name!.trim())) return '0px';
+          unknown = true;
+          return value.slice(call.start, call.end);
+        });
+        if (unknown) {
+          this.report.unresolved.push({ property, value, reason: 'env() with no fallback and no known value; the encoder drops the declaration', loc });
+        } else {
+          this.report.rewrites.env++;
+        }
+      }
+
+      if (property === 'inset') {
+        const sides = this.expandInset(value, loc);
+        if (sides) {
+          this.report.rewrites.inset++;
+          for (const [p, v] of sides) out.push(decl(p, v, d.important));
+          continue;
+        }
+      }
+
       if (property === 'display' && /^inline-flex$/i.test(value)) {
         this.report.rewrites['inline-flex']++;
         value = 'flex';
@@ -599,6 +631,22 @@ class Normaliser {
       if (err instanceof UnresolvableValueError) throw new NormaliseError(`cannot lower "${value}": ${err.message}`, loc);
       throw err;
     }
+  }
+
+  /** `inset: a b c d` → the four sides, as any box shorthand. Null (and reported) when a `var()` hides how many values there are. */
+  private expandInset(value: string, loc: SourceLocation | null): [string, string][] | null {
+    const parts = splitTopLevel(value, ' ');
+    if (parts.some((p) => /var\(/i.test(p)) || parts.length < 1 || parts.length > 4) {
+      this.report.unresolved.push({ property: 'inset', value, reason: 'a var() hides how many sides it sets; the encoder will remove it', loc });
+      return null;
+    }
+    const [top, right = top, bottom = top, left = right] = parts as [string, string?, string?, string?];
+    return [
+      ['top', top],
+      ['right', right!],
+      ['bottom', bottom!],
+      ['left', left!],
+    ];
   }
 
   /**

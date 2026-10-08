@@ -10,7 +10,8 @@
     "dev": "rsbuild dev",
     "check": "node scripts/check-build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "check:packed": "node scripts/check-packed.mjs"
   },
   "dependencies": {
     "@airo-js/cartridge-kit": "workspace:*",

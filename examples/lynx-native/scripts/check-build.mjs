@@ -7,12 +7,18 @@
  *   - the bundle's page config has `"enableCSSInheritance":true`;
  *   - the stylesheet reached the encoder normalised: no `color-mix()`,
  *     `inline-flex` or `calc()` left, and the page / tag / mirror classes in;
+ *   - the bundle is one chunk: a split chunk (`exports.ids=…`) is CommonJS
+ *     the vanilla loader runs on neither thread, and the card never starts;
  *   - the report was written, and counts what this stylesheet exercises.
  */
 
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const dist = new URL('../dist/', import.meta.url);
+// `--dist <dir>` checks another build of this card (scripts/check-packed.mjs); the default is this one's.
+const at = process.argv.indexOf('--dist');
+const dist = at > -1 ? pathToFileURL(`${resolve(process.argv[at + 1])}/`) : new URL('../dist/', import.meta.url);
 const failures = [];
 const check = (ok, message) => {
   if (!ok) failures.push(message);
@@ -22,6 +28,7 @@ const bundle = readFileSync(new URL('main.lynx.bundle', dist)).toString('latin1'
 const report = JSON.parse(readFileSync(new URL('airo-lynx-report.json', dist), 'utf8'));
 
 check(/"enableCSSInheritance":true/.test(bundle), 'bundle page config does not enable CSS inheritance');
+check(!/exports\.ids=/.test(bundle), 'a split chunk reached the bundle (exports.ids=…): the card would not start on device');
 check(!/"enableCSSInheritance":false/.test(bundle), 'bundle page config still says enableCSSInheritance false');
 for (const gone of ['color-mix', 'inline-flex', 'calc(', 'focus-visible']) {
   check(!bundle.includes(gone), `"${gone}" reached the encoder`);
