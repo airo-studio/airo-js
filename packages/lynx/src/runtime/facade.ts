@@ -13,8 +13,10 @@
  * | `querySelector(All)`, `closest`, `matches`, `contains` | answered from the node model (`matcher.ts`) |
  * | `getAttribute`, `setAttribute`, `removeAttribute`, `hasAttribute`, `toggleAttribute`, `dataset`, `hidden`, `disabled`, `id`, `className`, `classList` | the model's attributes; every write also updates the element's mirror classes |
  * | `textContent`, `innerHTML`, `insertAdjacentHTML` | the model, re-projected through the tokenizer and tree pass |
- * | `value` | form controls: mirrored from the Lynx `input` event, pushed with `setValue` |
- * | `addEventListener`, `removeEventListener` | `click`, `input`, `change`, `submit`, `focus`, `blur` (below) |
+ * | `value` | form controls: mirrored from the Lynx `input` event, pushed with `setValue`; a select's from its selected option |
+ * | `open`, `show()`, `showModal()`, `close()`, `returnValue` | `<details>` and `<dialog>`: the `open` attribute, re-projected; `toggle` and `close` fire after the current task |
+ * | `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules (`./select.ts`) |
+ * | `addEventListener`, `removeEventListener` | `click`, `input`, `change`, `submit`, `focus`, `blur`, `toggle`, `close` (below) |
  * | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only, from the model |
  *
  * Every other member, and every browser global that is not DOM (`window`,
@@ -28,9 +30,14 @@
  * ```
  *  Lynx (native)                          facade (what hydrate code sees)
  *  tap on any element ──────────────────► click, bubbling from the tapped element
- *                                           └─ not prevented: <a href> → onNavigate (link)
+ *                                           └─ not prevented, by the nearest of these around it:
+ *                                              <a href> → onNavigate (link)
  *                                              submit button → submit on its form
- *                                                 └─ not prevented → onNavigate (form)
+ *                                                 └─ not prevented → onNavigate (form), or for
+ *                                                    method="dialog", its dialog closes
+ *                                              a details' summary → `open` toggles → toggle
+ *                                              <select> → onPick → input, change
+ *  … while a modal dialog is open, a tap outside it is a tap on the dialog (its backdrop)
  *  focus on input/textarea ─────────────► focus     (value remembered)
  *  input ───────────────────────────────► input     (value mirrored first)
  *  blur ────────────────────────────────► change if the value differs from focus, then blur
@@ -55,6 +62,17 @@
 import { type ErrorReporter, type LynxErrorPhase, refuse, report } from './errors.js';
 import { closest, matches, querySelector, querySelectorAll } from './matcher.js';
 import {
+  isDisabledOption,
+  optionsOf,
+  optionText,
+  optionValue,
+  type PickRequest,
+  pickRequest,
+  selectedOption,
+  selectOf,
+  selectOption,
+} from './select.js';
+import {
   type NavigateRequest,
   blockingFields,
   defaultButton,
@@ -78,7 +96,21 @@ import { tokenize } from './tokenize.js';
 import type { ControlEvent, NativeTree } from './tree.js';
 
 /** The events a listener can be added for on device. */
-const SUPPORTED_EVENTS = new Set(['click', 'input', 'change', 'submit', 'focus', 'blur']);
+const SUPPORTED_EVENTS = new Set(['click', 'input', 'change', 'submit', 'focus', 'blur', 'toggle', 'close']);
+
+/** What a tap activates besides a link or a summary; a tap inside one of these does not reach a summary around it. */
+const ACTIVATABLE = new Set(['button', 'select', 'input', 'textarea']);
+
+const isDetailsSummary = (el: LynxElement): boolean =>
+  el.parent?.tag === 'details' && el.parent.children.find((c) => c.kind === 'element' && c.tag === 'summary') === el;
+
+/** What a tap on `el` activates, as a browser finds it: the nearest link, control, or details' summary around it. */
+function activationTarget(el: LynxElement): LynxElement | null {
+  for (let n: LynxElement | null = el; n; n = n.parent) {
+    if (n.tag === 'a' ? n.attrs.has('href') : ACTIVATABLE.has(n.tag) || (n.tag === 'summary' && isDetailsSummary(n))) return n;
+  }
+  return null;
+}
 
 /** Elements whose `value` reflects their `value` attribute. */
 const VALUE_ATTRIBUTE_TAGS = new Set(['button', 'data', 'option', 'li', 'param', 'meter', 'progress']);
@@ -117,6 +149,8 @@ export interface FacadeHostOptions {
   reporter?: ErrorReporter;
   /** A link was tapped or a form submitted, and nothing prevented it. */
   navigate: (request: NavigateRequest) => void;
+  /** A select was tapped: the host shows the choice and resolves with the value picked, or nothing. */
+  pick?: (request: PickRequest) => Promise<string | null | undefined> | string | null | undefined;
 }
 
 const camel = (dataName: string): string => dataName.slice(5).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
@@ -134,6 +168,9 @@ export class FacadeHost {
   private readonly unwrapped = new WeakMap<object, LynxElement>();
   private readonly listeners = new Map<LynxElement, Map<string, Registered[]>>();
   private readonly recordings = new Set<Recording>();
+  /** Dialogs opened with `showModal()`, oldest first. */
+  private modals: LynxElement[] = [];
+  private readonly returnValues = new WeakMap<LynxElement, string>();
 
   constructor(private readonly opts: FacadeHostOptions) {
     this.tree = opts.tree;
@@ -176,18 +213,122 @@ export class FacadeHost {
 
   setAttribute(el: LynxElement, name: string, value: string): void {
     const key = el.foreign ? name : name.toLowerCase();
+    const added = !el.attrs.has(key);
     el.attrs.set(key, value);
     if (key === 'value' && (el.tag === 'input' || el.tag === 'textarea') && !el.valueDirty) {
       el.value = value;
       this.tree.pushValue(el);
     }
+    if (added) this.presenceChanged(el, key, true);
     this.tree.refreshAttributes(el, key);
   }
 
   removeAttribute(el: LynxElement, name: string): void {
     const key = el.foreign ? name : name.toLowerCase();
     if (!el.attrs.delete(key)) return;
+    this.presenceChanged(el, key, false);
     this.tree.refreshAttributes(el, key);
+  }
+
+  /** What a browser does, beyond restyling, when one of these attributes comes or goes. */
+  private presenceChanged(el: LynxElement, key: string, present: boolean): void {
+    if (el.foreign) return;
+    if (key === 'open' && el.tag === 'details') {
+      this.queue(el, 'toggle');
+    } else if (key === 'open' && el.tag === 'dialog' && !present) {
+      el.modal = false;
+      this.modals = this.modals.filter((m) => m !== el);
+    } else if (key === 'selected' && el.tag === 'option') {
+      // The attribute sets selectedness until the selection has been set by a pick or a script.
+      const select = selectOf(el);
+      if (select?.valueDirty) return;
+      el.selected = present;
+      if (present && select) for (const o of optionsOf(select)) if (o !== el) o.selected = false;
+    }
+  }
+
+  /** Fire a non-bubbling `type` at `el` once the current task is done, as a browser's element task does. */
+  private queue(el: LynxElement, type: string): void {
+    void Promise.resolve().then(() => this.dispatch(el, type, { bubbles: false, cancelable: false }));
+  }
+
+  // ── dialogs ───────────────────────────────────────────────────────────────
+
+  /** `dialog.show()` / `showModal()`. */
+  showDialog(el: LynxElement, modal: boolean): void {
+    if (el.attrs.has('open')) {
+      if (el.modal === modal) return;
+      const err = new Error(
+        `[@airo-js/lynx] <dialog>.${modal ? 'showModal' : 'show'}(): the dialog is already open ${el.modal ? 'as a modal' : 'without a backdrop'}`,
+      );
+      err.name = 'InvalidStateError';
+      throw report(this.opts.reporter, this.phase, err);
+    }
+    el.modal = modal;
+    if (modal) this.modals.push(el);
+    this.setAttribute(el, 'open', '');
+  }
+
+  /** `dialog.close(result)`, and a `method="dialog"` form's submission. */
+  closeDialog(el: LynxElement, result?: string): void {
+    if (!el.attrs.has('open')) return;
+    if (result !== undefined) this.returnValues.set(el, result);
+    this.removeAttribute(el, 'open');
+    this.queue(el, 'close');
+  }
+
+  returnValue(el: LynxElement): string {
+    return this.returnValues.get(el) ?? '';
+  }
+
+  setReturnValue(el: LynxElement, value: string): void {
+    this.returnValues.set(el, value);
+  }
+
+  /** The modal on top, if one is open on the page on screen. */
+  private topModal(): LynxElement | null {
+    const root = this.tree.viewport;
+    for (let i = this.modals.length - 1; i >= 0; i--) {
+      const m = this.modals[i]!;
+      if (m.modal && (!root || contains(root, m))) return m;
+    }
+    return null;
+  }
+
+  // ── selects ───────────────────────────────────────────────────────────────
+
+  /** Select `option` (null: none) by script: the label changes, no event fires. */
+  select(select: LynxElement, option: LynxElement | null): void {
+    selectOption(select, option);
+    this.tree.reproject(select);
+  }
+
+  /** A tapped select: ask the host, then apply its answer as a user's pick. */
+  private pick(select: LynxElement): void {
+    const ask = this.opts.pick;
+    const name = select.attrs.get('name');
+    const named = `<select${name ? ` name="${name}"` : ''}>`;
+    if (!ask) {
+      report(this.opts.reporter, 'event', new Error(`[@airo-js/lynx] ${named} was tapped: mountLynx has no onPick to show the choice`));
+      return;
+    }
+    const request = pickRequest(select);
+    // Asked within the tap, so the host's picker opens in the same frame; a throw becomes a rejection.
+    new Promise<string | null | undefined>((resolve) => resolve(ask(request)))
+      .then((value) => {
+        if (value === null || value === undefined) return;
+        const root = this.tree.viewport;
+        if (root && !contains(root, select)) return;
+        const option = optionsOf(select).find((o) => optionValue(o) === value && !isDisabledOption(o));
+        if (!option) throw new Error(`[@airo-js/lynx] onPick answered "${value}" for ${named}, which has no enabled option of that value`);
+        if (option === selectedOption(select)) return;
+        this.select(select, option);
+        this.dispatch(select, 'input', { bubbles: true, cancelable: false });
+        this.dispatch(select, 'change', { bubbles: true, cancelable: false });
+      })
+      .catch((err: unknown) => {
+        report(this.opts.reporter, 'event', err);
+      });
   }
 
   // ── content ───────────────────────────────────────────────────────────────
@@ -289,30 +430,49 @@ export class FacadeHost {
     return proxy;
   }
 
-  /** A tap on `el`: `click`, then the browser's default action for links and submit buttons. */
+  /** A tap on `el`: `click`, then the browser's default action for what it activates. */
   click(el: LynxElement): void {
-    const button = closest(el, 'button');
-    if (button?.attrs.has('disabled')) return;
+    const target = activationTarget(el);
+    // A disabled control gets no click at all.
+    if (target && ACTIVATABLE.has(target.tag) && target.attrs.has('disabled')) return;
     const event = this.dispatch(el, 'click', { bubbles: true, cancelable: true });
-    if (event.defaultPrevented) return;
-    const link = closest(el, 'a[href]');
-    if (link) {
-      const request = linkRequest(link);
-      if (request) this.opts.navigate(request);
-      return;
-    }
-    if (button && isSubmitButton(button)) {
-      const form = formOf(button);
-      if (form) this.submit(form, button);
+    if (event.defaultPrevented || !target) return;
+    switch (target.tag) {
+      case 'a': {
+        const request = linkRequest(target);
+        if (request) this.opts.navigate(request);
+        return;
+      }
+      case 'button': {
+        const form = isSubmitButton(target) ? formOf(target) : null;
+        if (form) this.submit(form, target);
+        return;
+      }
+      case 'summary': {
+        const details = target.parent!;
+        if (details.attrs.has('open')) this.removeAttribute(details, 'open');
+        else this.setAttribute(details, 'open', '');
+        return;
+      }
+      case 'select':
+        this.pick(target);
+        return;
+      default:
+        return;
     }
   }
 
-  /** Submit `form`: a cancellable `submit`, then the request. */
+  /** Submit `form`: a cancellable `submit`, then the request, or for `method="dialog"` the dialog's close. */
   submit(form: LynxElement, submitter: LynxElement | null): void {
     const event = this.dispatch(form, 'submit', { bubbles: true, cancelable: true, submitter });
     if (event.defaultPrevented) return;
     const request = formRequest(form, submitter);
-    if (request) this.opts.navigate(request);
+    if (request) {
+      this.opts.navigate(request);
+      return;
+    }
+    const dialog = closest(form, 'dialog');
+    if (dialog) this.closeDialog(dialog, submitter ? (submitter.attrs.get('value') ?? '') : undefined);
   }
 
   /** The page's native `tap`, as Lynx delivers it. */
@@ -323,7 +483,9 @@ export class FacadeHost {
       el = this.tree.byUid.get(this.tree.papi.uniqueId(target.elementRefptr as object));
     }
     if (!el) return;
-    this.click(el);
+    // The page below a modal is inert: a tap outside it lands on its backdrop, which is the dialog.
+    const modal = this.topModal();
+    this.click(modal && !contains(modal, el) ? modal : el);
   }
 
   /** A form control's native event (registered by the tree pass). */
@@ -559,6 +721,11 @@ class ElementFacade {
   get value(): string {
     const el = this.#el;
     if (el.tag === 'input' || el.tag === 'textarea') return el.value;
+    if (el.tag === 'select') {
+      const selected = selectedOption(el);
+      return selected ? optionValue(selected) : '';
+    }
+    if (el.tag === 'option') return optionValue(el);
     if (VALUE_ATTRIBUTE_TAGS.has(el.tag)) return el.attrs.get('value') ?? '';
     return this.#host.refuse(`<${el.tag}>.value`);
   }
@@ -570,11 +737,78 @@ class ElementFacade {
       this.#host.tree.pushValue(el);
       return;
     }
+    if (el.tag === 'select') {
+      this.#host.select(el, optionsOf(el).find((o) => optionValue(o) === String(value)) ?? null);
+      return;
+    }
     if (VALUE_ATTRIBUTE_TAGS.has(el.tag)) {
       this.setAttribute('value', value);
       return;
     }
     this.#host.refuse(`setting <${el.tag}>.value`);
+  }
+
+  // select and option
+  get options(): object[] {
+    return optionsOf(this.#only('select', 'options')).map((o) => this.#host.facade(o));
+  }
+  get selectedIndex(): number {
+    const select = this.#only('select', 'selectedIndex');
+    const selected = selectedOption(select);
+    return selected ? optionsOf(select).indexOf(selected) : -1;
+  }
+  set selectedIndex(index: number) {
+    const select = this.#only('select', 'selectedIndex');
+    this.#host.select(select, optionsOf(select)[Number(index)] ?? null);
+  }
+  get selected(): boolean {
+    const option = this.#only('option', 'selected');
+    const select = selectOf(option);
+    return select ? selectedOption(select) === option : option.selected;
+  }
+  set selected(on: boolean) {
+    const option = this.#only('option', 'selected');
+    const select = selectOf(option);
+    if (!select) {
+      option.selected = !!on;
+      return;
+    }
+    if (on) this.#host.select(select, option);
+    else if (selectedOption(select) === option) this.#host.select(select, null);
+  }
+  get text(): string {
+    return optionText(this.#only('option', 'text'));
+  }
+
+  // details and dialog
+  get open(): boolean {
+    return this.#only(['details', 'dialog'], 'open').attrs.has('open');
+  }
+  set open(on: boolean) {
+    this.#only(['details', 'dialog'], 'open');
+    this.toggleAttribute('open', !!on);
+  }
+  show(): void {
+    this.#host.showDialog(this.#only('dialog', 'show()'), false);
+  }
+  showModal(): void {
+    this.#host.showDialog(this.#only('dialog', 'showModal()'), true);
+  }
+  close(result?: unknown): void {
+    this.#host.closeDialog(this.#only('dialog', 'close()'), result === undefined ? undefined : String(result));
+  }
+  get returnValue(): string {
+    return this.#host.returnValue(this.#only('dialog', 'returnValue'));
+  }
+  set returnValue(value: string) {
+    this.#host.setReturnValue(this.#only('dialog', 'returnValue'), String(value));
+  }
+
+  /** The element, when it is one of `tags`; a refusal naming the member otherwise. */
+  #only(tags: string | readonly string[], member: string): LynxElement {
+    const el = this.#el;
+    if (el.foreign || !(typeof tags === 'string' ? [tags] : tags).includes(el.tag)) return this.#host.refuse(`<${el.tag}>.${member}`);
+    return el;
   }
 
   // events
@@ -627,7 +861,19 @@ const membersOf = (proto: object): Set<string> =>
   new Set(Object.getOwnPropertyNames(proto).filter((k) => k !== 'constructor'));
 
 const ELEMENT_MEMBERS = membersOf(ElementFacade.prototype);
-const ELEMENT_SETTABLE = new Set(['hidden', 'disabled', 'id', 'className', 'textContent', 'innerHTML', 'value']);
+const ELEMENT_SETTABLE = new Set([
+  'hidden',
+  'disabled',
+  'id',
+  'className',
+  'textContent',
+  'innerHTML',
+  'value',
+  'selectedIndex',
+  'selected',
+  'open',
+  'returnValue',
+]);
 const EVENT_MEMBERS = new Set([
   ...membersOf(FacadeEvent.prototype),
   'type',

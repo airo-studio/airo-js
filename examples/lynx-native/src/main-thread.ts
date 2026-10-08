@@ -38,9 +38,19 @@ lynx.getEngine().addEventListener('__RenderPage', () => {
     cartridge,
     config: {},
     template,
-    page: renderPage({ url: '/', method: 'get', fields: {} }),
+    page: renderPage({ url: AIRO_LYNX_START, method: 'get', fields: {} }),
     colorScheme: 'light',
+    baseUrl: AIRO_LYNX_ASSETS,
     onError: record,
+    // Lynx Explorer has no native picker to show, so this card takes the
+    // next enabled option. An app opens its action sheet here and resolves
+    // with the value the person picked.
+    onPick: (request) => {
+      const enabled = request.options.filter((o) => !o.disabled);
+      const next = enabled[(enabled.findIndex((o) => o.value === request.value) + 1) % enabled.length];
+      report(`picked-${next?.value}`);
+      return next?.value;
+    },
     onNavigate: (request) =>
       new Promise((resolve) => {
         setTimeout(() => {

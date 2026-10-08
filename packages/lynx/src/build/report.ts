@@ -78,7 +78,10 @@ export function buildReport(environment: string, sheets: NormaliseReport[], warn
     environment,
     stylesheets: sheets.map((s) => s.file),
     rewrites,
-    emitted: sheets.flatMap((s) => s.emitted),
+    // The browser defaults head every stylesheet (no source location); list them once.
+    emitted: sheets
+      .flatMap((s) => s.emitted)
+      .filter((e, i, all) => e.loc !== null || all.findIndex((o) => o.loc === null && o.selector === e.selector && o.property === e.property) === i),
     rejectedSelectors: all.filter((u) => u.removed),
     unsupportedSelectors: all.filter((u) => !u.removed),
     droppedMedia: sheets.flatMap((s) => s.droppedMedia),

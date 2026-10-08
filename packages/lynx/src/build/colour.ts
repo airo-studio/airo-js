@@ -1,8 +1,10 @@
 /**
- * Colour lowering for the Lynx encoder: `color-mix()` and literal `oklch()`
- * become sRGB at build time, because the engine parses neither (the spike's
- * probes: both paint the fallback grey). Tokens that hold `oklch()` and are
- * read through `var()` do resolve on device, so those are left alone.
+ * Colour lowering for the Lynx encoder: `color-mix()` and the CSS Color 4
+ * functions become sRGB at build time, because the engine parses neither
+ * (the spike's probes: both paint the fallback grey). That holds for tokens
+ * read through `var()` as well: the spike saw `oklch()` tokens resolve only
+ * because rsbuild's lightningcss-loader had already turned them into hex,
+ * and only for a browserslist that lacks `oklch()`.
  *
  * `color-mix()` follows CSS Color 5 §2: percentages normalised, colours
  * converted into the interpolation space, alpha premultiplied, hue by the

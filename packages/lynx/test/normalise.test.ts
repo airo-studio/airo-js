@@ -8,16 +8,34 @@ import { describe, expect, it } from 'vitest';
 import { NormaliseError, normaliseCss } from '../src/build/normalise.js';
 
 /** The output without the page base rule every run prepends. */
-const BASE = '.airo-lynx-page{font-size:16px}.airo-lynx-viewport{width:100%;height:100%}.a-hidden{display:none;overflow:hidden}';
+const BASE = [
+  '.airo-lynx-page{font-size:16px}',
+  '.airo-lynx-viewport{width:100%;height:100%}',
+  '.a-hidden{display:none;overflow:hidden}',
+  '.airo-lynx-closed{display:none}',
+  '.airo-lynx-modal{overflow:auto}',
+  '.airo-lynx-backdrop{position:fixed;top:0;right:0;bottom:0;left:0;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-start}',
+].join('');
 const body = (css: string): string => normaliseCss(css).css.replace(BASE, '');
 
 describe('page rule', () => {
-  it('prepends the browser defaults the device lacks: the root font-size (so rem is 16px), a page-sized viewport, and [hidden]', () => {
+  it('prepends the browser defaults the device lacks: the root font-size (so rem is 16px), a page-sized viewport, [hidden], and the dialog rules that place it', () => {
     expect(normaliseCss('').css).toBe(BASE);
   });
 
   it('turns html and body into the page element', () => {
     expect(body('body{color:red}html{line-height:1.5}')).toBe('.airo-lynx-page{color:red}.airo-lynx-page{line-height:1.5}');
+  });
+
+  it('resolves a relative font-size on html or body to px, since rem follows that same element on device', () => {
+    expect(body('body{font:400 1rem/1.5 serif}')).toContain('font-size:16px');
+    expect(body('body{font-size:100%}')).toBe('.airo-lynx-page{font-size:16px}');
+    expect(body('html{font-size:62.5%}body{font-size:1.6rem}')).toBe('.airo-lynx-page{font-size:10px}.airo-lynx-page{font-size:16px}');
+    expect(body('.x{font-size:1rem}body .y{font-size:2em}')).toBe('.x{font-size:1rem}.airo-lynx-page .y{font-size:2em}');
+    const { report } = normaliseCss('html{font-size:62.5%}body{font-size:1.6rem}');
+    expect(report.rewrites['page-font-size']).toBe(2);
+    expect(report.unresolved).toEqual([expect.objectContaining({ property: 'font-size', value: '1.6rem', reason: expect.stringMatching(/body's 16px where a browser's is html's 10px/) })]);
+    expect(normaliseCss('body{font-size:1rem}').report.unresolved).toEqual([]);
   });
 
   it('leaves a class that happens to be called body alone', () => {
@@ -68,7 +86,7 @@ describe('selectors the encoder rejects', () => {
   });
 
   it('drop the rule when every selector in it is rejected', () => {
-    expect(body('.d::backdrop{background:red}.s:has(.x){gap:0}')).toBe('');
+    expect(body('.d::selection{background:red}.s:has(.x){gap:0}')).toBe('');
   });
 
   it('keep pseudo-elements the encoder parses', () => {
@@ -207,10 +225,29 @@ describe('colour', () => {
     expect(body('.p{background-color:oklch(0.8 0.17 125)}')).toBe('.p{background-color:rgb(165, 208, 70)}');
   });
 
-  it('leaves oklch() in a token, which resolves on device through var()', () => {
+  it('lowers oklch() in a token too: read through var(), it paints nothing on device', () => {
     expect(body(':root{--primary:oklch(0.8 0.17 125)}.p{color:var(--primary)}')).toBe(
-      ':root{--primary:oklch(0.8 0.17 125)}.p{color:var(--primary)}',
+      ':root{--primary:rgb(165, 208, 70)}.p{color:var(--primary)}',
     );
+    expect(body(':root{--glass:oklch(0.99 0.004 105/0.92)}')).toBe(':root{--glass:rgba(252, 252, 249, 0.92)}');
+  });
+
+  it('lowers the rest of CSS Color 4, and leaves hex and comma rgb() alone', () => {
+    expect(body('.s{box-shadow:0 1px 3px 0 rgb(0 0 0/0.1),0 1px 2px -1px rgb(0 0 0 / 10%)}')).toBe(
+      '.s{box-shadow:0 1px 3px 0 rgba(0, 0, 0, 0.1),0 1px 2px -1px rgba(0, 0, 0, 0.1)}',
+    );
+    expect(body('.g{background:linear-gradient(to top,rgba(17,25,10,0.82),transparent)}')).toBe(
+      '.g{background:linear-gradient(to top,rgba(17,25,10,0.82),transparent)}',
+    );
+    expect(body('.h{color:hsl(120, 100%, 25%);border-color:#fff}')).toBe('.h{color:rgb(0, 128, 0);border-color:#fff}');
+    expect(body('.l{color:lab(50% 0 0);background:oklab(1 0 0)}')).toBe('.l{color:rgb(119, 119, 119);background:rgb(255, 255, 255)}');
+    expect(normaliseCss('.a{color:oklch(0.5 0.1 100)}.b{color:#000}').report.rewrites['colour-function']).toBe(1);
+  });
+
+  it('leaves a colour it cannot resolve as written, and reports it', () => {
+    const { css, report } = normaliseCss('.t{color:rgb(var(--tw-rgb) / 0.5)}');
+    expect(css).toContain('.t{color:rgb(var(--tw-rgb) / 0.5)}');
+    expect(report.unresolved[0]).toMatchObject({ property: 'color', value: 'rgb(var(--tw-rgb) / 0.5)' });
   });
 
   it('evaluates color-mix() with premultiplied alpha', () => {
@@ -277,5 +314,40 @@ describe('@media', () => {
 
   it('leaves keyframe selectors alone', () => {
     expect(body('@keyframes pulse{from{opacity:0}to{opacity:1}}')).toBe('@keyframes pulse{from{opacity:0}to{opacity:1}}');
+  });
+});
+
+describe(':empty and :modal', () => {
+  it('become the classes the runtime puts on an element with no children, and on an open modal', () => {
+    expect(body('.toast:empty{display:none;overflow:hidden}')).toBe('.toast.airo-lynx-empty{display:none;overflow:hidden}');
+    expect(body('.list:not(:empty){margin:0}')).toBe('.list:not(.airo-lynx-empty){margin:0}');
+    expect(body('dialog:modal{padding:0}')).toBe('.tag-dialog.airo-lynx-modal{padding:0}');
+    const { report } = normaliseCss('.a:empty{color:red}.b:modal{color:red}');
+    expect(report.rewrites).toMatchObject({ empty: 1, modal: 1 });
+    expect(report.unsupported).toEqual([]);
+  });
+});
+
+describe('::backdrop', () => {
+  it("becomes the backdrop's class for each class of its dialog, types and attributes included", () => {
+    expect(body('.sheet::backdrop{opacity:0.5}')).toBe('.airo-lynx-backdrop--sheet{opacity:0.5}');
+    expect(body('dialog.sheet[open]::backdrop{opacity:0.5}')).toBe(
+      '.airo-lynx-backdrop--tag-dialog.airo-lynx-backdrop--sheet.airo-lynx-backdrop--a-open{opacity:0.5}',
+    );
+    expect(body('.page .sheet::backdrop{opacity:0.5}')).toBe('.page .airo-lynx-backdrop--sheet{opacity:0.5}');
+    expect(body('::backdrop{opacity:0.5}')).toBe('.airo-lynx-backdrop{opacity:0.5}');
+  });
+
+  it('lowers its colours like any rule, with a dark twin', () => {
+    const css = ':root{--o:#000}@media (prefers-color-scheme: dark){:root{--o:#fff}}.s::backdrop{background:color-mix(in srgb,var(--o) 50%,transparent)}';
+    expect(normaliseCss(css).css).toContain('.airo-lynx-backdrop--s{background:rgba(0, 0, 0, 0.5)}');
+    expect(normaliseCss(css).css).toContain('.airo-lynx-dark .airo-lynx-backdrop--s{background:rgba(255, 255, 255, 0.5)}');
+  });
+
+  it('is split out and reported when its dialog is named by something the backdrop cannot carry', () => {
+    const { css, report } = normaliseCss('#d::backdrop,.s::backdrop{opacity:0.5}');
+    expect(css).toContain('.airo-lynx-backdrop--s{opacity:0.5}');
+    expect(css).not.toContain('#d');
+    expect(report.unsupported[0]).toMatchObject({ selector: '#d::backdrop', removed: true });
   });
 });

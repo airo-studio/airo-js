@@ -3,7 +3,7 @@
 import { vi } from 'vitest';
 
 import type { LynxErrorInfo } from '../src/runtime/errors.js';
-import { FacadeHost } from '../src/runtime/facade.js';
+import { FacadeHost, type FacadeHostOptions } from '../src/runtime/facade.js';
 import type { NavigateRequest } from '../src/runtime/navigation.js';
 import { fromParsed, insertChildren, LynxElement } from '../src/runtime/node-model.js';
 import { getPapi } from '../src/runtime/papi.js';
@@ -29,7 +29,7 @@ export interface Page {
   tap(selector: string, child?: number): void;
 }
 
-export function page(html: string): Page {
+export function page(html: string, options: Pick<FacadeHostOptions, 'pick'> = {}): Page {
   const fake = installFakePapi();
   const papi = getPapi();
   const pageRef = papi.createPage('0', 0);
@@ -42,7 +42,7 @@ export function page(html: string): Page {
     baseUrl: 'https://shop.example/',
     onControlEvent: (el, event, native) => host.onControlEvent(el, event, native),
   });
-  host = new FacadeHost({ tree, reporter: (info) => errors.push(info), navigate });
+  host = new FacadeHost({ tree, reporter: (info) => errors.push(info), navigate, ...options });
   papi.addEventListener(pageRef, 'tap', (e) => host.onTap(e));
   const model = new LynxElement('div', false);
   insertChildren(model, fromParsed(tokenize(html)));

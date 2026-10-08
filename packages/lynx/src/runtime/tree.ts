@@ -7,10 +7,13 @@
  * |---|---|
  * | text-level tags (`p`, `h1`–`h6`, `li`, `span`, …) whose content is text and inline tags | `text`, inline children as nested `text` |
  * | other containers, and `a` / `button` outside running text | `view`; each text run inside becomes a synthesised `text` |
- * | `img` | `image` (`src` resolved against the page's base url) |
+ * | `img` | `image` (`src` resolved against the page's base url; with no size of its own it takes the picture's); an SVG source is an `svg` with that `src`, since `image` does not draw SVG |
  * | `svg` | `svg` with `content` set to the element's own markup |
  * | `input` (text-like types), `textarea` | `input`, `textarea`; value from the markup, then from typing |
- * | `input type="hidden"`, `script`, `template`, `noscript` | nothing on screen; in the model only |
+ * | `details`, `summary` | `view`s (a summary of text and inline tags is a `text`); a closed `details` shows its first `summary` only, and a tap on that summary toggles `open` |
+ * | `dialog` | a `view`, empty and hidden while closed; opened with `showModal()`, it sits inside a `view` that is its backdrop |
+ * | `select` | a `view` holding the selected option's label; a tap asks the host's `onPick` for a choice (`./select.ts`). `multiple` and `size` > 1 are refused |
+ * | `input type="hidden"`, `script`, `template`, `noscript`, `option`, `optgroup` | nothing on screen; in the model only |
  * | the mount's root (the element the server rendered into) | a vertical `scroll-view`: the browser viewport scrolls, a Lynx `view` does not |
  * | anything else | refused by name (`UnmappedElementError`) |
  *
@@ -29,16 +32,29 @@
  * times costs one flush, and the writes show up before the next frame.
  */
 
-import { DARK_CLASS, PAGE_CLASS, attrClass, tagClass, UNMIRRORED_ATTRIBUTES, VIEWPORT_CLASS } from '../shared/attr-class.js';
+import {
+  attrClass,
+  BACKDROP_CLASS,
+  backdropClass,
+  CLOSED_DIALOG_CLASS,
+  DARK_CLASS,
+  EMPTY_CLASS,
+  MODAL_CLASS,
+  PAGE_CLASS,
+  tagClass,
+  UNMIRRORED_ATTRIBUTES,
+  VIEWPORT_CLASS,
+} from '../shared/attr-class.js';
 import { LynxRefusalError, log, UnmappedElementError } from './errors.js';
 import { type LynxElement, type LynxKind, type LynxNode, serialize } from './node-model.js';
 import type { ElementRef, NativeEvent, NativeListener, Papi } from './papi.js';
+import { optionLabel, selectedOption, selectOf } from './select.js';
 
 /** Becomes `text` when its content is only text and inline tags. */
 const TEXT_TAGS = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'dt', 'dd', 'figcaption', 'legend', 'blockquote', 'address',
   'label', 'span', 'strong', 'em', 'b', 'i', 'small', 'time', 'mark', 'abbr', 'code', 'cite', 'q', 's', 'u',
-  'sub', 'sup', 'kbd', 'data', 'var', 'samp', 'del', 'ins', 'bdi', 'bdo',
+  'sub', 'sup', 'kbd', 'data', 'var', 'samp', 'del', 'ins', 'bdi', 'bdo', 'summary',
 ]);
 
 /** Can sit inside running text as a nested `text`. */
@@ -50,11 +66,11 @@ const INLINE_TAGS = new Set([
 /** Containers that are always a `view`, whatever they hold. */
 const VIEW_TAGS = new Set([
   'div', 'section', 'article', 'aside', 'header', 'footer', 'main', 'nav', 'figure', 'form', 'ol', 'ul',
-  'dl', 'fieldset', 'hgroup', 'search', 'menu', 'hr', 'a', 'button',
+  'dl', 'fieldset', 'hgroup', 'search', 'menu', 'hr', 'a', 'button', 'details', 'dialog',
 ]);
 
 /** In the model, never on screen. */
-const MODEL_ONLY = new Set(['script', 'template', 'noscript']);
+const MODEL_ONLY = new Set(['script', 'template', 'noscript', 'option', 'optgroup']);
 
 /** HTML input types the Lynx `input` element can stand in for, and the type it gets. */
 const INPUT_TYPES: Record<string, string> = {
@@ -86,7 +102,34 @@ export function mirrorClasses(attrs: ReadonlyMap<string, string>): string[] {
 function classString(el: LynxElement): string {
   const authored = (el.attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
   const own = el.as === 'scroll' ? [VIEWPORT_CLASS] : [];
+  if (el.children.length === 0) own.push(EMPTY_CLASS);
+  if (el.tag === 'dialog' && !el.attrs.has('open')) own.push(CLOSED_DIALOG_CLASS);
+  else if (el.modal) own.push(MODAL_CLASS);
   return [...own, ...authored, tagClass(el.tag), ...mirrorClasses(el.attrs)].join(' ');
+}
+
+/** An `<img>` source that is an SVG: a `.svg` path, or an `image/svg+xml` data url. */
+const isSvgSource = (src: string): boolean => /\.svg(?:[?#]|$)/i.test(src) || /^data:image\/svg\+xml[;,]/i.test(src);
+
+/** `w / h` from an img's `width` and `height` attributes, when both are positive numbers. */
+function attributeRatio(el: LynxElement): string | null {
+  const w = Number.parseFloat(el.attrs.get('width') ?? '');
+  const h = Number.parseFloat(el.attrs.get('height') ?? '');
+  return w > 0 && h > 0 ? `${w} / ${h}` : null;
+}
+
+/** A modal's backdrop: its own class, and one per class of its dialog, which `X::backdrop` rules were rewritten to. */
+const backdropClasses = (dialog: LynxElement): string =>
+  [BACKDROP_CLASS, ...classString(dialog).split(' ').map(backdropClass)].join(' ');
+
+/** The children a browser renders: all, except in a closed `<details>` (its first summary) and a closed `<dialog>` (none). */
+function renderedChildren(el: LynxElement): readonly LynxNode[] {
+  if (el.tag === 'details' && !el.attrs.has('open')) {
+    const summary = el.children.find((c) => c.kind === 'element' && c.tag === 'summary');
+    return summary ? [summary] : [];
+  }
+  if (el.tag === 'dialog' && !el.attrs.has('open')) return [];
+  return el.children;
 }
 
 const collapse = (s: string): string => s.replace(/[ \t\n\f\r]+/g, ' ');
@@ -118,6 +161,8 @@ export class NativeTree {
   private afterFlush: (() => void)[] = [];
   /** Projected `svg` elements, and the colour last handed to each as `current-color`. */
   private readonly svgs = new Map<LynxElement, string | null>();
+  /** Each modal dialog on screen, and the backdrop it is drawn inside: what stands in its parent's place. */
+  private readonly backdrops = new Map<LynxElement, ElementRef>();
 
   constructor(private readonly opts: TreeOptions) {
     this.papi = opts.papi;
@@ -136,7 +181,7 @@ export class NativeTree {
     }
     switch (el.tag) {
       case 'img':
-        return 'image';
+        return isSvgSource(el.attrs.get('src') ?? '') ? 'svg' : 'image';
       case 'textarea':
         return 'textarea';
       case 'input': {
@@ -145,6 +190,10 @@ export class NativeTree {
         if (INPUT_TYPES[type]) return 'input';
         throw new UnmappedElementError(`input type="${type}"`);
       }
+      case 'select':
+        if (el.attrs.has('multiple')) throw new UnmappedElementError('select multiple');
+        if (Number(el.attrs.get('size') ?? 1) > 1) throw new UnmappedElementError(`select size="${el.attrs.get('size')}"`);
+        return 'view';
       default:
         if (MODEL_ONLY.has(el.tag)) return 'none';
         if (TEXT_TAGS.has(el.tag) && !VIEW_TAGS.has(el.tag) && isTextOnly(el)) return 'text';
@@ -183,6 +232,7 @@ export class NativeTree {
 
   private forget(el: LynxElement): void {
     this.svgs.delete(el);
+    this.backdrops.delete(el);
     for (const uid of el.uids) if (this.byUid.get(uid) === el) this.byUid.delete(uid);
     el.uids = [];
     el.ref = null;
@@ -195,15 +245,34 @@ export class NativeTree {
     this.papi.setClasses(ref, classString(el));
     const id = el.attrs.get('id');
     if (id !== undefined) this.papi.setId(ref, id);
+    const backdrop = this.backdrops.get(el);
+    if (backdrop) this.papi.setClasses(backdrop, backdropClasses(el));
     switch (el.as) {
       case 'image': {
         this.papi.setAttribute(ref, 'src', this.resolve(el.attrs.get('src') ?? ''));
         this.papi.setAttribute(ref, 'mode', 'scaleToFill');
+        // A size the stylesheet leaves open comes from the picture, as in a
+        // browser. Without it Lynx draws the image 0 wide or 0 tall.
+        this.papi.setAttribute(ref, 'auto-size', true);
         const alt = el.attrs.get('alt');
         if (alt) this.papi.setAttribute(ref, 'accessibility-label', alt);
         break;
       }
       case 'svg':
+        if (el.tag === 'img') {
+          // An SVG drawn as an image: no currentColor from the page, as in a browser.
+          this.papi.setAttribute(ref, 'src', this.resolve(el.attrs.get('src') ?? ''));
+          const alt = el.attrs.get('alt');
+          if (alt) this.papi.setAttribute(ref, 'accessibility-label', alt);
+          // A browser maps an img's width and height attributes to
+          // `aspect-ratio`, so a stylesheet that sets one side gets the other.
+          // Lynx's svg has no picture size to fall back on (an image's
+          // auto-size), so the ratio is set here, inline: it beats an author
+          // `aspect-ratio` on the same img, where a browser's would lose.
+          const ratio = attributeRatio(el);
+          this.papi.setInlineStyles(ref, ratio ? `aspect-ratio: ${ratio}` : '');
+          break;
+        }
         this.papi.setAttribute(ref, 'content', serialize(el));
         this.svgs.set(el, null);
         break;
@@ -285,7 +354,11 @@ export class NativeTree {
     }
   }
 
-  /** Build the Lynx element for `el` (and below) in a block parent. Returns null for `none`. */
+  /**
+   * Build the Lynx element for `el` (and below) in a block parent. Returns
+   * what goes in the parent: null for `none`, and a modal dialog's backdrop
+   * with the dialog inside it.
+   */
   project(el: LynxElement): ElementRef | null {
     const kind = this.kindOf(el);
     el.as = kind;
@@ -303,8 +376,12 @@ export class NativeTree {
 
     if (kind === 'text') {
       this.projectInline(el, ref, { first: true, last: true });
+    } else if (el.tag === 'select') {
+      const selected = selectedOption(el);
+      const label = selected ? optionLabel(selected) : '';
+      if (label) p.append(ref, this.wrapText(el, label));
     } else if (kind === 'view' || kind === 'scroll') {
-      for (const child of el.children) {
+      for (const child of renderedChildren(el)) {
         if (child.kind === 'text') {
           const text = collapse(child.data).trim();
           if (text) p.append(ref, this.wrapText(el, text));
@@ -318,6 +395,18 @@ export class NativeTree {
         const listener: NativeListener = (native) => this.opts.onControlEvent(el, event, native);
         p.addEventListener(ref, event, listener);
       }
+    }
+    if (el.modal && el.attrs.has('open')) {
+      // The browser draws a modal over a ::backdrop box that covers the
+      // viewport. Here that box is an element, and the dialog sits inside
+      // it, where its parent's styles still reach it by inheritance. A tap
+      // on it is a tap on the dialog, as a click on the backdrop is.
+      const backdrop = p.createView(this.pid);
+      this.own(el, backdrop);
+      this.backdrops.set(el, backdrop);
+      p.setClasses(backdrop, backdropClasses(el));
+      p.append(backdrop, ref);
+      return backdrop;
     }
     return ref;
   }
@@ -334,7 +423,7 @@ export class NativeTree {
     let target = el;
     while (target.parent && target.parent.as === 'text') target = target.parent;
     if (!target.ref && target.parent && target.parent.ref) target = target.parent;
-    const previous = target.ref;
+    const previous = target.ref && (this.backdrops.get(target) ?? target.ref);
     if (!previous) {
       // Not on screen, and no projected parent to rebuild from: the model
       // changed, and there is nothing to show yet.
@@ -359,8 +448,18 @@ export class NativeTree {
       }
       return;
     }
-    if (el.tag === 'input' && changed === 'type') {
+    if (
+      (el.tag === 'input' && changed === 'type') ||
+      (el.tag === 'img' && changed === 'src' && el.as !== null && this.kindOf(el) !== el.as) ||
+      ((el.tag === 'details' || el.tag === 'dialog') && changed === 'open')
+    ) {
       this.reproject(el);
+      return;
+    }
+    if (el.tag === 'option') {
+      // Not on screen itself: what it changes is its select's label.
+      const select = selectOf(el);
+      if (select && (changed === 'selected' || changed === 'label' || changed === 'disabled')) this.reproject(select);
       return;
     }
     if (!el.ref) return;

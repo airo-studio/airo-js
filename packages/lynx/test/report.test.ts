@@ -35,17 +35,16 @@ describe('buildReport', () => {
     expect(report.unsupportedSelectors.map((u) => u.selector)).toEqual(['.b[data-x*="y"]']);
     expect(report.droppedMedia).toHaveLength(1);
     expect(report.rewrites['inline-flex']).toBe(1);
-    expect(report.emitted.map((e) => `${e.property}: ${e.value}`)).toEqual([
-      ...['font-size: 16px', 'width: 100%', 'height: 100%', 'display: none', 'overflow: hidden'],
-      ...['font-size: 16px', 'width: 100%', 'height: 100%', 'display: none', 'overflow: hidden'],
-      'width: 100%',
-    ]);
+    // The browser defaults head both stylesheets and are listed once; then b.css's aspect-ratio width.
+    const base = normaliseCss('').report.emitted.length;
+    expect(report.emitted).toHaveLength(base + 1);
+    expect(report.emitted.at(-1)).toMatchObject({ selector: '.p', property: 'width', value: '100%' });
     expect(report.removedProperties).toEqual([{ property: 'place-items', count: 1, locations: [] }]);
   });
 
   it('renders every section in Markdown', () => {
     const md = formatReport(report);
-    for (const heading of ['Properties the encoder removed (1)', 'Selectors the encoder rejects', 'never match', '@media dropped', 'Values left as written', 'Declarations the normaliser added (11)']) {
+    for (const heading of ['Properties the encoder removed (1)', 'Selectors the encoder rejects', 'never match', '@media dropped', 'Values left as written', `Declarations the normaliser added (${normaliseCss('').report.emitted.length + 1})`]) {
       expect(md).toContain(heading);
     }
     expect(md).toContain('`.a:focus-visible` — :focus-visible is rejected by the Lynx encoder a.css:1');

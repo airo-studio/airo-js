@@ -41,8 +41,16 @@ export class LynxElement {
   value = '';
   /** The value when the control gained focus, for `change` on commit. */
   valueAtFocus: string | null = null;
-  /** Set once the user or a handler changed the value: `setAttribute('value')` stops reaching it. */
+  /**
+   * Set once the user or a handler changed the value: `setAttribute('value')`
+   * stops reaching it. On a `<select>`: its selection was set, so having no
+   * option selected means none, not the first.
+   */
   valueDirty = false;
+  /** An `<option>`'s selectedness: from its `selected` attribute, then from picks (`./select.ts`). */
+  selected = false;
+  /** A `<dialog>` opened with `showModal()`, until it closes. */
+  modal = false;
 
   constructor(
     readonly tag: string,
@@ -65,6 +73,7 @@ export function fromParsed(nodes: ParsedNode[]): LynxNode[] {
     }
     if (el.tag === 'textarea') el.value = textContent(el);
     else if (el.tag === 'input') el.value = el.attrs.get('value') ?? '';
+    else if (el.tag === 'option') el.selected = el.attrs.has('selected');
     return el;
   });
 }

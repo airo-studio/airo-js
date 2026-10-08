@@ -95,7 +95,7 @@ function changes(prev, cur) {
   ].slice(0, 10);
 }
 
-const TYPES = { '.bundle': 'application/octet-stream', '.json': 'application/json', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.woff2': 'font/woff2' };
+const TYPES = { '.bundle': 'application/octet-stream', '.json': 'application/json', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${port}`);

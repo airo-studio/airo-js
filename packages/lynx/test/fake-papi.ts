@@ -16,6 +16,8 @@ export interface FakeElement {
   parent: FakeElement | null;
   /** Raw text elements only. */
   text?: string;
+  /** What `__SetInlineStyles` set last. */
+  style?: string;
   listeners: Map<string, Set<(event: unknown) => void>>;
   uiCalls: { method: string; params: Record<string, unknown> }[];
 }
@@ -40,7 +42,7 @@ export interface FakeLynx {
 const NAMES = [
   '__CreatePage', '__GetElementUniqueID', '__CreateView', '__CreateScrollView', '__CreateText', '__CreateRawText', '__CreateImage',
   '__CreateElement', '__AppendElement', '__InsertElementBefore', '__RemoveElement', '__ReplaceElement',
-  '__SetClasses', '__SetID', '__SetAttribute', '__AddEventListener', '__RemoveEventListener',
+  '__SetClasses', '__SetID', '__SetAttribute', '__SetInlineStyles', '__AddEventListener', '__RemoveEventListener',
   '__InvokeUIMethod', '__FlushElementTree',
 ];
 
@@ -104,6 +106,9 @@ export function installFakePapi(scope: Record<string, unknown> = globalThis as u
     },
     __SetAttribute: (el: FakeElement, name: string, value: unknown) => {
       el.attrs[name] = value;
+    },
+    __SetInlineStyles: (el: FakeElement, css: string) => {
+      el.style = css;
     },
     __AddEventListener: (el: FakeElement, name: string, fn: (e: unknown) => void) => {
       const set = el.listeners.get(name) ?? new Set();

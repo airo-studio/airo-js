@@ -46,6 +46,46 @@ const homeBehaviour = (root: HTMLElement, _ctx: Ctx): (() => void) => {
   };
 };
 
+/** Open a native `<dialog>`'s close paths: its close buttons, and a click on the backdrop (the dialog itself). */
+function wireDialog(dialog: HTMLDialogElement): () => void {
+  const onClick = (event: Event): void => {
+    const target = event.target as HTMLElement;
+    if (target === dialog || target.closest('[data-close]')) dialog.close();
+  };
+  dialog.addEventListener('click', onClick);
+  return () => dialog.removeEventListener('click', onClick);
+}
+
+const controlsBehaviour = (root: HTMLElement, ctx: Ctx): (() => void) => {
+  const sheet = root.querySelector<HTMLDialogElement>('#sheet');
+  const toast = root.querySelector<HTMLElement>('[data-toast]');
+  const picked = root.querySelector<HTMLElement>('.picked__value');
+  // The newest toast clears itself; one cleared after the page is gone writes nowhere.
+  let shown = 0;
+  const offs = [
+    on(root, 'click', '[data-action="sheet"]', () => sheet?.showModal()),
+    on(root, 'click', '[data-action="toast"]', () => {
+      if (!toast) return;
+      toast.textContent = 'Saved';
+      const mine = ++shown;
+      setTimeout(() => {
+        if (mine === shown) toast.textContent = '';
+      }, 2000);
+    }),
+    on(root, 'change', '.sort__select', (_e, select) => {
+      if (picked) picked.textContent = (select as HTMLSelectElement).value;
+    }),
+  ];
+  if (sheet) {
+    offs.push(wireDialog(sheet));
+    if (ctx.app.data.open) sheet.showModal();
+  }
+  return () => {
+    shown = -1;
+    for (const off of offs) off();
+  };
+};
+
 const view = (pageType: string, hydrate: (root: HTMLElement, ctx: Ctx) => (() => void) | void) => ({
   id: `${pageType}-view`,
   displayName: pageType,
@@ -59,14 +99,20 @@ export const cartridge: Cartridge<NotesData, Record<string, never>> = {
   mailboxName: '__AIRO_NOTES_PAGES__',
   industry: 'publishing',
   displayName: 'Field notes',
-  description: 'A two-page notes site, rendered on a server and shown natively.',
+  description: 'A small notes site, rendered on a server and shown natively.',
   version: '0.0.0',
   schema: {
     parse: (input) => input as NotesData,
     safeParse: (input) => ({ success: true as const, data: input as NotesData }),
   },
   dataSources: [],
-  views: [view('home', homeBehaviour), view('note', () => {}), view('search', () => {}), view('done', () => {})],
+  views: [
+    view('home', homeBehaviour),
+    view('note', () => {}),
+    view('search', () => {}),
+    view('done', () => {}),
+    view('controls', controlsBehaviour),
+  ],
   templates: [],
   defaultConfig: {},
   defaultTemplateId: 'site',
@@ -82,5 +128,6 @@ export const template: Template<Record<string, never>> = {
     { id: 'note', type: 'note', enabled: true },
     { id: 'search', type: 'search', enabled: true },
     { id: 'done', type: 'done', enabled: true },
+    { id: 'controls', type: 'controls', enabled: true },
   ],
 };

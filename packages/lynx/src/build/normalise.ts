@@ -8,6 +8,7 @@
  * | rewrite | why |
  * |---|---|
  * | `html`, `body` → `.airo-lynx-page`, plus `font-size: 16px` on it | there is no `<body>`; `rem` follows the page element, whose default is 14px |
+ * | a relative `font-size` on `html` or `body` (`rem`, `em`, `%`) → px | both are the page, which `rem` follows: `body { font-size: 1rem }` would refer to itself and fall back to 14px |
  * | type selectors → `.tag-<name>` | Lynx matches its own tags (`view`, `text`), never `h1` |
  * | `[n]` → `.a-n`, `[n="v"]` → `.a-n--v` | attribute selectors parse but never match; the runtime mirrors attributes into these classes |
  * | selectors the encoder rejects are split out of their list | the encoder drops the whole rule when one selector in its list fails to parse |
@@ -15,12 +16,15 @@
  * | `display: none` → plus `overflow: hidden` | Lynx lays a `display: none` box out at 0×0 but still paints the text inside it |
  * | the HTML UA rule `[hidden] { display: none }`, as `.a-hidden` | there is no UA stylesheet on device |
  * | `.airo-lynx-viewport` fills the page | the mount's scroller stands in for the viewport, which is the size of the screen |
+ * | `:empty` → `.airo-lynx-empty`, `:modal` → `.airo-lynx-modal` | both parse and never match; the runtime puts the class on the elements they would match |
+ * | `X::backdrop` → `X`'s classes as `.airo-lynx-backdrop--<class>` | the encoder rejects `::backdrop`; a modal's backdrop is an element on device, carrying one such class per class of its dialog |
+ * | the HTML UA rules for `<dialog>` that place it: closed, modal, backdrop | there is no UA stylesheet on device |
  * | `font` shorthand → longhands | the encoder removes the shorthand |
  * | `inset` → `top` / `right` / `bottom` / `left` | the encoder removes the shorthand |
  * | `env(name, fallback)` → the fallback; a safe-area inset with none → `0px` | `env()` is not parsed, and takes the declaration (a `calc()` round it included) with it |
  * | static `calc()` in `:root` tokens and `border-radius` → its value | `calc()` in a radius reads as 0 |
  * | `aspect-ratio` with no width → plus `width: 100%` | Lynx applies `aspect-ratio` only to an explicit width |
- * | literal `oklch()` → sRGB | not parsed in a declaration (it is through a token) |
+ * | colour syntax other than `rgb(r, g, b)` / `rgba(r, g, b, a)` and hex → `rgb()` / `rgba()`, tokens included | `oklch()` paints nothing, in a declaration or a token (CSS Color 4 syntax is not read) |
  * | `color-mix()` → sRGB, per theme | not parsed at all |
  * | `@media (prefers-color-scheme: …)` → the page's theme class | `@media` is dropped at engine 3.9 |
  *
@@ -38,7 +42,18 @@
 
 import * as csstree from 'css-tree';
 
-import { attrClass, DARK_CLASS, PAGE_CLASS, tagClass, VIEWPORT_CLASS } from '../shared/attr-class.js';
+import {
+  attrClass,
+  BACKDROP_CLASS,
+  backdropClass,
+  CLOSED_DIALOG_CLASS,
+  DARK_CLASS,
+  EMPTY_CLASS,
+  MODAL_CLASS,
+  PAGE_CLASS,
+  tagClass,
+  VIEWPORT_CLASS,
+} from '../shared/attr-class.js';
 import { formatSrgb, mixColours, parseColour } from './colour.js';
 import { evalCalc, replaceCalls, resolveVars, splitTopLevel, type TokenTable, UnresolvableValueError } from './values.js';
 
@@ -79,6 +94,7 @@ export interface UnresolvedValue {
 
 export type RewriteKind =
   | 'page-selector'
+  | 'page-font-size'
   | 'type-selector'
   | 'attribute-selector'
   | 'rejected-selector-split'
@@ -89,7 +105,10 @@ export type RewriteKind =
   | 'env'
   | 'calc'
   | 'aspect-ratio-width'
-  | 'oklch'
+  | 'empty'
+  | 'modal'
+  | 'backdrop'
+  | 'colour-function'
   | 'color-mix'
   | 'color-scheme-media'
   | 'dark-variant';
@@ -187,7 +206,28 @@ const CITE = {
   hiddenUa: 'HTML §15.3.1 UA stylesheet: `[hidden] { display: none }`',
   viewport:
     'CSS 2.1 §10.1: the initial containing block has the dimensions of the viewport, which scrolls when the document overflows it; the scroller standing in for it fills the page',
+  closedDialog: 'HTML §15.3.3 UA stylesheet: `dialog:not([open]) { display: none }`',
+  modal: 'HTML §15.3.3 UA stylesheet: `dialog:modal { overflow: auto }`',
+  backdrop: 'CSS Positioned Layout 4, the top layer: `::backdrop { position: fixed; inset: 0 }`',
+  modalPlacement:
+    'HTML §15.3.3 places a modal dialog with `position: fixed; inset: 0; width: fit-content; height: fit-content` and lets its margins move it in that box; Lynx ignores `auto` margins on a positioned box and honours them on a flex item, so the backdrop, which covers the same box, lays the dialog out as one',
+  topLayer:
+    'CSS Positioned Layout 4, the top layer: a modal dialog and its backdrop paint above every stacking context; on device the largest z-index stands in for it',
 } as const;
+
+/**
+ * Colour functions lowered to `rgb()` / `rgba()`. The encoder reads hex and
+ * `rgb(r, g, b)` / `rgba(r, g, b, a)`; `oklch()` paints nothing, in a
+ * declaration or in a token read through `var()` (measured on the iOS
+ * simulator, 8 Oct 2026, with lightningcss no longer lowering tokens first).
+ * The rest of CSS Color 4 is lowered with it rather than left to chance:
+ * `oklab()`, `lab()`, `lch()`, `hwb()`, `color()`, `hsl()`, and `rgb()` in
+ * the space-separated form.
+ */
+const COLOUR_FUNCTIONS = ['oklch', 'oklab', 'lab', 'lch', 'hwb', 'color', 'hsl', 'hsla', 'rgb', 'rgba'];
+/** Lowered only in the space-separated form; with commas they already read. */
+const LEGACY_SYNTAX = new Set(['rgb', 'rgba']);
+const COLOUR_CALL = new RegExp(`(^|[^\\w-])(${COLOUR_FUNCTIONS.join('|')})\\(`, 'i');
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -239,6 +279,32 @@ function colourSchemeOf(query: string): 'dark' | 'light' | null {
 
 // ── tokens ──────────────────────────────────────────────────────────────────
 
+/** `medium`, the initial font size of the root element (CSS Fonts 4 §2.5). */
+const MEDIUM_PX = 16;
+
+/**
+ * The root font size the stylesheet gives `html` / `:root` (top-level rules,
+ * the last one winning): px as written, `%`, `em` and `rem` of `medium`.
+ * `medium` when none sets it, or sets it in a way the build cannot compute.
+ */
+function collectRootFontSize(sheet: Plain[]): number {
+  let px = MEDIUM_PX;
+  for (const node of sheet) {
+    if (node.type !== 'Rule' || node.prelude.type !== 'SelectorList') continue;
+    if (!(node.prelude.children as PlainSelector[]).every((s) => isRootCompound(s, false))) continue;
+    for (const d of node.block.children) {
+      if (d.type !== 'Declaration') continue;
+      const property = d.property.toLowerCase();
+      let value = valueText(d);
+      if (property === 'font') value = value.replace(/\s*\/\s*/g, '/').split(/\s+/).find((w) => /^\d*\.?\d+(px|rem|em|%)(\/|$)/i.test(w))?.split('/')[0] ?? '';
+      else if (property !== 'font-size') continue;
+      const m = /^(\d*\.?\d+)(px|rem|em|%)$/i.exec(value.trim());
+      if (m) px = Number(m[1]) * (m[2]!.toLowerCase() === 'px' ? 1 : m[2] === '%' ? MEDIUM_PX / 100 : MEDIUM_PX);
+    }
+  }
+  return px;
+}
+
 /**
  * The custom properties each theme declares at the root. Light: top-level
  * `:root` / `html` rules. Dark: light, overlaid with the root rules inside
@@ -272,6 +338,9 @@ function collectTokens(sheet: Plain[]): { light: Map<string, string>; dark: Map<
 
 type Theme = 'both' | 'light' | 'dark';
 
+/** A rule that styles the page element itself, and which of the two elements it was written for. */
+type PageRule = 'html' | 'body' | null;
+
 interface Context {
   theme: Theme;
   inKeyframes: boolean;
@@ -280,16 +349,20 @@ interface Context {
 class Normaliser {
   readonly report: NormaliseReport;
   private readonly tokens: { light: TokenTable; dark: TokenTable };
+  /** The root font size a browser computes from the stylesheet's `html` / `:root` rules: what `rem` is. */
+  private readonly rootFontPx: number;
 
   constructor(
     private readonly file: string,
     sheet: Plain[],
   ) {
     this.tokens = collectTokens(sheet);
+    this.rootFontPx = collectRootFontSize(sheet);
     this.report = {
       file,
       rewrites: {
         'page-selector': 0,
+        'page-font-size': 0,
         'type-selector': 0,
         'attribute-selector': 0,
         'rejected-selector-split': 0,
@@ -300,7 +373,10 @@ class Normaliser {
         env: 0,
         calc: 0,
         'aspect-ratio-width': 0,
-        oklch: 0,
+        empty: 0,
+        modal: 0,
+        backdrop: 0,
+        'colour-function': 0,
         'color-mix': 0,
         'color-scheme-media': 0,
         'dark-variant': 0,
@@ -362,6 +438,14 @@ class Normaliser {
     }
     const kept: PlainSelector[] = [];
     const selectors = rule.prelude.children as PlainSelector[];
+    // Whether the rule styles the page itself, as html or as body: what a relative font-size there is relative to.
+    const isBody = (sel: PlainSelector): boolean =>
+      sel.children.length === 1 && sel.children[0]!.type === 'TypeSelector' && sel.children[0]!.name.toLowerCase() === 'body';
+    const page: PageRule = selectors.every((sel) => isRootCompound(sel, true))
+      ? 'html'
+      : selectors.every(isBody)
+        ? 'body'
+        : null;
     for (const selector of selectors) {
       const original = gen(selector as Plain);
       const rejected = this.rewriteSelector(selector, original);
@@ -376,7 +460,7 @@ class Normaliser {
     rule.prelude.children = kept.map((s) => this.themed(s, ctx.theme));
 
     const selectorText = gen(rule.prelude as Plain);
-    const { dark } = this.declarations(rule, selectorText, ctx);
+    const { dark } = this.declarations(rule, selectorText, ctx, page);
     if (!dark.length) return [rule];
 
     // The light value stays in place; a twin rule scoped to the dark page
@@ -400,6 +484,7 @@ class Normaliser {
    */
   private rewriteSelector(selector: PlainSelector, original: string): string | null {
     let rejected: string | null = null;
+    let backdrop = false;
     const warn = (reason: string): void => {
       this.report.unsupported.push({ selector: original, reason, removed: false, loc: this.loc(selector) });
     };
@@ -442,12 +527,20 @@ class Normaliser {
           }
           case 'PseudoElementSelector': {
             const name = node.name.toLowerCase();
+            if (name === 'backdrop') {
+              backdrop = true;
+              return node;
+            }
             if (!PARSED_PSEUDO_ELEMENTS.has(name)) rejected ??= `::${name} is rejected by the Lynx encoder`;
             else if (PARSED_PSEUDO_ELEMENTS.get(name)) warn(`::${name} ${PARSED_PSEUDO_ELEMENTS.get(name)}`);
             return node;
           }
           case 'PseudoClassSelector': {
             const name = node.name.toLowerCase();
+            if (name === 'empty' || name === 'modal') {
+              this.report.rewrites[name]++;
+              return cls(name === 'empty' ? EMPTY_CLASS : MODAL_CLASS);
+            }
             if (REJECTED_PSEUDO_CLASSES.has(name)) rejected ??= `:${name} is rejected by the Lynx encoder`;
             else if (NEVER_MATCHING_PSEUDO_CLASSES.has(name)) warn(`:${name} parses but never matches on device`);
             else if (PARSED_PSEUDO_ELEMENTS.get(name)) warn(`:${name} ${PARSED_PSEUDO_ELEMENTS.get(name)}`);
@@ -467,7 +560,31 @@ class Normaliser {
         }
       });
     selector.children = visit(selector.children);
+    if (backdrop && !rejected) rejected = this.rewriteBackdrop(selector);
     return rejected;
+  }
+
+  /**
+   * `X::backdrop` → the classes the backdrop of a dialog matching `X` carries:
+   * one `backdropClass(c)` for each class `c` in `X`'s last compound, which by
+   * now holds only classes (types and mirrored attributes have been
+   * rewritten to theirs). Returns why it cannot be, or null.
+   */
+  private rewriteBackdrop(selector: PlainSelector): string | null {
+    const nodes = selector.children;
+    const at = nodes.findIndex((n) => n.type === 'PseudoElementSelector');
+    let start = at;
+    while (start > 0 && nodes[start - 1]!.type !== 'Combinator') start--;
+    const compound = nodes.slice(start, at).filter((n) => !(n.type === 'TypeSelector' && n.name === '*'));
+    if (at !== nodes.length - 1 || compound.some((n) => n.type !== 'ClassSelector')) {
+      return '::backdrop on device is an element with a class per class of its dialog; only a dialog named by classes, its type and mirrored attributes reaches it';
+    }
+    this.report.rewrites.backdrop++;
+    const classes = compound.length
+      ? compound.map((n) => cls(backdropClass((n as csstree.ClassSelector).name)))
+      : [cls(BACKDROP_CLASS)];
+    selector.children = [...nodes.slice(0, start), ...classes];
+    return null;
   }
 
   /** Scope a selector to one theme by the page's class. 'both' leaves it alone. */
@@ -494,7 +611,7 @@ class Normaliser {
    * Rewrite a rule's declarations in place. Returns the dark-theme values of
    * declarations whose colour differs by theme (only in a 'both' context).
    */
-  private declarations(rule: PlainRule, selector: string, ctx: Context): { dark: PlainDeclaration[] } {
+  private declarations(rule: PlainRule, selector: string, ctx: Context, page: PageRule = null): { dark: PlainDeclaration[] } {
     const out: Plain[] = [];
     const dark: PlainDeclaration[] = [];
     const isTokenRule =
@@ -552,10 +669,11 @@ class Normaliser {
         const longhands = this.expandFont(value, selector, loc);
         if (longhands) {
           this.report.rewrites['font-shorthand']++;
-          for (const [p, v] of longhands) out.push(decl(p, v, d.important));
+          for (const [p, v] of longhands) out.push(decl(p, p === 'font-size' ? this.pageFontSize(v, page, loc) : v, d.important));
           continue;
         }
       }
+      if (property === 'font-size') value = this.pageFontSize(value, page, loc);
 
       const isRadius = property.startsWith('border') && property.includes('radius');
       if ((isTokenRule && property.startsWith('--')) || isRadius) {
@@ -579,17 +697,15 @@ class Normaliser {
         value = next;
       }
 
-      const custom = property.startsWith('--');
       const hasMix = /color-mix\(/i.test(value);
-      const hasOklch = !custom && /(^|[^\w-])oklch\(/i.test(value);
-      if (hasMix || hasOklch) {
-        const lightValue = this.lowerColours(value, table, loc);
+      if (hasMix || COLOUR_CALL.test(value)) {
+        const lightValue = this.lowerColours(value, table, loc, property);
         if (ctx.theme === 'both' && /var\(/i.test(value)) {
-          const darkValue = this.lowerColours(value, this.tokens.dark, loc);
+          const darkValue = this.lowerColours(value, this.tokens.dark, loc, null);
           if (darkValue !== lightValue) dark.push(decl(d.property, darkValue, d.important));
         }
         if (hasMix) this.report.rewrites['color-mix']++;
-        if (hasOklch) this.report.rewrites.oklch++;
+        else if (lightValue !== value) this.report.rewrites['colour-function']++;
         value = lightValue;
       }
 
@@ -617,20 +733,66 @@ class Normaliser {
     return { dark };
   }
 
-  /** `color-mix()` and literal `oklch()` → sRGB, with tokens from one theme. */
-  private lowerColours(value: string, tokens: TokenTable, loc: SourceLocation | null): string {
+  /**
+   * `color-mix()` and every other colour function → `rgb()` / `rgba()`, with
+   * tokens from one theme. A `color-mix()` the build cannot resolve fails it;
+   * any other colour it cannot resolve (a `var()` that is not a `:root`
+   * token, relative colour syntax) is left as written and, when `property`
+   * is given, reported.
+   */
+  private lowerColours(value: string, tokens: TokenTable, loc: SourceLocation | null, property: string | null): string {
     const evalColour = (text: string): ReturnType<typeof parseColour> => {
       const resolved = resolveVars(text, tokens).trim();
       if (/^color-mix\(/i.test(resolved)) return mixColours(resolved.slice(resolved.indexOf('(') + 1, -1), evalColour);
       return parseColour(resolved);
     };
+    let out: string;
     try {
-      const mixed = replaceCalls(value, 'color-mix', (call) => formatSrgb(mixColours(call.inner, evalColour)));
-      return replaceCalls(mixed, 'oklch', (call) => formatSrgb(evalColour(mixed.slice(call.start, call.end))));
+      out = replaceCalls(value, 'color-mix', (call) => formatSrgb(mixColours(call.inner, evalColour)));
     } catch (err) {
       if (err instanceof UnresolvableValueError) throw new NormaliseError(`cannot lower "${value}": ${err.message}`, loc);
       throw err;
     }
+    for (const name of COLOUR_FUNCTIONS) {
+      const text = out;
+      out = replaceCalls(text, name, (call) => {
+        const source = text.slice(call.start, call.end);
+        if (LEGACY_SYNTAX.has(name) && call.inner.includes(',')) return source;
+        try {
+          return formatSrgb(evalColour(source));
+        } catch (err) {
+          if (!(err instanceof UnresolvableValueError)) throw err;
+          if (property) {
+            this.report.unresolved.push({ property, value: source, reason: 'a colour the build cannot resolve; the encoder may not read it', loc });
+          }
+          return source;
+        }
+      });
+    }
+    return out;
+  }
+
+  /**
+   * A relative font size on the page element, in px. On device `html` and
+   * `body` are one element and `rem` follows its font size, so `1rem` there
+   * would refer to itself. A browser resolves `html`'s against `medium` and
+   * `body`'s against the root size. Anywhere else, `value` is left alone.
+   */
+  private pageFontSize(value: string, page: PageRule, loc: SourceLocation | null): string {
+    const m = page && /^(\d*\.?\d+)(rem|em|%)$/i.exec(value.trim());
+    if (!m) return value;
+    const base = page === 'html' ? MEDIUM_PX : this.rootFontPx;
+    const px = Math.round(Number(m[1]) * base * (m[2] === '%' ? 0.01 : 1) * 1000) / 1000;
+    this.report.rewrites['page-font-size']++;
+    if (page === 'body' && px !== this.rootFontPx) {
+      this.report.unresolved.push({
+        property: 'font-size',
+        value,
+        reason: `html and body are one element on device, so rem there is body's ${px}px where a browser's is html's ${this.rootFontPx}px`,
+        loc,
+      });
+    }
+    return `${px}px`;
   }
 
   /** `inset: a b c d` → the four sides, as any box shorthand. Null (and reported) when a `var()` hides how many values there are. */
@@ -721,19 +883,33 @@ export function normaliseCss(css: string, options: NormaliseOptions = {}): Norma
   const children = normaliser.list(plain.children, { theme: 'both', inKeyframes: false });
 
   // The browser's own defaults the device lacks, first so every author rule wins over them.
-  const hidden = `.${attrClass('hidden')}`;
-  const viewport = `.${VIEWPORT_CLASS}`;
-  const pageRule = csstree.toPlainObject(
-    csstree.parse(`.${PAGE_CLASS}{font-size:16px}${viewport}{width:100%;height:100%}${hidden}{display:none;overflow:hidden}`),
+  const inset = (cite: string): [string, string, string][] =>
+    ['top', 'right', 'bottom', 'left'].map((side) => [side, '0', cite] as [string, string, string]);
+  const base: [selector: string, declarations: [property: string, value: string, cite: string][]][] = [
+    [`.${PAGE_CLASS}`, [['font-size', '16px', CITE.pageFontSize]]],
+    [`.${VIEWPORT_CLASS}`, [['width', '100%', CITE.viewport], ['height', '100%', CITE.viewport]]],
+    [`.${attrClass('hidden')}`, [['display', 'none', CITE.hiddenUa], ['overflow', 'hidden', CITE.displayNone]]],
+    [`.${CLOSED_DIALOG_CLASS}`, [['display', 'none', CITE.closedDialog]]],
+    [`.${MODAL_CLASS}`, [['overflow', 'auto', CITE.modal]]],
+    [
+      `.${BACKDROP_CLASS}`,
+      [
+        ['position', 'fixed', CITE.backdrop],
+        ...inset(CITE.backdrop),
+        ['z-index', '2147483647', CITE.topLayer],
+        ['display', 'flex', CITE.modalPlacement],
+        ['flex-direction', 'column', CITE.modalPlacement],
+        ['align-items', 'flex-start', CITE.modalPlacement],
+      ],
+    ],
+  ];
+  const baseRules = csstree.toPlainObject(
+    csstree.parse(base.map(([selector, decls]) => `${selector}{${decls.map(([p, v]) => `${p}:${v}`).join(';')}}`).join('')),
   ) as csstree.StyleSheetPlain;
   normaliser.report.emitted.unshift(
-    { selector: `.${PAGE_CLASS}`, property: 'font-size', value: '16px', cite: CITE.pageFontSize, loc: null },
-    { selector: viewport, property: 'width', value: '100%', cite: CITE.viewport, loc: null },
-    { selector: viewport, property: 'height', value: '100%', cite: CITE.viewport, loc: null },
-    { selector: hidden, property: 'display', value: 'none', cite: CITE.hiddenUa, loc: null },
-    { selector: hidden, property: 'overflow', value: 'hidden', cite: CITE.displayNone, loc: null },
+    ...base.flatMap(([selector, decls]) => decls.map(([property, value, cite]) => ({ selector, property, value, cite, loc: null }))),
   );
-  plain.children = [...pageRule.children, ...children];
+  plain.children = [...baseRules.children, ...children];
 
   return { css: csstree.generate(csstree.fromPlainObject(plain)), report: normaliser.report };
 }

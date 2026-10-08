@@ -248,7 +248,7 @@ describe('navigation', () => {
   });
 
   it('keeps the old page when the new markup cannot be built', async () => {
-    start({ onNavigate: async () => ({ ...ITEM, html: '<dialog open>x</dialog>' }) });
+    start({ onNavigate: async () => ({ ...ITEM, html: '<video>x</video>' }) });
     fake.tap(fake.byClass('go'));
     await flushed();
     expect(mount!.nav?.page).toBe('home');

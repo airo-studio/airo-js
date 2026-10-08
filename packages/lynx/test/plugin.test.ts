@@ -51,6 +51,11 @@ describe('pluginAiroLynx config', () => {
     expect(asked.config.performance?.chunkSplit).toBeUndefined();
   });
 
+  it('turns lightningcss off, which would merge the normaliser\'s four sides back into `inset`', () => {
+    expect(apply({}).config.tools?.lightningcssLoader).toBe(false);
+    expect(apply({ tools: { lightningcssLoader: { targets: ['safari >= 16'] } } }).config.tools?.lightningcssLoader).toBe(false);
+  });
+
   it('turns CSS minification off and leaves JavaScript minification as it was', () => {
     expect(apply({ output: { minify: { js: true } } }).config.output?.minify).toEqual({ js: true, css: false });
     expect(apply({ output: { minify: false } }).config.output?.minify).toBe(false);

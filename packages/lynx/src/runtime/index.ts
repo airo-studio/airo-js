@@ -6,6 +6,7 @@
 
 export { mountLynx, type ColorScheme, type LynxMount, type LynxPage, type MountLynxOptions } from './mount.js';
 export type { NavigateRequest } from './navigation.js';
+export type { PickOption, PickRequest } from './select.js';
 export {
   LynxRefusalError,
   UnmappedElementError,

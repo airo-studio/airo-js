@@ -12,3 +12,7 @@ declare function setTimeout(fn: () => void, ms: number): number;
 
 /** Where device reports go during a device check; empty otherwise. Set at build time. */
 declare const AIRO_LYNX_COLLECTOR: string;
+/** The url of the first page the card shows (`AIRO_LYNX_START`, default `/`). Set at build time. */
+declare const AIRO_LYNX_START: string;
+/** Where the pages' images resolve: the device check's server, or the dev server. Set at build time. */
+declare const AIRO_LYNX_ASSETS: string;

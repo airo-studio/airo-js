@@ -22,6 +22,8 @@ export interface NotesData {
   query?: string;
   /** Set after subscribing. */
   list?: string;
+  /** The controls page with `?open=1`: its details open and its sheet shown, for a check that cannot tap. */
+  open?: boolean;
 }
 
 const NOTES: Note[] = [
@@ -81,6 +83,7 @@ function home(data: NotesData): string {
       '<form class="subscribe" action="/subscribe" method="post"><input type="hidden" name="list" value="weekly">',
       '<button class="btn" type="submit">Subscribe weekly</button></form>',
       '<figure class="art"><div class="art__frame"></div><figcaption>An aspect-ratio box with no width of its own.</figcaption></figure>',
+      `<a class="back" href="/controls">Controls${icon('m9 18 6-6-6-6')}</a>`,
     ].join(''),
   );
 }
@@ -110,6 +113,35 @@ function search(data: NotesData): string {
   );
 }
 
+/**
+ * The elements a browser gives behaviour of its own, and two things a device
+ * does not size or match by itself: a logo sized by its height only, and a
+ * toast hidden by `:empty`.
+ */
+function controls(data: NotesData): string {
+  return frame(
+    [
+      `<a class="back" href="/">${icon('m15 18-6-6 6-6')}All notes</a>`,
+      '<h1>Controls</h1>',
+      '<div class="logos"><img class="logo" src="logo.svg" width="360" height="136" alt="Field notes, an SVG">',
+      '<img class="logo" src="logo.png" width="360" height="136" alt="Field notes, a PNG"></div>',
+      `<details class="faq"${data.open ? ' open' : ''}><summary class="faq__q">${icon('m6 9 6 6 6-6', 'icon chevron')}What is a field note?</summary>`,
+      '<p class="faq__a">A short note, written slowly and revised often.</p></details>',
+      '<form class="sort" action="/search" method="get"><label class="field">Sort by <select class="sort__select" name="sort">',
+      '<option value="new">Newest</option><option value="old" selected>Oldest</option>',
+      '<optgroup label="Other"><option value="az">A to Z</option><option value="za" disabled>Z to A</option></optgroup>',
+      '</select></label></form>',
+      '<p class="picked">Sorted by <span class="picked__value">old</span></p>',
+      '<div class="row"><button class="btn" type="button" data-action="sheet">Open the sheet</button>',
+      '<button class="btn" type="button" data-action="toast">Show a toast</button></div>',
+      '<dialog class="sheet" id="sheet" aria-labelledby="sheet-title"><h2 class="sheet__title" id="sheet-title">A bottom sheet</h2>',
+      '<p>Tap outside it, or the button, to close it.</p><button class="btn" type="button" data-close>Close</button></dialog>',
+      '<p class="toast" data-toast></p>',
+      '<nav class="tabbar"><a class="tabbar__link" href="/">Home</a><a class="tabbar__link" href="/controls">Controls</a></nav>',
+    ].join(''),
+  );
+}
+
 function subscribed(data: NotesData): string {
   return frame(
     `<a class="back" href="/">${icon('m15 18-6-6 6-6')}All notes</a><h1>Subscribed</h1><p class="lede">You are on the ${esc(data.list ?? '')} list.</p>`,
@@ -123,8 +155,12 @@ const field = (fields: NavigateRequest['fields'], name: string): string => {
 
 /** What the server would answer for a request. */
 export function renderPage(req: Pick<NavigateRequest, 'url' | 'method' | 'fields'>): LynxPage<NotesData> {
-  const path = req.url.split('?')[0]!;
+  const [path = '/', query = ''] = req.url.split('?');
   const data: NotesData = { notes: NOTES };
+  if (path === '/controls') {
+    data.open = /(^|&)open=1(&|$)/.test(query);
+    return { html: controls(data), snapshot: data, nav: { page: 'controls' } };
+  }
   if (path === '/search') {
     data.query = field(req.fields, 'q');
     return { html: search(data), snapshot: data, nav: { page: 'search' } };

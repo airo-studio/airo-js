@@ -123,4 +123,16 @@ Follow-ups for the planned `@airo-js/lynx` native render adapter (one package, `
 **Priority:** P3
 **Depends on:** An upstream encoder release
 
+### Emit the browser defaults once per card, not once per stylesheet
+
+**What:** have `pluginAiroLynx()` emit the normaliser's browser-default rules (`.airo-lynx-page`, `.a-hidden`, the dialog and backdrop rules) once, ahead of every stylesheet, instead of at the head of each one.
+
+**Why:** each `.css` module the bundler sees is normalised on its own, so a card with two stylesheets gets the defaults again after the first one's rules, and at equal specificity they then win: `.airo-lynx-page { font-size: 16px }` over the first sheet's `body` size, `.airo-lynx-modal { overflow: auto }` over its dialog's. Tokens are also read per stylesheet, so `color-mix()` across files fails today anyway; the first consumer concatenates its sheets into one file for that reason, and the README says to.
+
+**Context:** a virtual stylesheet added through `source.preEntry`, with `normaliseCss` taking a `base: false` option, is the likely shape; the report already lists the defaults once. Trigger: the first card that ships more than one stylesheet, or cross-file tokens.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** Nothing
+
 ## Completed

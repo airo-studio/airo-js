@@ -41,12 +41,12 @@ describe('mapping table', () => {
 
   it('containers become views and their loose text a synthesised text', () => {
     build('<div class="row"><svg viewBox="0 0 1 1"></svg>Label</div>');
-    expect(inner()).toBe('view.row.tag-div(svg.tag-svg.a-viewbox, text("Label"))');
+    expect(inner()).toBe('view.row.tag-div(svg.airo-lynx-empty.tag-svg.a-viewbox, text("Label"))');
   });
 
   it('a text tag with a block or an svg inside becomes a view', () => {
     build('<p class="meta"><svg></svg>Lisbon</p>');
-    expect(inner()).toBe('view.meta.tag-p(svg.tag-svg, text("Lisbon"))');
+    expect(inner()).toBe('view.meta.tag-p(svg.airo-lynx-empty.tag-svg, text("Lisbon"))');
   });
 
   it('a and button outside running text are views', () => {
@@ -86,8 +86,9 @@ describe('mapping table', () => {
   });
 
   it('refuses an element it has no mapping for, by name', () => {
-    expect(() => build('<div><select name="s"></select></div>')).toThrow(UnmappedElementError);
-    expect(() => build('<details><summary>x</summary></details>')).toThrow(/<details>/);
+    expect(() => build('<div><video src="a.mp4"></video></div>')).toThrow(UnmappedElementError);
+    expect(() => build('<select multiple></select>')).toThrow(/<select multiple>/);
+    expect(() => build('<select size="4"></select>')).toThrow(/<select size="4">/);
     expect(() => build('<input type="checkbox">')).toThrow(/input type="checkbox"/);
   });
 
@@ -139,7 +140,7 @@ describe('mirror classes', () => {
     build('<div class="card" data-state="open" hidden aria-pressed="true" id="c1"></div>');
     const el = fake.byClass('card');
     expect(el.classes).toBe(
-      'card tag-div a-data-state a-data-state--open a-hidden a-hidden-- a-aria-pressed a-aria-pressed--true',
+      'airo-lynx-empty card tag-div a-data-state a-data-state--open a-hidden a-hidden-- a-aria-pressed a-aria-pressed--true',
     );
     expect(el.id).toBe('c1');
   });
@@ -154,7 +155,7 @@ describe('keeping in step', () => {
     insertChildren(a, [new LynxText('two')]);
     tree.reproject(a);
     expect(a.ref).not.toBe(oldRef);
-    expect(inner()).toBe('view.a.tag-div(text("two")), view.b.tag-div');
+    expect(inner()).toBe('view.a.tag-div(text("two")), view.airo-lynx-empty.b.tag-div');
   });
 
   it('re-projects from the outermost text when inline content changes', () => {

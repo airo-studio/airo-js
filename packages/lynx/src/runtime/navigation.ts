@@ -10,12 +10,14 @@
  * Form fields follow the HTML form-submission rules for the controls the
  * device has: a control counts when it has a name and is not disabled
  * (itself or through a disabled fieldset); text inputs and textareas give
- * their current value, hidden inputs their markup value, the submitter
- * button its own name and value; a repeated name keeps every value, in tree
- * order.
+ * their current value, hidden inputs their markup value, a select its
+ * selected option's value (nothing when none is, or it is disabled), the
+ * submitter button its own name and value; a repeated name keeps every
+ * value, in tree order.
  */
 
 import { descendants, type LynxElement } from './node-model.js';
+import { isDisabledOption, optionValue, selectedOption } from './select.js';
 
 export interface NavigateRequest {
   /** The `href` or form `action` as written in the markup; the host resolves it. */
@@ -70,6 +72,9 @@ export function formRequest(form: LynxElement, submitter: LynxElement | null): N
       entries.push([name, el.value]);
     } else if (el.tag === 'textarea') {
       entries.push([name, el.value]);
+    } else if (el.tag === 'select') {
+      const option = selectedOption(el);
+      if (option && !isDisabledOption(option)) entries.push([name, optionValue(option)]);
     } else if (el.tag === 'button' && el === submitter) {
       entries.push([name, el.attrs.get('value') ?? '']);
     }

@@ -152,7 +152,7 @@ describe('content', () => {
       box.innerHTML = 'a&nbsp;b';
     }).toThrow(HtmlParseError);
     expect(() => {
-      box.innerHTML = '<select></select>';
+      box.innerHTML = '<video></video>';
     }).toThrow(UnmappedElementError);
     expect(box.textContent).toBe('kept');
     expect(p.errors).toHaveLength(2);
@@ -178,14 +178,14 @@ describe('refusals', () => {
     p = page('<div class="d"></div>');
     const d = p.root.querySelector('.d');
     expect(() => d.getBoundingClientRect()).toThrow(LynxRefusalError);
-    expect(() => d.showModal()).toThrow(/Element\.showModal is not available on device/);
+    expect(() => d.showModal()).toThrow(/<div>\.showModal\(\) is not available on device/);
     expect(() => {
       d.style.color = 'red';
     }).toThrow(/Element\.style/);
     expect(() => {
       d.onclick = () => {};
     }).toThrow(/setting Element\.onclick/);
-    expect(p.errors.map((e) => e.member)).toEqual(['Element.getBoundingClientRect', 'Element.showModal', 'Element.style', 'setting Element.onclick']);
+    expect(p.errors.map((e) => e.member)).toEqual(['Element.getBoundingClientRect', '<div>.showModal()', 'Element.style', 'setting Element.onclick']);
     expect(events.filter((e) => e.level === 'error' && e.channel === 'lynx')).toHaveLength(4);
   });
 

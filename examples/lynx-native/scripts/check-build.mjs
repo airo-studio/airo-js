@@ -6,9 +6,12 @@
  *
  *   - the bundle's page config has `"enableCSSInheritance":true`;
  *   - the stylesheet reached the encoder normalised: no `color-mix()`,
- *     `inline-flex` or `calc()` left, and the page / tag / mirror classes in;
+ *     `oklch()` (tokens included), `inline-flex` or `calc()` left, and the
+ *     page / tag / mirror classes in;
  *   - the bundle is one chunk: a split chunk (`exports.ids=…`) is CommonJS
  *     the vanilla loader runs on neither thread, and the card never starts;
+ *   - nothing after the normaliser undid it: no `inset` reached the encoder
+ *     (lightningcss merges four sides back into one, which the encoder removes);
  *   - the report was written, and counts what this stylesheet exercises.
  */
 
@@ -30,23 +33,38 @@ const report = JSON.parse(readFileSync(new URL('airo-lynx-report.json', dist), '
 check(/"enableCSSInheritance":true/.test(bundle), 'bundle page config does not enable CSS inheritance');
 check(!/exports\.ids=/.test(bundle), 'a split chunk reached the bundle (exports.ids=…): the card would not start on device');
 check(!/"enableCSSInheritance":false/.test(bundle), 'bundle page config still says enableCSSInheritance false');
-for (const gone of ['color-mix', 'inline-flex', 'calc(', 'focus-visible']) {
+for (const gone of ['color-mix', 'oklch', 'inline-flex', 'calc(', 'focus-visible']) {
   check(!bundle.includes(gone), `"${gone}" reached the encoder`);
 }
-for (const present of ['airo-lynx-page', 'airo-lynx-dark', 'tag-h1', 'a-hidden', 'a-aria-expanded--true']) {
+for (const present of [
+  'airo-lynx-page',
+  'airo-lynx-dark',
+  'tag-h1',
+  'a-hidden',
+  'a-aria-expanded--true',
+  'airo-lynx-empty',
+  'airo-lynx-closed',
+  'airo-lynx-modal',
+  'airo-lynx-backdrop--sheet',
+]) {
   check(bundle.includes(present), `"${present}" is missing from the encoded stylesheet`);
 }
 
 const expected = {
   'page-selector': 1,
+  'page-font-size': 1,
   'type-selector': 3,
-  'attribute-selector': 3,
+  'attribute-selector': 5,
   'inline-flex': 2,
   'font-shorthand': 1,
   calc: 1,
   'aspect-ratio-width': 1,
-  'color-mix': 4,
+  'color-mix': 5,
+  'colour-function': 13,
   'color-scheme-media': 1,
+  'display-none-clip': 2,
+  empty: 1,
+  backdrop: 1,
 };
 for (const [kind, n] of Object.entries(expected)) {
   check(report.rewrites[kind] === n, `report: ${kind} is ${report.rewrites[kind]}, expected ${n}`);
@@ -56,6 +74,10 @@ check(
   'report: the :focus-visible selector is not listed as rejected',
 );
 check(Array.isArray(report.removedProperties), 'report: no removedProperties section');
+check(
+  !report.removedProperties.some((p) => p.property === 'inset'),
+  'the encoder removed `inset`: something after the normaliser merged top/right/bottom/left back into it',
+);
 
 if (failures.length) {
   console.error(`lynx-native build check failed:\n  - ${failures.join('\n  - ')}`);

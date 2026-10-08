@@ -21,7 +21,8 @@
  *      `nav` as the initial navigation state, no router, and the facade
  *      root as the host, so the cartridge's hydrate handlers run unchanged;
  *   3. turns link taps and form submissions into the host's `onNavigate`,
- *      and shows the page it answers with — only the newest request's.
+ *      and shows the page it answers with — only the newest request's; a
+ *      tapped `<select>` asks the host's `onPick` for the choice.
  *
  * The host owns the network (M13): on Lynx that is the background thread,
  * so `onNavigate` typically posts the request there and resolves with the
@@ -38,6 +39,7 @@ import { type Cartridge, createCartridgeApp, getDefaultRenderResolver, type Temp
 import { type LynxErrorInfo, log, report } from './errors.js';
 import { FacadeHost, installGlobalGuards } from './facade.js';
 import type { NavigateRequest } from './navigation.js';
+import type { PickRequest } from './select.js';
 import { fromParsed, insertChildren, LynxElement } from './node-model.js';
 import { type ElementRef, getPapi, type NativeListener, type Papi } from './papi.js';
 import { tokenize } from './tokenize.js';
@@ -79,6 +81,14 @@ export interface MountLynxOptions<TData, TConfig, TPageType extends string = str
    * nothing to stay. Errors and empty answers leave the page as it is.
    */
   onNavigate?: (request: NavigateRequest) => Promise<LynxPage<TData> | void | undefined> | LynxPage<TData> | void | undefined;
+  /**
+   * A `<select>` was tapped. Lynx has no picker and the framework draws no
+   * UI, so the host shows the choice (an action sheet, a wheel) and returns
+   * the value picked, or nothing to leave it. The select then changes and
+   * fires `input` and `change`, as a browser's does. Without it, a tap on a
+   * select is reported and changes nothing.
+   */
+  onPick?: (request: PickRequest) => Promise<string | null | undefined> | string | null | undefined;
   /** Every render, hydrate, event and navigation error, including refusals. Also logged. */
   onError?: (info: LynxErrorInfo) => void;
   /**
@@ -199,7 +209,12 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
       );
   };
 
-  facadeHost = new FacadeHost({ tree, ...(onError ? { reporter: onError } : {}), navigate });
+  facadeHost = new FacadeHost({
+    tree,
+    ...(onError ? { reporter: onError } : {}),
+    navigate,
+    ...(opts.onPick ? { pick: opts.onPick } : {}),
+  });
   const uninstallGuards = installGlobalGuards(facadeHost);
   const onTap: NativeListener = (native) => facadeHost.onTap(native);
   papi.addEventListener(pageRef, 'tap', onTap);

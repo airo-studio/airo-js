@@ -36,6 +36,8 @@ export interface Papi {
   setClasses(el: ElementRef, classes: string): void;
   setId(el: ElementRef, id: string | null): void;
   setAttribute(el: ElementRef, name: string, value: unknown): void;
+  /** Inline styles, as a declaration list. Only for what a browser derives from markup, never author styling. */
+  setInlineStyles(el: ElementRef, css: string): void;
   addEventListener(el: ElementRef, name: string, fn: NativeListener): void;
   removeEventListener(el: ElementRef, name: string, fn: NativeListener): void;
   invokeUIMethod(el: ElementRef, method: string, params: Record<string, unknown>): void;
@@ -73,6 +75,7 @@ const NAMES = [
   '__SetClasses',
   '__SetID',
   '__SetAttribute',
+  '__SetInlineStyles',
   '__AddEventListener',
   '__RemoveEventListener',
   '__InvokeUIMethod',
@@ -103,6 +106,7 @@ export function getPapi(scope: Record<string, unknown> = globalThis as unknown a
     setClasses: (el, classes) => void g('__SetClasses')(el, classes),
     setId: (el, id) => void g('__SetID')(el, id),
     setAttribute: (el, name, value) => void g('__SetAttribute')(el, name, value),
+    setInlineStyles: (el, css) => void g('__SetInlineStyles')(el, css),
     addEventListener: (el, name, fn) => void g('__AddEventListener')(el, name, fn, options),
     removeEventListener: (el, name, fn) => void g('__RemoveEventListener')(el, name, fn, options),
     invokeUIMethod: (el, method, params) => void g('__InvokeUIMethod')(el, method, params, () => undefined),

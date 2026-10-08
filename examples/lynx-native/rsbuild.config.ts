@@ -10,16 +10,25 @@ import { defineConfig } from '@rsbuild/core';
  * inheritance.
  *
  * AIRO_LYNX_COLLECTOR is where device reports go during a device check;
- * empty in every other build.
+ * empty in every other build. The pages' images are served from the same
+ * place as the bundle: the device check's server, or the dev server.
+ * AIRO_LYNX_START is the first page's url, e.g. `/controls?open=1` for a
+ * check that has to see an open dialog without a tap.
  */
 const collector = process.env.AIRO_LYNX_COLLECTOR ?? '';
+const port = Number(process.env.PORT ?? 3210);
+const assets = collector ? `${new URL(collector).origin}/` : `http://localhost:${port}/`;
 
 export default defineConfig({
   source: {
     entry: { main: './src/main-thread.ts' },
-    define: { AIRO_LYNX_COLLECTOR: JSON.stringify(collector) },
+    define: {
+      AIRO_LYNX_COLLECTOR: JSON.stringify(collector),
+      AIRO_LYNX_START: JSON.stringify(process.env.AIRO_LYNX_START ?? '/'),
+      AIRO_LYNX_ASSETS: JSON.stringify(assets),
+    },
   },
   plugins: [pluginLynx(), pluginVanillaLynx({ engineVersion: '3.9' }), pluginAiroLynx()],
   environments: { lynx: {} },
-  server: { port: Number(process.env.PORT ?? 3210), host: '0.0.0.0' },
+  server: { port, host: '0.0.0.0' },
 });

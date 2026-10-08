@@ -45,6 +45,8 @@ export default defineConfig({
 
 The plugin also makes the build one a vanilla card can load, which rsbuild's defaults are not once `@airo-js/*` comes from `node_modules`: it transpiles the framework's packages like your own source (the encoder's main-thread compiler rejects them as published), and turns chunk splitting off (a split chunk is CommonJS the loader runs on neither thread, and the card never starts). If your card imports another package that ships modern syntax, add it to `source.include` yourself.
 
+It also leaves the normaliser the last word on your CSS: no CSS minification, and no lightningcss-loader, which rspack runs after the normaliser and which merges `top`/`right`/`bottom`/`left` back into an `inset` the encoder removes. lightningcss used to lower `oklch()` tokens to hex as a side effect of rsbuild's default browserslist; the normaliser now does that itself, whatever your targets are.
+
 **Installing before a release:** from airo-js, `pnpm yalc:publish`; then in the card's own folder run `yalc add @airo-js/lynx` with `yalc` itself (installed globally). Through `npx`, one consumer's `yalc add` wrote to the enclosing project's `package.json` instead of the card's.
 
 ### What the normaliser rewrites
@@ -54,6 +56,9 @@ Every rewrite answers a gap measured on device:
 | your CSS | on device | why |
 |---|---|---|
 | `html`, `body` | `.airo-lynx-page` (the page element) | there is no `<body>` |
+| a `font-size` in `rem`, `em` or `%` on `html` or `body` | px: `html`'s against 16px, `body`'s against `html`'s | both are the page, which `rem` follows, so `body { font: 1rem/1.5 … }` would refer to itself and fall back to 14px |
+| `:empty`, `:modal` | `.airo-lynx-empty`, `.airo-lynx-modal` (the runtime keeps these classes current) | both parse and never match |
+| `.sheet::backdrop` | `.airo-lynx-backdrop--sheet`: one class per class of the dialog, its tag and mirrored attributes included | `::backdrop` is rejected; a modal's backdrop is an element on device |
 | `h1`, `img`, … | `.tag-h1`, `.tag-img`, … (the tree pass adds these classes) | Lynx type selectors match Lynx tags (`view`, `text`) |
 | `[n]`, `[n="v"]` | `.a-n`, `.a-n--v` (the runtime mirrors attributes into these classes) | attribute selectors parse but never match |
 | a selector list holding one the encoder rejects | the rest of the list, kept | the encoder drops the whole rule otherwise |
@@ -64,7 +69,7 @@ Every rewrite answers a gap measured on device:
 | `env(name, fallback)` | the fallback; a `safe-area-inset-*` with none is `0px` | not parsed, and it takes the whole declaration with it, a `calc()` round it included |
 | static `calc()` in `:root` tokens and `border-radius` | its value | `calc()` in a radius reads as 0 |
 | `aspect-ratio` with no width | plus `width: 100%` | Lynx applies it only to an explicit width |
-| literal `oklch()` | sRGB | not parsed in a declaration |
+| `oklch()`, `oklab()`, `lab()`, `lch()`, `hwb()`, `color()`, `hsl()`, space-separated `rgb()`, in declarations and tokens | `rgb()` / `rgba()` | `oklch()` paints nothing, through `var()` as well; hex and `rgb(r, g, b)` read |
 | `color-mix()` | sRGB, light in place, dark in a twin rule | not parsed at all |
 | `@media (prefers-color-scheme: dark)` | `.airo-lynx-dark …` | `@media` is dropped at 3.9; the host passes `colorScheme` |
 
@@ -84,6 +89,13 @@ airo-js ships no visual policy, and the normaliser emits CSS your stylesheet did
 | `width: 100%` next to `aspect-ratio` | the used width of `width: auto` for a block in normal flow |
 | `font-style`, `font-weight`, `line-height: normal` from a `font` shorthand | the shorthand resetting the longhands it omits |
 | `overflow: hidden` next to `display: none` | `display: none` rendering no descendants |
+| `.airo-lynx-closed { display: none }` | the HTML UA rule `dialog:not([open]) { display: none }` |
+| `.airo-lynx-modal { overflow: auto }` | the HTML UA rule `dialog:modal { overflow: auto }` |
+| `.airo-lynx-backdrop { position: fixed; top/right/bottom/left: 0 }` | the top layer's `::backdrop { position: fixed; inset: 0 }` |
+| `z-index: 2147483647` on the backdrop | the top layer painting above every stacking context |
+| `display: flex; flex-direction: column; align-items: flex-start` on the backdrop | a modal placed by its margins in a fixed box the size of the viewport: Lynx honours `auto` margins only on a flex item, so the backdrop lays the dialog out as one |
+
+The dialog's paint (UA border, `padding: 1em`, Canvas colours), its centring `margin: auto` and the backdrop's tint are not emitted: under the headless rule the normaliser adds no colour and no spacing. Set them in the cartridge: a `margin` on the dialog, a `background` in `::backdrop`.
 
 A test holds every emitted declaration to that table.
 
@@ -91,7 +103,9 @@ A test holds every emitted declaration to that table.
 
 - **Tokens are read at build time.** `color-mix()` results and resolved radius tokens are baked from your `:root` tokens and the dark tokens inside `@media (prefers-color-scheme: dark)`. `Theme` from `@airo-js/core` and runtime token overrides do not reach a native page.
 - **`@media` other than the colour scheme is dropped** at engine 3.9. Write mobile-first: the unconditioned base is what a phone shows.
-- **Pseudo-elements** do not render; `:hover` and `:focus` do not apply on a touch screen; `:first-child` and `nth-*` never match.
+- **Pseudo-elements** do not render, except `::backdrop` (above); `:hover` and `:focus` do not apply on a touch screen; `:first-child` and `nth-*` never match.
+- **`html` and `body` are one element.** When they set different font sizes (`html { font-size: 62.5% }` with `body { font-size: 1.6rem }`), `rem` on device follows `body`'s, and the report says so.
+- **One stylesheet per card.** Tokens are read per stylesheet, and the browser defaults above head each one, so a second stylesheet would repeat them after the first one's rules. Concatenate into one file.
 - **Only the page scrolls.** An element your CSS makes scrollable (`overflow: auto` or `scroll`, such as a horizontal row of chips) is clipped on device, not scrolled.
 
 ## Runtime
@@ -108,6 +122,7 @@ lynx.getEngine().addEventListener('__RenderPage', () => {
     baseUrl: 'https://example.com/', // relative <img src> resolve here
     colorScheme: 'dark',       // from the OS; there is no media query on device
     onNavigate: (request) => askBackgroundThread(request), // yours: → { html, snapshot, nav } or nothing
+    onPick: (request) => showActionSheet(request),          // yours: a tapped <select> → the value picked, or nothing
     onError: ({ phase, member, error }) => report(phase, member, error),
   });
   // The first page usually arrives from the background thread (your plumbing):
@@ -131,6 +146,16 @@ A server that renders airo-js pages already has all three: answer native request
 
 **Know where a form landed from the page itself.** Lynx's `fetch` on iOS follows a redirect without saying so: `response.url` stays the request's, `redirected` is undefined, and `redirect: 'manual'` is ignored. So a host cannot read the landing url off the response; the page data should carry its own url (the first consumer reads its snapshot's path), and the host asks for that page. The same `fetch` keeps the session cookie across requests and launches, so a server's own cookie sign-in works from the background thread. `nav.page` must name an enabled entry page of the template; if it does not, the page is shown without behaviour and `onError` says why, rather than hydrating the wrong handlers over it.
 
+### Selects
+
+Lynx has no picker, and the framework draws no UI, so a tapped `<select>` asks the host. `onPick` receives
+
+```ts
+{ kind: 'select', name: 'sort', value: 'old', options: [{ value: 'new', label: 'Newest', disabled: false }, { value: 'az', label: 'A to Z', disabled: false, group: 'Other' }, …] }
+```
+
+and returns (or resolves with) the value picked, or nothing to leave it. Show your own action sheet or wheel; the example card, with no native picker to call, takes the next option. A picked value changes the select and fires `input` then `change`, as a browser's does; a value that is not an enabled option is reported. Without `onPick`, a tap on a select is reported and changes nothing.
+
 ### Links and forms
 
 A tap on `<a href>` and a submitted `<form>` (a submit button, or return in a text field) become one `NavigateRequest`:
@@ -139,7 +164,7 @@ A tap on `<a href>` and a submitted `<form>` (a submit button, or return in a te
 { url: '/search', method: 'get', fields: { q: 'chair' }, source: 'form' }
 ```
 
-`url` is as written in the markup. Fields follow the HTML form rules: named, enabled controls; hidden inputs; the submitter button's name and value; a repeated name keeps every value. Hydrate handlers see `click`, then a cancellable `submit`, first: `preventDefault()` keeps the page. When two navigations overlap, only the newest one's answer is shown. An answer of nothing, or an error, leaves the page as it is.
+`url` is as written in the markup. Fields follow the HTML form rules: named, enabled controls; hidden inputs; a select's selected option; the submitter button's name and value; a repeated name keeps every value. A `method="dialog"` form makes no request: it closes its dialog, with the submitter's value as `returnValue`. Hydrate handlers see `click`, then a cancellable `submit`, first: `preventDefault()` keeps the page. When two navigations overlap, only the newest one's answer is shown. An answer of nothing, or an error, leaves the page as it is.
 
 ### The DOM facade
 
@@ -150,11 +175,13 @@ Hydrate handlers receive element objects that implement this subset over a JS mo
 | `querySelector`, `querySelectorAll`, `closest`, `matches`, `contains` | type, `#id`, `.class`, `[attr]`, `[attr="v"]`, descendant, child, comma lists |
 | `getAttribute`, `setAttribute`, `removeAttribute`, `hasAttribute`, `toggleAttribute`, `dataset`, `hidden`, `disabled`, `id`, `className`, `classList` | every write updates the element's mirror classes, so attribute-keyed styles apply |
 | `textContent`, `innerHTML`, `insertAdjacentHTML` | re-parsed and re-projected |
-| `value` | text inputs and textareas, mirrored from typing |
-| `addEventListener`, `removeEventListener` | `click` (a tap), `input`, `change` (on blur or return, when the value changed), `submit`, `focus`, `blur` |
+| `value` | text inputs and textareas, mirrored from typing; a select's selected option; an option's value |
+| `open`, `show()`, `showModal()`, `close(result)`, `returnValue` | `<details>` and `<dialog>`; a modal makes the page below inert, and a tap outside it is a click on the dialog, as on its backdrop |
+| `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules; a script's change fires nothing, as in a browser |
+| `addEventListener`, `removeEventListener` | `click` (a tap), `input`, `change` (on blur or return, when the value changed; on a pick), `submit`, `focus`, `blur`, `toggle` (a details opened or closed), `close` (a dialog closed) |
 | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only |
 
-**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `Element.showModal`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window`, `document`, `location`, `history`, storage, `navigator`, `fetch`, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays.
+**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `<div>.showModal()`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window`, `document`, `location`, `history`, storage, `navigator`, `fetch`, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays.
 
 Run a page on device, read the refusals in `onError`, and rewrite those parts of the handler for native or move them to the host. Mutations are flushed once per task, however many a handler makes.
 
@@ -164,12 +191,15 @@ Run a page on device, read the refusals in `onError`, and rewrite those parts of
 |---|---|
 | text-level tags with only text and inline tags (`p`, `h1`–`h6`, `li`, `span`, …) | `text`, inline tags nested |
 | other containers; `a` and `button` outside running text | `view`, loose text wrapped in `text` |
-| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device) |
+| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device), taking the picture's size where the stylesheet leaves one open; an SVG source (`.svg`, an `image/svg+xml` data url) is an `svg` with that `src`, since `image` draws no SVG, sized by the `width` / `height` attributes' ratio as a browser sizes it |
 | `svg` | `svg` with its markup as `content`; `currentColor` follows the CSS `color` around it where the engine reports computed colour (verified on iOS) |
 | `input` (text, search, url, email, tel, password, number), `textarea` | `input`, `textarea` |
-| `input type="hidden"`, `script`, `template`, `noscript` | the model only |
+| `details`, `summary` | `view`s (`text` when the summary is only text); closed, only the first `summary` is on screen; a tap on it toggles `open` |
+| `dialog` | closed: an empty `view` with `.airo-lynx-closed`. `showModal()`: inside a backdrop `view` that covers the screen, with `.airo-lynx-modal` |
+| `select` | a `view` holding the selected option's label; a tap asks `onPick`. `multiple` and `size` > 1 are refused |
+| `input type="hidden"`, `script`, `template`, `noscript`, `option`, `optgroup` | the model only |
 | the mount's root (what the server rendered into) | a vertical `scroll-view` with `.airo-lynx-viewport`: the browser's viewport scrolls, a Lynx `view` does not |
-| anything else (`select`, `details`, `dialog`, tables, checkboxes, …) | refused: `UnmappedElementError` |
+| anything else (tables, checkboxes, radios, file inputs, `video`, …) | refused: `UnmappedElementError` |
 
 The tokenizer is strict on purpose. It reads what `escapeHtml` writes — the five entities `&amp; &lt; &gt; &quot; &#39;`, numeric references, void elements, raw-text `script`/`style`, `svg` as foreign content — and a bare `&` exactly as the HTML parser does, so `href="/g?a=1&so=x"` keeps its `&`. It refuses a named entity such as `&nbsp;`, a bare `&copy` a browser would turn into ©, an unclosed or mis-nested element, or a stray `<`, with an `HtmlParseError` that gives line and column. A conformance test holds its trees equal to a browser-grade parser's on real pages.
 

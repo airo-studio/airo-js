@@ -23,6 +23,24 @@ const BROWSER_VALUES: Record<string, string> = {
   // Not an initial value: the translation of what `display: none` means
   // (no descendant renders) onto an engine that still paints them.
   'overflow: hidden': 'CSS Display 3 §2.5 `display: none` renders no descendants',
+  // Where a modal dialog sits: the top layer's `::backdrop` box, and the
+  // HTML UA stylesheet (§15.3.3). Its paint (border, padding, Canvas
+  // colours, the backdrop's tint) and its centring margin are not emitted.
+  'position: fixed': 'CSS Positioned Layout 4 `::backdrop { position: fixed }`',
+  'top: 0': 'CSS Positioned Layout 4 `::backdrop { inset: 0 }`',
+  'bottom: 0': 'CSS Positioned Layout 4 `::backdrop { inset: 0 }`',
+  'left: 0': 'CSS Positioned Layout 4 `::backdrop { inset: 0 }`',
+  'right: 0': 'CSS Positioned Layout 4 `::backdrop { inset: 0 }`',
+  'overflow: auto': 'HTML §15.3.3 `dialog:modal`',
+  // Not UA values: a modal is placed by its margins inside a fixed box the
+  // size of the viewport, and Lynx honours `auto` margins only on a flex
+  // item, so the backdrop (that same box) lays the dialog out as one.
+  'display: flex': 'HTML §15.3.3 `dialog:modal` placement, as a flex item of its backdrop',
+  'flex-direction: column': 'HTML §15.3.3 `dialog:modal` placement, as a flex item of its backdrop',
+  'align-items: flex-start': 'HTML §15.3.3 `dialog { width: fit-content }`: not stretched across its backdrop',
+  // Not a UA value: the top layer paints above every stacking context,
+  // and the largest z-index is the nearest the device has to it.
+  'z-index: 2147483647': 'CSS Positioned Layout 4, the top layer',
 };
 
 /** Every rewrite that emits something, in one sheet. */

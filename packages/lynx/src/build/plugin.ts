@@ -32,13 +32,21 @@
  *     resolves under `node_modules` into a chunk in CommonJS form, which the
  *     vanilla plugin loads on neither thread: the card never starts.
  *
- * It also turns off CSS minification for the build. In the measuring
- * spike's minified build the encoder received `.a, :is(.a ~ .b, …)` — two
- * neighbouring source rules with equal declarations merged into one list,
- * the kind of merge a minifier does — and rejected the whole list, because
- * the encoder rejects any list holding `:is()`. Unminified, the normaliser's
- * output is what the encoder sees. The encoder compresses the CSS into the
- * bundle anyway.
+ * And it makes the normaliser the last thing to touch the CSS before the
+ * encoder, which compresses it into the bundle anyway:
+ *
+ *   - **No CSS minification.** In the measuring spike's minified build the
+ *     encoder received `.a, :is(.a ~ .b, …)` — two neighbouring source rules
+ *     with equal declarations merged into one list, the kind of merge a
+ *     minifier does — and rejected the whole list, because the encoder
+ *     rejects any list holding `:is()`.
+ *   - **No lightningcss-loader.** rspack runs it after this plugin's
+ *     transform, and it writes the normaliser's output back into what the
+ *     encoder cannot read: `top`, `right`, `bottom` and `left` together
+ *     become `inset` again, which the encoder then removes (measured, 8 Oct
+ *     2026: every expanded `inset`, and the modal dialog's own placement).
+ *     A cartridge's stylesheet is browser CSS that has already been through
+ *     the normaliser, so there is nothing left for it to lower.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -74,6 +82,7 @@ export function pluginAiroLynx(options: AiroLynxPluginOptions = {}): RsbuildPlug
     name: PLUGIN_NAME,
     setup(api) {
       api.modifyRsbuildConfig((config) => {
+        config.tools = { ...config.tools, lightningcssLoader: false };
         const minify = config.output?.minify;
         config.output = {
           ...config.output,

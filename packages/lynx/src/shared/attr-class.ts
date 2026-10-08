@@ -41,6 +41,34 @@ export const DARK_CLASS = 'airo-lynx-dark';
  */
 export const VIEWPORT_CLASS = 'airo-lynx-viewport';
 
+/**
+ * Class an element carries while it has no child nodes: the stand-in for
+ * `:empty`, which parses on device and never matches.
+ */
+export const EMPTY_CLASS = 'airo-lynx-empty';
+
+/** Class a `<dialog>` carries while it is closed: the HTML UA rule `dialog:not([open]) { display: none }`. */
+export const CLOSED_DIALOG_CLASS = 'airo-lynx-closed';
+
+/** Class a `<dialog>` carries while it is open as a modal (`showModal()`): the stand-in for `:modal`. */
+export const MODAL_CLASS = 'airo-lynx-modal';
+
+/**
+ * Class of the element a modal dialog is drawn inside on device: its
+ * `::backdrop`, which covers the screen below the dialog and takes the taps
+ * that land outside it.
+ */
+export const BACKDROP_CLASS = 'airo-lynx-backdrop';
+
+/**
+ * The class a modal's backdrop carries for each class its dialog carries, so
+ * that `.sheet::backdrop` can be rewritten to a class the backdrop has:
+ * `backdropClass('sheet')` → `airo-lynx-backdrop--sheet`.
+ */
+export function backdropClass(cls: string): string {
+  return `${BACKDROP_CLASS}--${cls}`;
+}
+
 /** Attributes the runtime never mirrors: they are already classes, ids or inline styles. */
 export const UNMIRRORED_ATTRIBUTES: ReadonlySet<string> = new Set(['class', 'id', 'style']);
 
