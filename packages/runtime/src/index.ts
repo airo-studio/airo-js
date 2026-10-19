@@ -17,7 +17,6 @@ export type {
   SharedLifecycleHooks,
   MountCartridgeOptions,
   MountCartridgeResult,
-  DataReplacedEvent,
   // Defined in `@airo-js/core`; surfaced here because it is the return type of
   // `MountCartridgeResult.update` / `.updatePages`. Without it on this barrel,
   // typing the result of a call you made against `@airo-js/runtime` means

@@ -53,13 +53,14 @@
  *                                              now forwards instead of owning the loop.
  *
  * Landed in 0.11.2:
- *   - `MountCartridgeResult.replaceData()`    — show the mount against other data
- *                                              (plus a transient config overlay)
- *                                              without a remount: transformers run,
- *                                              the active page re-renders in place,
- *                                              `null` restores the mount's own
- *                                              snapshot. Joins the FIFO queue and
- *                                              emits `'mount:data-replaced'`.
+ *   - Editor hook (`EDITOR_HOOK`)            — the seam `@airo-js/runtime/editor`
+ *                                              (`replaceData`) reaches through. The
+ *                                              editor capability itself lives in that
+ *                                              entry, so a page that only mounts never
+ *                                              downloads it; see `editor-hook.ts`.
+ *   - Post-processors read what is on screen — after an in-place swap they read
+ *                                              the swapped config + snapshot, not the
+ *                                              ones captured when the mount was built.
  *
  * None of these change the required surface — `cartridge`, `config`,
  * `template`, `host` remain the only required options.
@@ -100,6 +101,14 @@ import {
   templateToAppConfig,
 } from '@airo-js/cartridge-kit';
 import { initLogControls, logger } from '@airo-js/log';
+
+import { deepMerge, isPlainObject } from './deep-merge.js';
+import { EDITOR_HOOK } from './editor-hook.js';
+import type { EditorDisplay, EditorHook, Shown } from './editor-hook.js';
+
+// Re-exported for `update-dispatcher.test.ts`, which tests the helpers this
+// module dispatches with; it moved to its own module in 0.11.2.
+export { deepMerge };
 
 const log = logger('runtime');
 
@@ -376,19 +385,6 @@ export interface MountCartridgeOptions<
 export type { UpdateResult };
 
 /**
- * Payload of `'mount:data-replaced'` on `shell.events` (0.11.2). Emitted
- * after the render lands, by `replaceData()` — `replaced: true` on every
- * apply, `false` on a restore — and by a remount that had to drop the
- * replacement because the transformers threw on it under the new config.
- * The data itself is never echoed on the bus: the caller that replaced
- * it already holds it.
- */
-export interface DataReplacedEvent {
-  replaced: boolean;
-  navState: NavigationState;
-}
-
-/**
  * Discriminated result of a mount. The `blocked` branch fires when a
  * pre-render Gate returned 'block' — the gate's UI stays in the host
  * element and the framework paints nothing else.
@@ -397,8 +393,9 @@ export interface DataReplacedEvent {
  * branch can accept `DeepPartial<TConfig>` (0.7.1 widening — runtime
  * always walked nested deltas; type now matches). The `TConfig = unknown`
  * default preserves backward compatibility for callers that don't
- * propagate the type parameter. `TData` (0.11.2) types `replaceData()`;
- * it is last, and defaults to `unknown`, for the same reason.
+ * propagate the type parameter. `TData` (0.11.2) types the editor hook, so
+ * `@airo-js/runtime/editor` can check the data it is handed against the
+ * cartridge's; last and defaulted to `unknown` for the same reason.
  */
 export type MountCartridgeResult<
   TConfig = unknown,
@@ -464,59 +461,12 @@ export type MountCartridgeResult<
         nextPages: ReadonlyArray<TemplatePage<TPageType>>,
       ) => Promise<UpdateResult>;
       /**
-       * Show this mount against other data (0.11.2) — an editor drawing a
-       * state the live data cannot produce (an empty grid, a facet the
-       * draft does not configure) from sample data, without a remount.
-       *
-       *  - Apply: the cartridge's transformers run over `next.data` — no
-       *    `dataSource.fetch`, no gates — with the ACTIVE page as
-       *    `navState.page`, then the active page re-renders in place.
-       *    NavigationState is preserved and no navigation event fires.
-       *    Applying again replaces the previous replacement.
-       *  - `next.config` is a transient overlay, merged over the mount's
-       *    config for everything that displays: these transformers, views
-       *    (`ctx.app.config`) and post-processors. It is held apart from
-       *    the mount's config — `update()` never diffs against it or
-       *    merges it in, and gates and fetch never see it.
-       *  - `null` restores the mount's own snapshot (fetched or preloaded,
-       *    or the one the last remount refreshed) and drops the overlay,
-       *    with no refetch. A no-op — no render, no event — when nothing
-       *    is replaced.
-       *
-       * While replaced, an `update()` / `updatePages()` hot-swap keeps the
-       * replaced snapshot and re-applies the overlay over the new config.
-       * A remount still fetches under the real config — so a later `null`
-       * restores data computed for the config that is live — then re-runs
-       * the transformers over the replacement and mounts that. If they
-       * throw on it under the new config, the remount drops the
-       * replacement, mounts the live data, logs the error and emits
-       * `'mount:data-replaced'` with `replaced: false`; the `update()`
-       * that remounted still resolves.
-       *
-       * Shares the FIFO queue with `update` / `updatePages`. Resolves after
-       * the render lands: the in-place swap is synchronous — render, then
-       * post-processors, then `'mount:data-replaced'` (payload:
-       * `DataReplacedEvent`), then the promise. One exception: when the
-       * active page's renderer is not registered yet (an unloaded chunk),
-       * the swap emits `renderer:missing` and the page paints later, by
-       * chunk recovery, after the promise resolved.
-       *
-       * Rejects — and changes nothing, so the live data stays on screen —
-       * when a transformer throws on `next.data` (after
-       * `onError('pipeline')`), when a gate blocked the last remount (no
-       * live App to render into; the next `update()` remounts), and when
-       * called before the mount completed or after `destroy()`.
-       *
-       * `onPipelineComplete` does not fire for the replacement: it reports
-       * the mount's own snapshot.
+       * The seam `@airo-js/runtime/editor` reaches through (0.11.2). Not
+       * for direct use — import the editor entry's functions instead.
+       * Optional in the type because a runtime older than 0.11.2 has none,
+       * and an editor entry may attach to one.
        */
-      // Method syntax, not a property arrow: method parameters are checked
-      // bivariantly, so a result typed with a concrete `TData` still
-      // assigns to a `MountCartridgeResult<TConfig>` annotation (TData =
-      // unknown) that hosts written before 0.11.2 already carry.
-      replaceData(
-        next: { data: TData; config?: DeepPartial<TConfig> } | null,
-      ): Promise<UpdateResult>;
+      readonly [EDITOR_HOOK]?: EditorHook<TData, TConfig>;
     }
   | {
       app: null;
@@ -541,7 +491,6 @@ export type MountCartridgeResult<
  *   satisfiedGates: named gates skipped on the INITIAL mount only (gate:allowed via 'server')
  *   update()/updatePages(): hot-swap keys → replaceAppContext/replacePages (no gates)
  *                           otherwise      → re-run from resolveMountEntry (gates run again; freshness wins)
- *   replaceData():          transformers over the given data → replaceAppContext (no fetch, no gates)
  *
  *   1. Shell setup    — isolation root + style root + event bus.
  *   2. onShellReady   — studio attaches theme / styles / observers.
@@ -663,22 +612,14 @@ export async function mountCartridge<
   ).pages;
   // What the live App displays, held per mount and read by its
   // post-processor closure at render time. A capture would go stale: an
-  // in-place swap (`update()` hot-swap, `replaceData()`) re-renders through
-  // the same closure, and post-processors then read the config and
-  // snapshot from mount time while views read the swapped ones.
-  type Shown = { config: TConfig; data: TData };
-  let currentShown: Shown | null = null;
-  // `replaceData()` state (0.11.2). `replacement` is what the caller handed
-  // in — raw data plus overlay — kept so a remount can re-run the
-  // transformers over it under the new config; `replacedSnapshot` is the
-  // post-Transformer result on screen. `currentSnapshot` / `currentConfig`
-  // stay the mount's own, which is what a restore puts back.
-  let replacement: { data: TData; overlay: DeepPartial<TConfig> | undefined } | null = null;
-  let replacedSnapshot: TData | undefined;
-  // The config everything that displays reads: the mount's own, with the
-  // replacement's overlay on top while one is held.
-  const displayConfig = (base: TConfig): TConfig =>
-    replacement?.overlay === undefined ? base : deepMerge(base, replacement.overlay);
+  // in-place swap (`update()` hot-swap, the editor's `replaceData`)
+  // re-renders through the same closure, and post-processors then read the
+  // config and snapshot from mount time while views read the swapped ones.
+  let currentShown: Shown<TData, TConfig> | null = null;
+  // The editor's display override (see `editor-hook.ts`). `null` on every
+  // mount that is not being edited — the remount and hot-swap paths below
+  // then take exactly the route they took before 0.11.2.
+  let display: EditorDisplay<TData, TConfig> | null = null;
 
   // === Chunk-recovery engine (0.8.7 — the shared seam, formerly embed
   // Phase 6.5) ===
@@ -855,26 +796,27 @@ export async function mountCartridge<
     }
 
     // Hot-swap path. Existing snapshot is still valid (the cartridge
-    // declared these paths as not affecting derived data) — and so is a
-    // replaced one, for the same reason; replace the appContext +
-    // re-render the active page in place.
+    // declared these paths as not affecting derived data) — and so is
+    // whatever an editor display shows, for the same reason; replace the
+    // appContext + re-render the active page in place.
     currentConfig = newConfig;
-    showInPlace(displayConfig(newConfig), replacedSnapshot ?? currentSnapshot);
+    showInPlace(
+      (display && (await display(newConfig, navState, false))) || {
+        config: newConfig,
+        data: currentSnapshot,
+      },
+    );
     return { mode: 'hot-swap', navState };
   };
 
   // Swap what the live App displays and re-render the active page in
   // place. Post-processors read `currentShown`, so it is written first:
   // `replaceAppContext` renders, then runs them, synchronously.
-  const showInPlace = (config: TConfig, data: TData): void => {
-    if (currentShown) {
-      currentShown.config = config;
-      currentShown.data = data;
-    }
+  const showInPlace = (shown: Shown<TData, TConfig>): void => {
+    Object.assign(currentShown!, shown);
     const appContext: CartridgeAppContext<TData, TConfig> = {
       cartridgeId: opts.cartridge.id,
-      config,
-      data,
+      ...shown,
     };
     currentApp!.replaceAppContext(appContext);
   };
@@ -888,15 +830,8 @@ export async function mountCartridge<
     currentApp = next.app;
     currentSnapshot = next.snapshot;
     currentShown = next.shown;
-    replacedSnapshot = next.replacedSnapshot;
-    const dropped = replacement !== null && next.replacedSnapshot === undefined;
-    if (dropped) replacement = null;
     const outcome: UpdateResult = { mode: 'remount', navState };
     events.emit('mount:remounted', outcome);
-    if (dropped) {
-      const dataReplaced: DataReplacedEvent = { replaced: false, navState };
-      events.emit('mount:data-replaced', dataReplaced);
-    }
     return outcome;
   };
 
@@ -959,54 +894,6 @@ export async function mountCartridge<
     return { mode: 'hot-swap', navState };
   };
 
-  // === Data replacement dispatcher (0.11.2) ===
-  // Phase 6 alone, over caller-supplied data, then the hot-swap path's
-  // in-place render. No fetch and no gates: the mount already passed its
-  // gates, and the data is the caller's. Every exit before the render
-  // leaves the replacement state untouched, so a rejection means the
-  // screen did not change.
-  const replaceDataInner = async (
-    next: { data: TData; config?: DeepPartial<TConfig> } | null,
-  ): Promise<UpdateResult> => {
-    if (remountBlocked) {
-      throw new Error(
-        '[@airo-js/runtime] replaceData(): a gate blocked the last remount; update() remounts.',
-      );
-    }
-    if (!currentApp || currentSnapshot === undefined || currentApp.state === 'destroyed') {
-      throw new Error(
-        '[@airo-js/runtime] replaceData() before mount or after destroy().',
-      );
-    }
-    const navState = currentApp.getNavigationState();
-
-    const result: UpdateResult = { mode: 'hot-swap', navState };
-    if (next === null) {
-      if (replacement === null) return result;
-      replacement = null;
-      replacedSnapshot = undefined;
-      showInPlace(currentConfig, currentSnapshot);
-    } else {
-      const config = next.config === undefined ? currentConfig : deepMerge(currentConfig, next.config);
-      let snapshot: TData;
-      try {
-        snapshot = await createPipeline<TData, TConfig>(opts.cartridge.transformers ?? [], []).runTransformers(
-          next.data,
-          { config, navState, locale: (config as { locale?: string }).locale },
-        );
-      } catch (err) {
-        opts.onError?.('pipeline', err, shell);
-        throw err;
-      }
-      replacement = { data: next.data, overlay: next.config };
-      replacedSnapshot = snapshot;
-      showInPlace(config, snapshot);
-    }
-    const dataReplaced: DataReplacedEvent = { replaced: next !== null, navState };
-    events.emit('mount:data-replaced', dataReplaced);
-    return result;
-  };
-
   // Public dispatchers — the serialized fronts the caller (and renderers,
   // via `hostUpdate` below) actually invoke. Everything flows through the
   // FIFO queue so a host never observes interleaved remounts.
@@ -1015,9 +902,6 @@ export async function mountCartridge<
   const updatePages = (
     nextPages: ReadonlyArray<TemplatePage<TPageType>>,
   ): Promise<UpdateResult> => enqueue(() => updatePagesInner(nextPages));
-  const replaceData = (
-    next: { data: TData; config?: DeepPartial<TConfig> } | null,
-  ): Promise<UpdateResult> => enqueue(() => replaceDataInner(next));
 
   // Type-erased wrapper passed to PageManager as `hostUpdate`. Cast is
   // safe at runtime — `update()` walks the delta via `leafPaths` regardless
@@ -1034,19 +918,12 @@ export async function mountCartridge<
   // pipeline / createCartridgeApp work, threaded with the new config +
   // preserved NavigationState. Returns the snapshot too so the outer scope
   // can cache it for hot-swap reuse. No snapshot exists on the blocked
-  // branch: gates run before the data phase. `replacedSnapshot` is set
-  // when a held replacement was re-applied (undefined when none was held,
-  // or when its transformers threw and it was dropped); `shown` is the
-  // holder the new App's post-processors read.
+  // branch: gates run before the data phase. `shown` is what the new App
+  // displays — the snapshot, unless an editor display overrides it — and
+  // the holder its post-processors read.
   type InnerMount =
     | { blocked: true; blockedBy: string }
-    | {
-        blocked: false;
-        app: App;
-        snapshot: TData;
-        replacedSnapshot: TData | undefined;
-        shown: Shown;
-      };
+    | { blocked: false; app: App; snapshot: TData; shown: Shown<TData, TConfig> };
 
   // The gate that blocked the most recent mount attempt, held so its
   // `destroy()` runs when the host tears the mount down or before a remount
@@ -1221,34 +1098,15 @@ export async function mountCartridge<
     }
     opts.onPipelineComplete?.(snapshot);
 
-    // Phase 6b — a held `replaceData()` replacement, re-applied over the
-    // config this remount carries (never on the initial mount: nothing can
-    // be held yet). The fetch above still ran under the real config, so
-    // the mount's own snapshot is fresh for a later restore. Transformers
-    // that throw on the replacement under the new config drop it rather
-    // than fail the remount: the replacement is display-only, and the
-    // update that triggered this remount is the caller's real edit.
-    let replacedSnapshot: TData | undefined;
-    if (replacement !== null) {
-      const sampleConfig = displayConfig(config);
-      try {
-        replacedSnapshot = await pipeline.runTransformers(replacement.data, {
-          config: sampleConfig,
-          navState: pipelineNavState,
-          locale: (sampleConfig as { locale?: string }).locale,
-        });
-      } catch (err) {
-        log.error(
-          'replaceData: transformers threw on remount; replacement dropped.',
-          err,
-          { phase: 'pipeline', cartridgeId: opts.cartridge.id },
-        );
-      }
-    }
-    const shown: Shown =
-      replacedSnapshot === undefined
-        ? { config, data: snapshot }
-        : { config: displayConfig(config), data: replacedSnapshot };
+    // Phase 6b — an editor display override, when one is installed. The
+    // fetch and the pipeline above ran under the real config, so the mount's
+    // own snapshot is fresh whatever the editor shows; `null` means the
+    // editor dropped its override, and the mount shows its own data.
+    const shown: Shown<TData, TConfig> = (display &&
+      (await display(config, pipelineNavState as NavigationState, true))) || {
+      config,
+      data: snapshot,
+    };
 
     // Phase 7 — createCartridgeApp (synchronous since 0.11.0; gates ran in
     // phase 4). AppConfig is built from the live `currentPages` snapshot so
@@ -1297,10 +1155,10 @@ export async function mountCartridge<
           // `data` halves of `PostProcessorContext` that only the runtime
           // holds. Core stays ignorant of pipelines and cartridges.
           //
-          // `shown` is per mount: a remount replays this whole function
-          // and rebuilds the pipeline and this closure. It is read at
-          // render time, not captured, because an in-place swap
-          // (`update()` hot-swap, `replaceData()`) re-renders through this
+          // `shown` is per mount: a remount replays this whole function and
+          // rebuilds the pipeline and this closure. It is read at render
+          // time, not captured, because an in-place swap (`update()`
+          // hot-swap, the editor's `replaceData`) re-renders through this
           // same closure — `showInPlace` writes the swapped config and
           // snapshot into it first, so post-processors see what views see.
           postRender: hasPostProcessors
@@ -1319,7 +1177,7 @@ export async function mountCartridge<
       opts.onError?.('mount', err, shell);
       throw err;
     }
-    return { blocked: false, app, snapshot, replacedSnapshot, shown };
+    return { blocked: false, app, snapshot, shown };
   }
 
   // === Initial mount ===
@@ -1397,7 +1255,15 @@ export async function mountCartridge<
     destroy,
     update,
     updatePages,
-    replaceData,
+    [EDITOR_HOOK]: {
+      enqueue,
+      own: () => ({ config: currentConfig, data: currentSnapshot! }),
+      display: (fn) => {
+        display = fn;
+      },
+      show: showInPlace,
+      opts,
+    },
   };
 }
 
@@ -1460,38 +1326,6 @@ export function isCovered(path: string, hotSwap: string[]): boolean {
   return hotSwap.some(
     (allowed) => allowed === path || path.startsWith(allowed + '.'),
   );
-}
-
-/**
- * Shallow-aware deep merge. Recurses into plain objects so nested
- * deltas don't clobber sibling fields:
- *
- *   deepMerge({ display: { a: 1, b: 2 } }, { display: { a: 9 } })
- *     → { display: { a: 9, b: 2 } }
- *
- * Arrays are replaced wholesale — merging arrays is ambiguous (index
- * align? key align? concat?) and cartridge config shapes don't need it.
- * Primitives + null are also wholesale replacements.
- *
- * Exported for tests; otherwise module-internal.
- */
-export function deepMerge<T>(base: T, delta: unknown): T {
-  if (!isPlainObject(base) || !isPlainObject(delta)) {
-    return delta as T;
-  }
-  const result: Record<string, unknown> = { ...base };
-  for (const [k, v] of Object.entries(delta)) {
-    if (isPlainObject(v) && isPlainObject(result[k])) {
-      result[k] = deepMerge(result[k], v);
-    } else {
-      result[k] = v;
-    }
-  }
-  return result as T;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

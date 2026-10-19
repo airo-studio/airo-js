@@ -2,15 +2,15 @@
 
 Cartridge mount orchestration for the airo framework. Single-call shell setup → entry resolution → gate phase → optional data fetch → pipeline → mount via `createCartridgeApp`. Studio-side concerns (theme, error UI, debug observers) extend via hooks rather than forking the orchestration.
 
-> Status: CSR + SSR-hydrate single-mount surface with live `update()` / `updatePages()` / `replaceData()`. Per-page chunk loading via `resolveView`.
+> Status: CSR + SSR-hydrate single-mount surface with live `update()` / `updatePages()`; editor-only `replaceData()` in `@airo-js/runtime/editor`. Per-page chunk loading via `resolveView`.
 
 ## What's in here
 
 - `mountCartridge(opts)` — the only entry point. Runs the full mount sequence.
 - `MountCartridgeOptions<TData, TConfig>` — required: `cartridge`, `config`, `template`, `host`. Everything else optional.
-- `MountCartridgeResult` — discriminated union: either `{ blocked: false, app, shell, destroy, update, updatePages, replaceData }` or `{ blocked: true, blockedBy, shell, destroy }`.
+- `MountCartridgeResult` — discriminated union: either `{ blocked: false, app, shell, destroy, update, updatePages }` or `{ blocked: true, blockedBy, shell, destroy }`.
 - `ShellHandle` — what `onShellReady` receives: `renderRoot`, `styleRoot`, `events`, `rootId`.
-- `DataReplacedEvent` — payload of `'mount:data-replaced'` on `shell.events`: `{ replaced, navState }`.
+- `@airo-js/runtime/editor` — `replaceData(mount, next)` and `DataReplacedEvent`, for editors only (below).
 - `MountPhase` — phase identifier for `onError`: `'shell' | 'gate' | 'fetch' | 'pipeline' | 'mount' | 'resolve-view'`.
 
 ## Why this exists
@@ -104,7 +104,7 @@ result.destroy();
 | SSR-hydrate fork (`mode: 'hydrate'`) | `@airo-js/runtime` (v0.2 — landed) |
 | Per-page chunk recovery (singleflight, hydrate-vs-navigate dispatch) | `@airo-js/runtime` (the `resolveView` seam on `SharedLifecycleHooks`; chunk transport is the host's) |
 | Live `update(delta)` / `updatePages(pages)` for studio chrome | `@airo-js/runtime` (hot-swap under `hotSwapKeys` / `pageHotSwapKeys`, otherwise remount with `NavigationState` preserved) |
-| Showing a mount against sample data (`replaceData`) | `@airo-js/runtime` (transformers + in-place render, queue, restore). Building the sample data is the **host's** |
+| Showing a mount against sample data (`replaceData`) | `@airo-js/runtime/editor` (transformers + in-place render, queue, restore). Building the sample data is the **host's** |
 
 ## Hook contract
 
@@ -177,17 +177,17 @@ What `mode: 'hydrate'` does:
 
 `mode: 'csr'` (the default) ignores any pre-existing markup and paints fresh — the v0.1 behaviour.
 
-## Showing other data: `replaceData` (0.11.2)
+## Editors: `@airo-js/runtime/editor` (0.11.2)
 
-An editor that lets an author pick a section's state, such as "no results" or a populated grid the live feed cannot fill, needs the mounted widget to draw that state from sample data. It also needs to give the mount its own data back afterwards, without a remount.
+Some capabilities matter only on an editor's canvas: an author picks a section's state, such as "no results" or a populated grid the live feed cannot fill, and the canvas draws it from sample data. Those capabilities ship in their own entry, so a page that only mounts never downloads them. Import the entry from editor code only.
 
 ```ts
+import { replaceData } from '@airo-js/runtime/editor';
+
 const result = await mountCartridge({ cartridge, config, template, host });
-if (!result.blocked) {
-  await result.replaceData({ data: sample, config: { display: { facet: 'colour' } } });
-  // …the author moves on
-  await result.replaceData(null);
-}
+await replaceData(result, { data: sample, config: { display: { facet: 'colour' } } });
+// …the author moves on
+await replaceData(result, null);
 ```
 
 - The cartridge's transformers run over `data` (no fetch, no gates), then the active page re-renders in place. NavigationState is preserved.
@@ -195,6 +195,9 @@ if (!result.blocked) {
 - `null` restores the mount's own snapshot with no refetch.
 - `update()` / `updatePages()` keep the replacement. A hot-swap reuses it. A remount fetches as usual, then re-applies it; if the transformers throw on it under the new config, the remount drops it and emits `replaced: false`.
 - It shares the FIFO queue and resolves after the render lands, after `'mount:data-replaced'` (`{ replaced, navState }`) has fired. A rejection means nothing changed.
+- It resolves `null`, applying nothing, when the mount carries no editor hook: a gate-blocked mount, or a runtime older than 0.11.2. An overlay served apart from the runtime it attaches to can therefore treat `null` as "not applied".
+
+The entry reaches the mount through one property under `Symbol.for('airo-js.runtime.editor.v1')`. It is versioned in the key so that an editor entry and a runtime from different releases still find each other. Don't call it directly.
 
 ## Deferred (signature-compatible — additive)
 

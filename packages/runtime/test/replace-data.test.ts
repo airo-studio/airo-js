@@ -1,7 +1,8 @@
 /**
- * Tests for MountCartridgeResult.replaceData() — 0.11.2. An editor shows a
- * mounted widget against sample data (plus a transient config overlay)
- * without a remount, then gives the mount its own data back.
+ * Tests for `replaceData` from `@airo-js/runtime/editor` — 0.11.2. An
+ * editor shows a mounted widget against sample data (plus a transient
+ * config overlay) without a remount, then gives the mount its own data
+ * back. It reaches the mount through the versioned editor hook.
  *
  * Bands:
  *   1. Apply / restore — transformers over the given data, in-place
@@ -26,7 +27,9 @@ import type {
 } from '@airo-js/cartridge-kit';
 import type { PageRenderer } from '@airo-js/core';
 
-import { mountCartridge, type DataReplacedEvent } from '../src/mount-cartridge.js';
+import { replaceData, type DataReplacedEvent } from '../src/editor.js';
+import { EDITOR_HOOK } from '../src/editor-hook.js';
+import { mountCartridge } from '../src/mount-cartridge.js';
 import {
   blockingGate,
   fakeCartridge,
@@ -159,9 +162,9 @@ describe('replaceData — apply', () => {
     const { result, h } = await mount();
     expect(last(h.painted).items).toEqual(['t:live-1']);
 
-    const out = await result.replaceData({ data: { items: ['sample'] } });
+    const out = await replaceData(result, { data: { items: ['sample'] } });
 
-    expect(out.mode).toBe('hot-swap');
+    expect(out?.mode).toBe('hot-swap');
     expect(last(h.painted).items).toEqual(['t:sample']);
     expect(h.fetches).toBe(1);
     expect(h.remounts).toBe(0);
@@ -171,10 +174,10 @@ describe('replaceData — apply', () => {
     const { result, h } = await mount();
     result.app.navigate({ page: 'about' });
 
-    const out = await result.replaceData({ data: { items: ['sample'] } });
+    const out = await replaceData(result, { data: { items: ['sample'] } });
 
     expect(last(h.transformed).page).toBe('about');
-    expect(out.navState.page).toBe('about');
+    expect(out?.navState.page).toBe('about');
     expect(result.app.getNavigationState().page).toBe('about');
     expect(last(h.painted).page).toBe('about');
   });
@@ -184,7 +187,7 @@ describe('replaceData — apply', () => {
       config: { feed: { url: 'u' }, display: { showPrices: true } },
     });
 
-    await result.replaceData({ data: { items: ['s'] }, config: { display: { categoryFilter: 'shoes' } } });
+    await replaceData(result, { data: { items: ['s'] }, config: { display: { categoryFilter: 'shoes' } } });
 
     const expected = { feed: { url: 'u' }, display: { showPrices: true, categoryFilter: 'shoes' } };
     expect(last(h.transformed).config).toEqual(expected);
@@ -196,7 +199,7 @@ describe('replaceData — apply', () => {
     const order: string[] = [];
     result.shell.events.on('mount:data-replaced', () => order.push('event'));
 
-    await result.replaceData({ data: { items: ['s'] } }).then(() => order.push('resolved'));
+    await replaceData(result, { data: { items: ['s'] } }).then(() => order.push('resolved'));
 
     expect(order).toEqual(['event', 'resolved']);
     expect(h.events).toEqual([{ replaced: true, navState: result.app.getNavigationState() }]);
@@ -204,8 +207,8 @@ describe('replaceData — apply', () => {
 
   test('applying again replaces the previous replacement', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['a'] }, config: { locale: 'fr-FR' } });
-    await result.replaceData({ data: { items: ['b'] } });
+    await replaceData(result, { data: { items: ['a'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['b'] } });
 
     expect(last(h.painted).items).toEqual(['t:b']);
     // The second call carried no overlay, so the first one's is gone.
@@ -216,10 +219,10 @@ describe('replaceData — apply', () => {
 describe('replaceData — restore (null)', () => {
   test('puts back the mount’s own snapshot and drops the overlay, with no refetch', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
     const transformRuns = h.transformed.length;
 
-    await result.replaceData(null);
+    await replaceData(result, null);
 
     expect(last(h.painted).items).toEqual(['t:live-1']);
     expect(last(h.painted).config.locale).toBeUndefined();
@@ -233,9 +236,9 @@ describe('replaceData — restore (null)', () => {
     const { result, h } = await mount();
     const renders = h.painted.length;
 
-    const out = await result.replaceData(null);
+    const out = await replaceData(result, null);
 
-    expect(out.mode).toBe('hot-swap');
+    expect(out?.mode).toBe('hot-swap');
     expect(h.painted.length).toBe(renders);
     expect(h.events).toEqual([]);
   });
@@ -248,7 +251,7 @@ describe('replaceData — restore (null)', () => {
 describe('replaceData — with update() / updatePages()', () => {
   test('a hot-swap keeps the replaced snapshot and re-applies the overlay over the new config', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
 
     const out = await result.update({ display: { showPrices: true } });
 
@@ -260,10 +263,10 @@ describe('replaceData — with update() / updatePages()', () => {
 
   test('the overlay never enters the mount config — a restore after a hot-swap keeps the update, not the overlay', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
     await result.update({ display: { showPrices: true } });
 
-    await result.replaceData(null);
+    await replaceData(result, null);
 
     expect(last(h.painted).config.locale).toBeUndefined();
     expect(last(h.painted).config.display?.showPrices).toBe(true);
@@ -272,7 +275,7 @@ describe('replaceData — with update() / updatePages()', () => {
 
   test('a page hot-swap keeps the replacement', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] } });
+    await replaceData(result, { data: { items: ['s'] } });
 
     await result.updatePages([
       { id: 'home', type: 'home', enabled: true },
@@ -284,7 +287,7 @@ describe('replaceData — with update() / updatePages()', () => {
 
   test('a remount fetches under the real config, then re-applies the replacement over the new config', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
     h.events.length = 0;
 
     const out = await result.update({ display: { categoryFilter: 'shoes' } });
@@ -302,10 +305,10 @@ describe('replaceData — with update() / updatePages()', () => {
 
   test('after a remount, a restore shows the snapshot that remount fetched — still no extra fetch', async () => {
     const { result, h } = await mount();
-    await result.replaceData({ data: { items: ['s'] } });
+    await replaceData(result, { data: { items: ['s'] } });
     await result.update({ display: { categoryFilter: 'shoes' } });
 
-    await result.replaceData(null);
+    await replaceData(result, null);
 
     expect(last(h.painted).items).toEqual(['t:live-2']);
     expect(last(h.painted).config.display?.categoryFilter).toBe('shoes');
@@ -332,7 +335,7 @@ describe('replaceData — with update() / updatePages()', () => {
       },
     };
     const { result } = await mount({ gates: [recordingGate] });
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
     gateConfigs.length = 0;
 
     await result.update({ display: { categoryFilter: 'shoes' } });
@@ -354,7 +357,7 @@ describe('replaceData — with update() / updatePages()', () => {
       errorPolicy: 'fail-render',
     };
     const { result, h } = await mount({ transformers: [picky] });
-    await result.replaceData({ data: { items: ['s'] } });
+    await replaceData(result, { data: { items: ['s'] } });
     h.events.length = 0;
 
     const out = await result.update({ display: { categoryFilter: 'shoes' } });
@@ -364,7 +367,7 @@ describe('replaceData — with update() / updatePages()', () => {
     expect(h.events).toEqual([{ replaced: false, navState: out.navState }]);
     // Nothing left to restore: a later null is a no-op.
     const renders = h.painted.length;
-    await result.replaceData(null);
+    await replaceData(result, null);
     expect(h.painted.length).toBe(renders);
   });
 });
@@ -387,20 +390,20 @@ describe('replaceData — failures', () => {
     const { result, h } = await mount({ transformers: [strict] });
     const renders = h.painted.length;
 
-    await expect(result.replaceData({ data: { items: ['bad'] } })).rejects.toThrow('bad sample');
+    await expect(replaceData(result, { data: { items: ['bad'] } })).rejects.toThrow('bad sample');
 
     expect(h.errors).toEqual(['pipeline']);
     expect(h.painted.length).toBe(renders);
     expect(h.events).toEqual([]);
     // Still not replaced: null stays a no-op.
-    await result.replaceData(null);
+    await replaceData(result, null);
     expect(h.painted.length).toBe(renders);
   });
 
   test('rejects after destroy()', async () => {
     const { result } = await mount();
     result.destroy();
-    await expect(result.replaceData({ data: { items: ['s'] } })).rejects.toThrow(/after destroy/);
+    await expect(replaceData(result, { data: { items: ['s'] } })).rejects.toThrow(/mount was destroyed/);
   });
 
   test('rejects while a gate blocks the last remount', async () => {
@@ -413,7 +416,7 @@ describe('replaceData — failures', () => {
     block = true;
     await expect(result.update({ display: { categoryFilter: 'x' } })).rejects.toThrow(/blocked/);
 
-    await expect(result.replaceData({ data: { items: ['s'] } })).rejects.toThrow(/gate blocked/);
+    await expect(replaceData(result, { data: { items: ['s'] } })).rejects.toThrow(/gate blocked/);
   });
 });
 
@@ -422,7 +425,7 @@ describe('replaceData — FIFO queue', () => {
     const { result, h } = await mount();
 
     const remount = result.update({ display: { categoryFilter: 'shoes' } });
-    const replace = result.replaceData({ data: { items: ['s'] } });
+    const replace = replaceData(result, { data: { items: ['s'] } });
     await Promise.all([remount, replace]);
 
     expect(last(h.painted).items).toEqual(['t:s']);
@@ -432,12 +435,47 @@ describe('replaceData — FIFO queue', () => {
   test('an update queued behind a replaceData sees the replacement', async () => {
     const { result, h } = await mount();
 
-    const replace = result.replaceData({ data: { items: ['s'] } });
+    const replace = replaceData(result, { data: { items: ['s'] } });
     const hotSwap = result.update({ display: { showPrices: true } });
     await Promise.all([replace, hotSwap]);
 
     expect(last(h.painted).items).toEqual(['t:s']);
     expect(last(h.painted).config.display?.showPrices).toBe(true);
+  });
+});
+
+describe('replaceData — the editor hook', () => {
+  test('resolves null, applying nothing, for a mount whose runtime has no hook (older than 0.11.2)', async () => {
+    const { result, h } = await mount();
+    const renders = h.painted.length;
+    const older = { ...result, app: result.app } as typeof result;
+    delete (older as Partial<typeof result>)[EDITOR_HOOK];
+
+    await expect(replaceData(older, { data: { items: ['s'] } })).resolves.toBeNull();
+    expect(h.painted.length).toBe(renders);
+  });
+
+  test('resolves null for a gate-blocked mount', async () => {
+    const blocked = await mountCartridge<TestData, TestConfig>({
+      cartridge: fakeCartridge({ gates: [blockingGate()] }),
+      config: {},
+      template: fakeCartridge().templates[0]!,
+      host,
+      preloadedData: { items: ['x'] },
+    });
+    expect(blocked.blocked).toBe(true);
+    await expect(replaceData(blocked, { data: { items: ['s'] } })).resolves.toBeNull();
+  });
+
+  test('the key is a registry symbol, so a separately bundled editor finds it', async () => {
+    const { result } = await mount();
+    expect(EDITOR_HOOK).toBe(Symbol.for('airo-js.runtime.editor.v1'));
+    expect(result[Symbol.for('airo-js.runtime.editor.v1') as typeof EDITOR_HOOK]).toBeDefined();
+  });
+
+  test('the package barrel does not reach the editor entry', async () => {
+    const barrel = await import('../src/index.js');
+    expect(Object.keys(barrel)).not.toContain('replaceData');
   });
 });
 
@@ -469,10 +507,10 @@ describe('post-processors after an in-place swap', () => {
     const seen: Array<{ items: string[]; config: TestConfig }> = [];
     const { result } = await mount({ postProcessors: [capture(seen)] });
 
-    await result.replaceData({ data: { items: ['s'] }, config: { locale: 'fr-FR' } });
+    await replaceData(result, { data: { items: ['s'] }, config: { locale: 'fr-FR' } });
     expect(last(seen)).toEqual({ items: ['t:s'], config: expect.objectContaining({ locale: 'fr-FR' }) });
 
-    await result.replaceData(null);
+    await replaceData(result, null);
     expect(last(seen).items).toEqual(['t:live-1']);
     expect(last(seen).config.locale).toBeUndefined();
   });
@@ -480,7 +518,7 @@ describe('post-processors after an in-place swap', () => {
   test('after a remount that re-applied a replacement, post-processors read the replacement', async () => {
     const seen: Array<{ items: string[]; config: TestConfig }> = [];
     const { result } = await mount({ postProcessors: [capture(seen)] });
-    await result.replaceData({ data: { items: ['s'] } });
+    await replaceData(result, { data: { items: ['s'] } });
 
     await result.update({ display: { categoryFilter: 'shoes' } });
 
