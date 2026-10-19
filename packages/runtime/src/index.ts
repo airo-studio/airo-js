@@ -17,6 +17,7 @@ export type {
   SharedLifecycleHooks,
   MountCartridgeOptions,
   MountCartridgeResult,
+  DataReplacedEvent,
   // Defined in `@airo-js/core`; surfaced here because it is the return type of
   // `MountCartridgeResult.update` / `.updatePages`. Without it on this barrel,
   // typing the result of a call you made against `@airo-js/runtime` means
@@ -37,4 +38,4 @@ export { EventBus } from '@airo-js/core';
 
 export const PACKAGE_NAME = '@airo-js/runtime';
 /** Package version — publish preflight asserts this matches package.json. */
-export const VERSION = '0.11.1';
+export const VERSION = '0.11.2';

@@ -2,6 +2,29 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `replaceData` is `@airo-js/runtime` 0.11.2 alone
+
+One new method on the mount result, one new event, and a fix to how post-processors see an in-place swap, all in one package. Nothing that exists changes signature, and no other package moves, so this is a patch on the runtime rather than a new line. The method goes into the surface 1.0 freezes, so its semantics were agreed with the requesting consumer on the bridge before it was built (`msg_mvf2lxy8_1a82fa`).
+
+**Upgrading:** nothing is required. A host that annotates the result as `MountCartridgeResult<TConfig>` keeps compiling, and `replaceData` is typed `data: unknown` there. Add the third type argument (`MountCartridgeResult<TConfig, TPageType, TData>`) to type it, or let inference carry it from `mountCartridge`.
+
+## `@airo-js/runtime` 0.11.2 — 2026-10-19
+
+### Added
+- **`MountCartridgeResult.replaceData(next: { data, config? } | null)`** shows a mounted widget against other data without a remount. It is for an editor drawing a state the live data cannot produce, such as an empty grid, or a facet the draft does not configure, from sample data. Until now the only way in was `App.replaceAppContext`, which takes a *post*-pipeline context and sits outside the dispatch queue. A host had to re-run the cartridge's transformers itself, and the next hot-swap `update()` silently put the held snapshot back.
+  - **Apply.** The cartridge's transformers run over `next.data`, with no fetch and no gates, and the active page re-renders in place. Transformers see the active page as `navState.page`, not the entry page. NavigationState is preserved and no navigation event fires.
+  - **`config` is a transient overlay.** It is merged over the mount's config for everything that displays: these transformers, views and post-processors. It is held apart from that config, so `update()` never diffs against it and gates and fetch never see it.
+  - **`replaceData(null)` restores** the mount's own snapshot and drops the overlay, with no refetch. If nothing is replaced, it does nothing.
+  - **While replaced:** an `update()` / `updatePages()` hot-swap keeps the replacement. A remount still fetches under the real config, so a later restore shows data computed for the config that is live. It then re-runs the transformers over the replacement and mounts that. If they throw on the replacement under the new config, the remount drops it, mounts the live data and logs an error. The `update()` that remounted still resolves.
+  - **Queue, ordering and failures.** It joins the FIFO queue `update` / `updatePages` share, and resolves after the render lands. The one exception is an active page whose chunk has not registered: that page paints later, by chunk recovery. It rejects without changing anything if a transformer throws on the given data (after `onError('pipeline')`), if a gate blocked the last remount, or if it is called after `destroy()`.
+- **`'mount:data-replaced'` on `shell.events`** carries a `DataReplacedEvent` (`{ replaced, navState }`, exported). It fires after the render: `replaced: true` on each apply, `false` on a restore, and `false` when a remount had to drop the replacement. A remount that re-applies emits only `'mount:remounted'`, because `replaced` did not change. The data is never echoed on the bus.
+
+### Fixed
+- **Post-processors read mount-time config and data after an in-place swap.** The `postRender` closure captured the `config` and `snapshot` its mount was built with. `PageManager` re-runs post-processors on every in-place swap, so after a hot-swap `update()` they got the config from before the update while views got the new one. `replaceData` would have widened that to the data: views showing the sample, post-processors reading live data, which breaks the snapshot-fidelity guarantee. The closure now reads a per-mount holder that the swap writes before it renders.
+
+### Cost
+- The runtime's reachable closure grows from 28,335 B to 29,650 B minified (+1,315 B), and from 9,238 B to 9,656 B gzip (+418 B). Every page that mounts a cartridge pays this, editor or not, because the method lives in `mountCartridge`'s closure and cannot be tree-shaken. Both stay inside the existing budgets (29,696 B / 9,728 B), but only after shortening the new error strings, with 46 B / 72 B of headroom left. The next runtime addition will need a deliberate budget raise.
+
 ## Why the hydrate-only renderer is a patch, on two packages
 
 Both changes are additive: a new helper and a new capability value in `@airo-js/cartridge-kit`, a field `@airo-js/ssr` already received but ignored. No existing signature moves, nothing renders differently unless a consumer asks for it, so each package takes its own patch rather than the line taking a minor — `@airo-js/cartridge-kit` 0.11.1 and `@airo-js/ssr` 0.11.2, with core, runtime, embed, mcp and log where they were. `CONTRACT_VERSION` stays `0.10.0`: a helper and a widened capability union help consumers implement the existing contract, they do not move it.
