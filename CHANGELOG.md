@@ -2,6 +2,33 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `replaceData` is `@airo-js/runtime` 0.11.2 alone, and why it is its own entry
+
+This release adds a new entry, `@airo-js/runtime/editor`, with one function in it. It also adds one new event, a versioned hook on the mount result, and a fix to how post-processors see an in-place swap. All of it is in one package. Nothing that exists changes signature, and no other package moves, so this is a patch on the runtime rather than a new line. The requesting consumer agreed the semantics on the bridge before the build (`msg_mvf2lxy8_1a82fa`).
+
+`replaceData` lives in its own entry because only an editor calls it. A first build put it on the mount result, where tree-shaking cannot reach it, so every page that mounts a cartridge paid +418 B gzip for a method its visitors never use. The consumer measured both of their mounting bundles going over budget, and asked for the split. The mount now carries only the seam the editor entry needs, and the editor's own bundle pays for the rest.
+
+**Upgrading:** nothing is required. A host that annotates the result as `MountCartridgeResult<TConfig>` keeps compiling. To use `replaceData`, import it from `@airo-js/runtime/editor`, in editor code only.
+
+## `@airo-js/runtime` 0.11.2 — 2026-10-19
+
+### Added
+- **`replaceData(mount, next: { data, config? } | null)` in `@airo-js/runtime/editor`** shows a mounted widget against other data without a remount. It is for an editor drawing a state the live data cannot produce, such as an empty grid, or a facet the draft does not configure, from sample data. Until now the only way in was `App.replaceAppContext`, which takes a *post*-pipeline context and sits outside the dispatch queue. A host had to re-run the cartridge's transformers itself, and the next hot-swap `update()` silently put the held snapshot back.
+  - **Apply.** The cartridge's transformers run over `next.data`, with no fetch and no gates, and the active page re-renders in place. Transformers see the active page as `navState.page`, not the entry page. NavigationState is preserved and no navigation event fires.
+  - **`config` is a transient overlay.** It is merged over the mount's config for everything that displays: these transformers, views and post-processors. It is held apart from that config, so `update()` never diffs against it and gates and fetch never see it.
+  - **`null` restores** the mount's own snapshot and drops the overlay, with no refetch. If nothing is replaced, it does nothing.
+  - **While replaced:** an `update()` / `updatePages()` hot-swap keeps the replacement. A remount still fetches under the real config, so a later restore shows data computed for the config that is live. It then re-runs the transformers over the replacement and mounts that. If they throw on the replacement under the new config, the remount drops it, mounts the live data and logs an error. The `update()` that remounted still resolves.
+  - **Queue, ordering and failures.** It joins the FIFO queue `update` / `updatePages` share, and resolves after the render lands. The one exception is an active page whose chunk has not registered: that page paints later, by chunk recovery. It **resolves `null`**, applying nothing, when the mount has no editor hook: a gate-blocked mount, or a runtime older than 0.11.2. It rejects without changing anything if a transformer throws on the given data (after `onError('pipeline')`), if a gate blocked the last remount, or if it is called after `destroy()`.
+- **`'mount:data-replaced'` on `shell.events`** carries a `DataReplacedEvent` (`{ replaced, navState }`, exported from the editor entry). It fires after the render: `replaced: true` on each apply, `false` on a restore, and `false` when a remount had to drop the replacement. A remount that re-applies emits only `'mount:remounted'`, because `replaced` did not change. The data is never echoed on the bus.
+- **The editor hook.** The unblocked mount result carries one property under `Symbol.for('airo-js.runtime.editor.v1')`: the dispatch queue, the mount's own config and snapshot, an in-place swap, and a display slot that the remount and hot-swap paths consult. It is the whole of what a mount carries for the editor. The version is in the key: an editor overlay is often served apart from the runtime it attaches to, so the two can come from different releases. A runtime without the hook is detectable, and a breaking change ships as `v2` beside `v1`. `MountCartridgeResult` takes a third type parameter, `TData` (default `unknown`), to type it.
+
+### Fixed
+- **Post-processors read mount-time config and data after an in-place swap.** The `postRender` closure captured the `config` and `snapshot` its mount was built with. `PageManager` re-runs post-processors on every in-place swap, so after a hot-swap `update()` they got the config from before the update while views got the new one. The closure now reads a per-mount holder that the swap writes before it renders. Every runtime gets this fix, not just editors.
+
+### Cost
+- The runtime's reachable closure goes from 28,335 B to 28,585 B minified (+250 B), and from 9,238 B to 9,387 B gzip (+149 B). Of the gzip figure, +51 B is the post-processor fix and +98 B is the editor hook. The display slot is 35 B of that 98: it is what keeps the replacement on screen through hot-swaps and remounts. Without it, every `update()` would paint live data before the editor could re-apply the sample.
+- The editor entry is 1,759 B minified, 903 B gzip, excluding the `@airo-js/*` peers it shares with the runtime. Only bundles that import `@airo-js/runtime/editor` pay it.
+
 ## Why the hydrate-only renderer is a patch, on two packages
 
 Both changes are additive: a new helper and a new capability value in `@airo-js/cartridge-kit`, a field `@airo-js/ssr` already received but ignored. No existing signature moves, nothing renders differently unless a consumer asks for it, so each package takes its own patch rather than the line taking a minor — `@airo-js/cartridge-kit` 0.11.1 and `@airo-js/ssr` 0.11.2, with core, runtime, embed, mcp and log where they were. `CONTRACT_VERSION` stays `0.10.0`: a helper and a widened capability union help consumers implement the existing contract, they do not move it.
