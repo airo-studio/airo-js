@@ -89,7 +89,7 @@ describe('mapping table', () => {
     expect(() => build('<div><video src="a.mp4"></video></div>')).toThrow(UnmappedElementError);
     expect(() => build('<select multiple></select>')).toThrow(/<select multiple>/);
     expect(() => build('<select size="4"></select>')).toThrow(/<select size="4">/);
-    expect(() => build('<input type="checkbox">')).toThrow(/input type="checkbox"/);
+    expect(() => build('<input type="file">')).toThrow(/input type="file"/);
   });
 
   it('refuses a relative src with no base url', () => {

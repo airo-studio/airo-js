@@ -322,6 +322,7 @@ describe(':empty and :modal', () => {
     expect(body('.toast:empty{display:none;overflow:hidden}')).toBe('.toast.airo-lynx-empty{display:none;overflow:hidden}');
     expect(body('.list:not(:empty){margin:0}')).toBe('.list:not(.airo-lynx-empty){margin:0}');
     expect(body('dialog:modal{padding:0}')).toBe('.tag-dialog.airo-lynx-modal{padding:0}');
+    expect(body('.sw input:checked + .track{opacity:1}')).toBe('.sw .tag-input.airo-lynx-checked+.track{opacity:1}');
     const { report } = normaliseCss('.a:empty{color:red}.b:modal{color:red}');
     expect(report.rewrites).toMatchObject({ empty: 1, modal: 1 });
     expect(report.unsupported).toEqual([]);

@@ -57,7 +57,7 @@ Every rewrite answers a gap measured on device:
 |---|---|---|
 | `html`, `body` | `.airo-lynx-page` (the page element) | there is no `<body>` |
 | a `font-size` in `rem`, `em` or `%` on `html` or `body` | px: `html`'s against 16px, `body`'s against `html`'s | both are the page, which `rem` follows, so `body { font: 1rem/1.5 … }` would refer to itself and fall back to 14px |
-| `:empty`, `:modal` | `.airo-lynx-empty`, `.airo-lynx-modal` (the runtime keeps these classes current) | both parse and never match |
+| `:empty`, `:modal`, `:checked` | `.airo-lynx-empty`, `.airo-lynx-modal`, `.airo-lynx-checked` (the runtime keeps these classes current) | they parse and never match |
 | `.sheet::backdrop` | `.airo-lynx-backdrop--sheet`: one class per class of the dialog, its tag and mirrored attributes included | `::backdrop` is rejected; a modal's backdrop is an element on device |
 | `h1`, `img`, … | `.tag-h1`, `.tag-img`, … (the tree pass adds these classes) | Lynx type selectors match Lynx tags (`view`, `text`) |
 | `[n]`, `[n="v"]` | `.a-n`, `.a-n--v` (the runtime mirrors attributes into these classes) | attribute selectors parse but never match |
@@ -104,6 +104,8 @@ A test holds every emitted declaration to that table.
 - **Tokens are read at build time.** `color-mix()` results and resolved radius tokens are baked from your `:root` tokens and the dark tokens inside `@media (prefers-color-scheme: dark)`. `Theme` from `@airo-js/core` and runtime token overrides do not reach a native page.
 - **`@media` other than the colour scheme is dropped** at engine 3.9. Write mobile-first: the unconditioned base is what a phone shows.
 - **Pseudo-elements** do not render, except `::backdrop` (above); `:hover` and `:focus` do not apply on a touch screen; `:first-child` and `nth-*` never match.
+- **Sibling selectors match, and the runtime keeps them current.** `input:checked + .track` matches on device, but Lynx does not restyle a following sibling when an element's classes change, so the runtime sets every following sibling's classes again after a change.
+- **A grid row around an `aspect-ratio` box that is not an image is sized 0.** Lynx's grid sizes an auto row from its content at an unknown width, so content whose height comes from `aspect-ratio` contributes nothing; the runtime fixes it for images (above), which it knows from the markup. Computed style does not report `aspect-ratio`, so another box with one cannot be found: a `div` with `aspect-ratio` in a grid row overlaps what follows.
 - **`html` and `body` are one element.** When they set different font sizes (`html { font-size: 62.5% }` with `body { font-size: 1.6rem }`), `rem` on device follows `body`'s, and the report says so.
 - **One stylesheet per card.** Tokens are read per stylesheet, and the browser defaults above head each one, so a second stylesheet would repeat them after the first one's rules. Concatenate into one file.
 - **Only the page scrolls.** An element your CSS makes scrollable (`overflow: auto` or `scroll`, such as a horizontal row of chips) is clipped on device, not scrolled.
@@ -178,6 +180,7 @@ Hydrate handlers receive element objects that implement this subset over a JS mo
 | `value` | text inputs and textareas, mirrored from typing; a select's selected option; an option's value |
 | `open`, `show()`, `showModal()`, `close(result)`, `returnValue` | `<details>` and `<dialog>`; a modal makes the page below inert, and a tap outside it is a click on the dialog, as on its backdrop |
 | `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules; a script's change fires nothing, as in a browser |
+| `checked` | checkboxes and radios; a checked radio unchecks the rest of its group; a script's change fires nothing |
 | `addEventListener`, `removeEventListener` | `click` (a tap), `input`, `change` (on blur or return, when the value changed; on a pick), `submit`, `focus`, `blur`, `toggle` (a details opened or closed), `close` (a dialog closed) |
 | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only |
 
@@ -191,15 +194,16 @@ Run a page on device, read the refusals in `onError`, and rewrite those parts of
 |---|---|
 | text-level tags with only text and inline tags (`p`, `h1`–`h6`, `li`, `span`, …) | `text`, inline tags nested |
 | other containers; `a` and `button` outside running text | `view`, loose text wrapped in `text` |
-| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device), taking the picture's size where the stylesheet leaves one open; an SVG source (`.svg`, an `image/svg+xml` data url) is an `svg` with that `src`, since `image` draws no SVG, sized by the `width` / `height` attributes' ratio as a browser sizes it |
+| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device). After the first layout, an image the stylesheet sizes gets its laid-out height inline, so a grid row around it is sized right (Lynx's grid sizes an `aspect-ratio` image's row as 0); one the stylesheet leaves a side of at 0 is rebuilt with `auto-size`, taking the picture's size; an SVG source (`.svg`, an `image/svg+xml` data url) is an `svg` with that `src`, since `image` draws no SVG, sized by the `width` / `height` attributes' ratio as a browser sizes it |
 | `svg` | `svg` with its markup as `content`; `currentColor` follows the CSS `color` around it where the engine reports computed colour (verified on iOS) |
 | `input` (text, search, url, email, tel, password, number), `textarea` | `input`, `textarea` |
 | `details`, `summary` | `view`s (`text` when the summary is only text); closed, only the first `summary` is on screen; a tap on it toggles `open` |
 | `dialog` | closed: an empty `view` with `.airo-lynx-closed`. `showModal()`: inside a backdrop `view` that covers the screen, with `.airo-lynx-modal` |
 | `select` | a `view` holding the selected option's label; a tap asks `onPick`. `multiple` and `size` > 1 are refused |
+| `input type="checkbox"`, `"radio"` | an empty `view` the stylesheet draws, with `.airo-lynx-checked` while checked. A tap on it or on its `<label>` toggles it before its `click`, then fires `input` and `change`; a cancelled click puts it back |
 | `input type="hidden"`, `script`, `template`, `noscript`, `option`, `optgroup` | the model only |
 | the mount's root (what the server rendered into) | a vertical `scroll-view` with `.airo-lynx-viewport`: the browser's viewport scrolls, a Lynx `view` does not |
-| anything else (tables, checkboxes, radios, file inputs, `video`, …) | refused: `UnmappedElementError` |
+| anything else (tables, file inputs, `video`, …) | refused: `UnmappedElementError` |
 
 The tokenizer is strict on purpose. It reads what `escapeHtml` writes — the five entities `&amp; &lt; &gt; &quot; &#39;`, numeric references, void elements, raw-text `script`/`style`, `svg` as foreign content — and a bare `&` exactly as the HTML parser does, so `href="/g?a=1&so=x"` keeps its `&`. It refuses a named entity such as `&nbsp;`, a bare `&copy` a browser would turn into ©, an unclosed or mis-nested element, or a stray `<`, with an `HtmlParseError` that gives line and column. A conformance test holds its trees equal to a browser-grade parser's on real pages.
 

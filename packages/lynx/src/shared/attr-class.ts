@@ -47,6 +47,9 @@ export const VIEWPORT_CLASS = 'airo-lynx-viewport';
  */
 export const EMPTY_CLASS = 'airo-lynx-empty';
 
+/** Class a checkbox or radio carries while it is checked: the stand-in for `:checked`. */
+export const CHECKED_CLASS = 'airo-lynx-checked';
+
 /** Class a `<dialog>` carries while it is closed: the HTML UA rule `dialog:not([open]) { display: none }`. */
 export const CLOSED_DIALOG_CLASS = 'airo-lynx-closed';
 

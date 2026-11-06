@@ -16,6 +16,7 @@
  * | `value` | form controls: mirrored from the Lynx `input` event, pushed with `setValue`; a select's from its selected option |
  * | `open`, `show()`, `showModal()`, `close()`, `returnValue` | `<details>` and `<dialog>`: the `open` attribute, re-projected; `toggle` and `close` fire after the current task |
  * | `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules (`./select.ts`) |
+ * | `checked` | checkboxes and radios; a checked radio unchecks the rest of its group |
  * | `addEventListener`, `removeEventListener` | `click`, `input`, `change`, `submit`, `focus`, `blur`, `toggle`, `close` (below) |
  * | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only, from the model |
  *
@@ -36,6 +37,8 @@
  *                                                 └─ not prevented → onNavigate (form), or for
  *                                                    method="dialog", its dialog closes
  *                                              a details' summary → `open` toggles → toggle
+ *                                              checkbox / radio → toggled first, then input, change
+ *                                              <label> → a click on its control
  *                                              <select> → onPick → input, change
  *  … while a modal dialog is open, a tap outside it is a tap on the dialog (its backdrop)
  *  focus on input/textarea ─────────────► focus     (value remembered)
@@ -83,8 +86,10 @@ import {
 } from './navigation.js';
 import {
   contains,
+  descendants,
   fromParsed,
   insertChildren,
+  isCheckable,
   type LynxElement,
   type LynxNode,
   LynxText,
@@ -104,12 +109,41 @@ const ACTIVATABLE = new Set(['button', 'select', 'input', 'textarea']);
 const isDetailsSummary = (el: LynxElement): boolean =>
   el.parent?.tag === 'details' && el.parent.children.find((c) => c.kind === 'element' && c.tag === 'summary') === el;
 
-/** What a tap on `el` activates, as a browser finds it: the nearest link, control, or details' summary around it. */
+/** What a tap on `el` activates, as a browser finds it: the nearest link, control, label, or details' summary around it. */
 function activationTarget(el: LynxElement): LynxElement | null {
   for (let n: LynxElement | null = el; n; n = n.parent) {
-    if (n.tag === 'a' ? n.attrs.has('href') : ACTIVATABLE.has(n.tag) || (n.tag === 'summary' && isDetailsSummary(n))) return n;
+    if (n.tag === 'a' ? n.attrs.has('href') : ACTIVATABLE.has(n.tag) || n.tag === 'label' || (n.tag === 'summary' && isDetailsSummary(n))) return n;
   }
   return null;
+}
+
+const rootOf = (el: LynxElement): LynxElement => {
+  let n = el;
+  while (n.parent) n = n.parent;
+  return n;
+};
+
+/** The control a label labels: its `for` target, else the first labelable element inside it. */
+function labelledControl(label: LynxElement): LynxElement | null {
+  const id = label.attrs.get('for');
+  const scope = id === undefined ? label : rootOf(label);
+  for (const el of descendants(scope)) {
+    if (id !== undefined ? el.attrs.get('id') === id : LABELABLE.has(el.tag) && !(el.tag === 'input' && el.attrs.get('type')?.toLowerCase() === 'hidden')) {
+      return LABELABLE.has(el.tag) ? el : null;
+    }
+  }
+  return null;
+}
+const LABELABLE = new Set(['input', 'select', 'textarea', 'button', 'meter', 'output', 'progress']);
+
+/** The other radios a radio unchecks: same name, same form (or both in none), on the same page. */
+function radioGroup(radio: LynxElement): LynxElement[] {
+  const name = radio.attrs.get('name');
+  if (!name) return [radio];
+  const form = formOf(radio);
+  return [...descendants(form ?? rootOf(radio))].filter(
+    (el) => isCheckable(el) && el.attrs.get('type')?.toLowerCase() === 'radio' && el.attrs.get('name') === name && formOf(el) === form,
+  );
 }
 
 /** Elements whose `value` reflects their `value` attribute. */
@@ -238,6 +272,9 @@ export class FacadeHost {
     } else if (key === 'open' && el.tag === 'dialog' && !present) {
       el.modal = false;
       this.modals = this.modals.filter((m) => m !== el);
+    } else if (key === 'checked' && isCheckable(el)) {
+      // The attribute sets checkedness until a tap or a script has.
+      if (!el.checkedDirty) this.setChecked(el, present);
     } else if (key === 'selected' && el.tag === 'option') {
       // The attribute sets selectedness until the selection has been set by a pick or a script.
       const select = selectOf(el);
@@ -245,6 +282,39 @@ export class FacadeHost {
       el.selected = present;
       if (present && select) for (const o of optionsOf(select)) if (o !== el) o.selected = false;
     }
+  }
+
+  /** Check or uncheck a checkbox or radio (a checked radio unchecks the rest of its group), and restyle. */
+  setChecked(el: LynxElement, on: boolean): void {
+    if (on && el.attrs.get('type')?.toLowerCase() === 'radio') {
+      for (const other of radioGroup(el)) {
+        if (other !== el && other.checked) {
+          other.checked = false;
+          this.tree.restyle(other);
+        }
+      }
+    }
+    if (el.checked === on) return;
+    el.checked = on;
+    this.tree.restyle(el);
+  }
+
+  /**
+   * A checkbox or radio toggles before its click is dispatched, as in a
+   * browser, so handlers read the new state. Returns how to put it back if
+   * the click is cancelled, or null when nothing changed (a checked radio).
+   */
+  private preActivate(el: LynxElement): (() => void) | null {
+    const radio = el.attrs.get('type')?.toLowerCase() === 'radio';
+    if (radio && el.checked) return null;
+    const before = radioGroup(el).filter((r) => r.checked);
+    const was = el.checked;
+    el.checkedDirty = true;
+    this.setChecked(el, radio ? true : !was);
+    return () => {
+      this.setChecked(el, was);
+      for (const r of before) this.setChecked(r, true);
+    };
   }
 
   /** Fire a non-bubbling `type` at `el` once the current task is done, as a browser's element task does. */
@@ -435,9 +505,26 @@ export class FacadeHost {
     const target = activationTarget(el);
     // A disabled control gets no click at all.
     if (target && ACTIVATABLE.has(target.tag) && target.attrs.has('disabled')) return;
+    const undo = target && isCheckable(target) ? this.preActivate(target) : null;
     const event = this.dispatch(el, 'click', { bubbles: true, cancelable: true });
-    if (event.defaultPrevented || !target) return;
+    if (event.defaultPrevented) {
+      undo?.();
+      return;
+    }
+    if (!target) return;
     switch (target.tag) {
+      case 'input':
+        if (undo) {
+          this.dispatch(target, 'input', { bubbles: true, cancelable: false });
+          this.dispatch(target, 'change', { bubbles: true, cancelable: false });
+        }
+        return;
+      case 'label': {
+        // The label passes the click to its control, which then does what a tap on it does.
+        const control = labelledControl(target);
+        if (control && control !== el && !contains(control, el)) this.click(control);
+        return;
+      }
       case 'a': {
         const request = linkRequest(target);
         if (request) this.opts.navigate(request);
@@ -748,6 +835,22 @@ class ElementFacade {
     this.#host.refuse(`setting <${el.tag}>.value`);
   }
 
+  // checkbox and radio
+  get checked(): boolean {
+    return this.#checkable('checked').checked;
+  }
+  set checked(on: boolean) {
+    const el = this.#checkable('checked');
+    el.checkedDirty = true;
+    this.#host.setChecked(el, !!on);
+  }
+
+  #checkable(member: string): LynxElement {
+    const el = this.#el;
+    if (!isCheckable(el)) return this.#host.refuse(`<${el.tag}${el.tag === 'input' ? ` type="${el.attrs.get('type') ?? 'text'}"` : ''}>.${member}`);
+    return el;
+  }
+
   // select and option
   get options(): object[] {
     return optionsOf(this.#only('select', 'options')).map((o) => this.#host.facade(o));
@@ -871,6 +974,7 @@ const ELEMENT_SETTABLE = new Set([
   'value',
   'selectedIndex',
   'selected',
+  'checked',
   'open',
   'returnValue',
 ]);

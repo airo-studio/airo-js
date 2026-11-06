@@ -10,6 +10,7 @@
  * | `img` | `image` (`src` resolved against the page's base url; with no size of its own it takes the picture's); an SVG source is an `svg` with that `src`, since `image` does not draw SVG |
  * | `svg` | `svg` with `content` set to the element's own markup |
  * | `input` (text-like types), `textarea` | `input`, `textarea`; value from the markup, then from typing |
+ * | `input type="checkbox"`, `"radio"` | an empty `view` the stylesheet draws; checked, it carries `.airo-lynx-checked`. A tap on it or its `<label>` toggles it |
  * | `details`, `summary` | `view`s (a summary of text and inline tags is a `text`); a closed `details` shows its first `summary` only, and a tap on that summary toggles `open` |
  * | `dialog` | a `view`, empty and hidden while closed; opened with `showModal()`, it sits inside a `view` that is its backdrop |
  * | `select` | a `view` holding the selected option's label; a tap asks the host's `onPick` for a choice (`./select.ts`). `multiple` and `size` > 1 are refused |
@@ -36,6 +37,7 @@ import {
   attrClass,
   BACKDROP_CLASS,
   backdropClass,
+  CHECKED_CLASS,
   CLOSED_DIALOG_CLASS,
   DARK_CLASS,
   EMPTY_CLASS,
@@ -46,7 +48,7 @@ import {
   VIEWPORT_CLASS,
 } from '../shared/attr-class.js';
 import { LynxRefusalError, log, UnmappedElementError } from './errors.js';
-import { type LynxElement, type LynxKind, type LynxNode, serialize } from './node-model.js';
+import { isCheckable, type LynxElement, type LynxKind, type LynxNode, serialize } from './node-model.js';
 import type { ElementRef, NativeEvent, NativeListener, Papi } from './papi.js';
 import { optionLabel, selectedOption, selectOf } from './select.js';
 
@@ -103,6 +105,7 @@ function classString(el: LynxElement): string {
   const authored = (el.attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
   const own = el.as === 'scroll' ? [VIEWPORT_CLASS] : [];
   if (el.children.length === 0) own.push(EMPTY_CLASS);
+  if (el.checked && isCheckable(el)) own.push(CHECKED_CLASS);
   if (el.tag === 'dialog' && !el.attrs.has('open')) own.push(CLOSED_DIALOG_CLASS);
   else if (el.modal) own.push(MODAL_CLASS);
   return [...own, ...authored, tagClass(el.tag), ...mirrorClasses(el.attrs)].join(' ');
@@ -161,6 +164,12 @@ export class NativeTree {
   private afterFlush: (() => void)[] = [];
   /** Projected `svg` elements, and the colour last handed to each as `current-color`. */
   private readonly svgs = new Map<LynxElement, string | null>();
+  /** Images not laid out yet: each is pinned or given `auto-size` once it is (`syncImages`). */
+  private readonly unmeasuredImages = new Set<LynxElement>();
+  /** Images the stylesheet sizes, with the ratio they were laid out at: their height is set inline. */
+  private readonly pinnedImages = new Map<LynxElement, { ratio: number; width: number }>();
+  /** Images the stylesheet leaves unsized: built with `auto-size`, which Lynx reads only at creation. */
+  private readonly autoSizedImages = new Set<LynxElement>();
   /** Each modal dialog on screen, and the backdrop it is drawn inside: what stands in its parent's place. */
   private readonly backdrops = new Map<LynxElement, ElementRef>();
 
@@ -188,6 +197,8 @@ export class NativeTree {
         const type = (el.attrs.get('type') ?? 'text').toLowerCase();
         if (type === 'hidden') return 'none';
         if (INPUT_TYPES[type]) return 'input';
+        // No native checkbox: an empty view the stylesheet draws, its state a class.
+        if (type === 'checkbox' || type === 'radio') return 'view';
         throw new UnmappedElementError(`input type="${type}"`);
       }
       case 'select':
@@ -233,6 +244,8 @@ export class NativeTree {
   private forget(el: LynxElement): void {
     this.svgs.delete(el);
     this.backdrops.delete(el);
+    this.unmeasuredImages.delete(el);
+    this.pinnedImages.delete(el);
     for (const uid of el.uids) if (this.byUid.get(uid) === el) this.byUid.delete(uid);
     el.uids = [];
     el.ref = null;
@@ -252,8 +265,13 @@ export class NativeTree {
         this.papi.setAttribute(ref, 'src', this.resolve(el.attrs.get('src') ?? ''));
         this.papi.setAttribute(ref, 'mode', 'scaleToFill');
         // A size the stylesheet leaves open comes from the picture, as in a
-        // browser. Without it Lynx draws the image 0 wide or 0 tall.
-        this.papi.setAttribute(ref, 'auto-size', true);
+        // browser; without `auto-size` Lynx draws the image 0 wide or 0 tall.
+        // But `auto-size` on an image the stylesheet does size hands a grid
+        // the picture's natural size (a row 768 tall around a 263-tall photo,
+        // measured), so which it is waits for the first layout (`syncImages`).
+        // With no computed style to read, always.
+        if (this.autoSizedImages.has(el) || !this.papi.computedStyle) this.papi.setAttribute(ref, 'auto-size', true);
+        else if (!this.pinnedImages.has(el)) this.unmeasuredImages.add(el);
         const alt = el.attrs.get('alt');
         if (alt) this.papi.setAttribute(ref, 'accessibility-label', alt);
         break;
@@ -462,8 +480,24 @@ export class NativeTree {
       if (select && (changed === 'selected' || changed === 'label' || changed === 'disabled')) this.reproject(select);
       return;
     }
+    this.restyle(el);
+  }
+
+  /**
+   * Classes again after an attribute or state the stylesheet reads as a
+   * class changed (`:checked`). Lynx matches `+` and `~` on first paint but
+   * does not restyle a following sibling when an element's classes change
+   * (measured: `input:checked + .track` stayed grey), so every following
+   * sibling's classes are set again too.
+   */
+  restyle(el: LynxElement): void {
     if (!el.ref) return;
     this.applyAttributes(el);
+    const siblings = el.parent?.children ?? [];
+    for (let i = siblings.indexOf(el) + 1; i < siblings.length; i++) {
+      const next = siblings[i]!;
+      if (next.kind === 'element' && next.ref) this.papi.setClasses(next.ref, classString(next));
+    }
     this.markDirty();
   }
 
@@ -499,7 +533,7 @@ export class NativeTree {
     this.papi.flush();
     this.flushes++;
     // A second flush only when an icon's colour changed, which is rare after the first paint.
-    if (this.syncSvgColours()) {
+    if (this.syncImages() || this.syncSvgColours()) {
       this.papi.flush();
       this.flushes++;
     }
@@ -512,6 +546,62 @@ export class NativeTree {
         log.error('[@airo-js/lynx] post-flush update failed', err);
       }
     }
+  }
+
+  /**
+   * After a layout, settle each image's size the way a browser would have:
+   *
+   *   - **Sized by the stylesheet** (laid out with a width and a height): its
+   *     height is set inline, at the height it was laid out at, and follows
+   *     its width afterwards. Lynx's grid sizes an auto row as 0 when its
+   *     content's height comes from `aspect-ratio`, though the image itself
+   *     lays out right (a 263-tall photo in a 0-tall row, measured); with a
+   *     height of its own the row is right.
+   *   - **One side left at 0** by the stylesheet (`height` alone): rebuilt
+   *     with `auto-size`, which takes the other side from the picture. Lynx
+   *     reads `auto-size` only when it creates the image (set later, even
+   *     with `src` set again, it does nothing: measured).
+   *   - **Both sides 0**: no size from the stylesheet, or a hidden parent.
+   *     With a parent that has a width it is the former, and gets
+   *     `auto-size`; otherwise it waits for a later layout.
+   *
+   * Returns whether an inline height changed, so the caller flushes again.
+   */
+  private syncImages(): boolean {
+    const read = this.papi.computedStyle;
+    if (!read) return false;
+    const size = (el: LynxElement, key: 'width' | 'height'): number => Number.parseFloat(read(el.ref!, key)) || 0;
+    let changed = false;
+    const rebuild: LynxElement[] = [];
+    for (const el of this.unmeasuredImages) {
+      if (!el.ref || el.as !== 'image') {
+        this.unmeasuredImages.delete(el);
+        continue;
+      }
+      const w = size(el, 'width');
+      const h = size(el, 'height');
+      if (w > 0 && h > 0) {
+        this.papi.setInlineStyles(el.ref, `height: ${h}px`);
+        this.pinnedImages.set(el, { ratio: w / h, width: w });
+        this.unmeasuredImages.delete(el);
+        changed = true;
+      } else if (w > 0 || h > 0 || (el.parent?.ref && size(el.parent, 'width') > 0)) {
+        this.autoSizedImages.add(el);
+        this.unmeasuredImages.delete(el);
+        rebuild.push(el);
+      }
+    }
+    for (const [el, pin] of this.pinnedImages) {
+      if (!el.ref) continue;
+      const w = size(el, 'width');
+      if (w > 0 && Math.abs(w - pin.width) > 0.5) {
+        this.papi.setInlineStyles(el.ref, `height: ${w / pin.ratio}px`);
+        pin.width = w;
+        changed = true;
+      }
+    }
+    for (const el of rebuild) this.reproject(el);
+    return changed;
   }
 
   /**

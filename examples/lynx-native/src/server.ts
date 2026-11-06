@@ -114,9 +114,10 @@ function search(data: NotesData): string {
 }
 
 /**
- * The elements a browser gives behaviour of its own, and two things a device
- * does not size or match by itself: a logo sized by its height only, and a
- * toast hidden by `:empty`.
+ * The elements a browser gives behaviour of its own, and the things a device
+ * does not size or match by itself: a logo sized by its height only, a toast
+ * hidden by `:empty`, switches drawn by `:checked + …`, and a photo in a grid
+ * whose height comes from its width and `aspect-ratio`.
  */
 function controls(data: NotesData): string {
   return frame(
@@ -132,6 +133,12 @@ function controls(data: NotesData): string {
       '<optgroup label="Other"><option value="az">A to Z</option><option value="za" disabled>Z to A</option></optgroup>',
       '</select></label></form>',
       '<p class="picked">Sorted by <span class="picked__value">old</span></p>',
+      '<label class="switch"><span>Mail me</span><input class="sr-only" type="checkbox" name="mail" checked><span class="switch__track"></span></label>',
+      '<label class="switch"><span>Weekly digest</span><input class="sr-only" type="checkbox" name="digest" data-digest><span class="switch__track"></span></label>',
+      '<div class="seg"><label><input class="sr-only" type="radio" name="theme" value="light" checked><span class="seg__pill">Light</span></label>',
+      '<label><input class="sr-only" type="radio" name="theme" value="dark"><span class="seg__pill">Dark</span></label></div>',
+      '<div class="item"><div class="item__gallery"><figure class="gallery"><img class="gallery__img" src="photo.png" width="1024" height="768" alt="A field"></figure></div>',
+      '<p class="item__after">The photo is as tall as its width and ratio make it; this line follows it.</p></div>',
       '<div class="row"><button class="btn" type="button" data-action="sheet">Open the sheet</button>',
       '<button class="btn" type="button" data-action="toast">Show a toast</button></div>',
       '<dialog class="sheet" id="sheet" aria-labelledby="sheet-title"><h2 class="sheet__title" id="sheet-title">A bottom sheet</h2>',

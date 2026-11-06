@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { noopSink, resetSink, setSink } from '@airo-js/log';
 
 import type { PickRequest } from '../src/runtime/select.js';
-import { BACKDROP_CLASS, CLOSED_DIALOG_CLASS, EMPTY_CLASS, MODAL_CLASS, backdropClass } from '../src/shared/attr-class.js';
+import { BACKDROP_CLASS, CHECKED_CLASS, CLOSED_DIALOG_CLASS, EMPTY_CLASS, MODAL_CLASS, backdropClass } from '../src/shared/attr-class.js';
 import { type El, type Page, page } from './harness.js';
 
 let p: Page;
@@ -44,6 +44,50 @@ describe('img', () => {
   it('takes the size the stylesheet leaves open from the picture', () => {
     p = page('<img class="logo" src="/logo.png" width="900" height="340" alt="Logo">');
     expect(p.native('.logo').attrs).toMatchObject({ src: 'https://shop.example/logo.png', 'auto-size': true, 'accessibility-label': 'Logo' });
+  });
+});
+
+describe('img sizes, settled after the first layout', () => {
+  /** Laid-out sizes by class, as the engine reports them; `width` can be changed between flushes. */
+  const sizes: Record<string, { width: number; height: number }> = {};
+  const layout = (el: { classes: string }, key: string): string => {
+    const hit = Object.entries(sizes).find(([cls]) => el.classes.split(' ').includes(cls));
+    return hit ? `${hit[1][key as 'width' | 'height']}px` : '';
+  };
+  const flushed = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('pins an image the stylesheet sizes at the height it was laid out at, and keeps the ratio as its width changes', async () => {
+    Object.assign(sizes, { photo: { width: 350, height: 262.5 } });
+    p = page('<div class="grid"><img class="photo" src="/p.jpg" width="1024" height="768"></div>', { layout });
+    p.tree.markDirty();
+    await flushed();
+    expect(p.native('.photo').style).toBe('height: 262.5px');
+    expect(p.native('.photo').attrs['auto-size']).toBeUndefined();
+    sizes.photo = { width: 175, height: 262.5 };
+    p.tree.markDirty();
+    await flushed();
+    expect(p.native('.photo').style).toBe('height: 131.25px');
+  });
+
+  it('rebuilds an image with a side left at 0 with auto-size, which Lynx reads only at creation', async () => {
+    Object.assign(sizes, { logo: { width: 0, height: 56 }, wrap: { width: 350, height: 100 } });
+    p = page('<div class="wrap"><img class="logo" src="/l.png"><img class="bare" src="/b.png"></div>', { layout });
+    const before = p.native('.logo');
+    p.tree.markDirty();
+    await flushed();
+    expect(p.native('.logo')).not.toBe(before);
+    expect(p.native('.logo').attrs['auto-size']).toBe(true);
+    // No size at all, in a parent with a width: no size from the stylesheet either.
+    expect(p.native('.bare').attrs['auto-size']).toBe(true);
+  });
+
+  it('waits while an image and its parent have no size (a hidden parent)', async () => {
+    Object.assign(sizes, { gone: { width: 0, height: 0 } });
+    p = page('<div class="gone" hidden><img class="pic" src="/x.png"></div>', { layout });
+    p.tree.markDirty();
+    await flushed();
+    expect(p.native('.pic').attrs['auto-size']).toBeUndefined();
+    expect(p.native('.pic').style).toBeUndefined();
   });
 });
 
@@ -316,5 +360,100 @@ describe('<select>', () => {
     p = page('<select class="sel" disabled><option>a</option></select>', { pick });
     p.tap('.sel');
     expect(pick).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkbox and radio', () => {
+  // The site's switch: the input is visually hidden, the label takes the tap, the track is drawn by `:checked + …`.
+  const SWITCH =
+    '<form action="/prefs" method="post"><label class="sw"><span class="sw__label">Mail me</span>' +
+    '<input class="sr" type="checkbox" name="mail" data-pref="mail"><span class="sw__track"></span></label>' +
+    '<label class="sw2"><input class="c2" type="checkbox" name="news" value="weekly" checked> News</label>' +
+    '<button class="save">Save</button></form>';
+  const checkedClass = (selector: string): boolean => p.native(selector).classes.split(' ').includes(CHECKED_CLASS);
+
+  it('is an empty view the stylesheet draws, carrying the checked class while checked', () => {
+    p = page(SWITCH);
+    expect(p.native('.sr').tag).toBe('view');
+    expect(p.native('.sr').children).toEqual([]);
+    expect(checkedClass('.sr')).toBe(false);
+    expect(checkedClass('.c2')).toBe(true);
+  });
+
+  it('toggles on a tap on its label: the label\'s click, then the box toggled before its own click, then input and change', () => {
+    p = page(SWITCH);
+    const seen: string[] = [];
+    for (const type of ['click', 'input', 'change']) p.root.addEventListener(type, (e: El) => seen.push(`${type}:${e.target.tagName}:${p.root.querySelector('.sr').checked}`));
+    p.tap('.sw__track');
+    expect(p.root.querySelector('.sr').checked).toBe(true);
+    expect(checkedClass('.sr')).toBe(true);
+    // The label's own click comes first, with the box as it was; the click it passes on sees it toggled.
+    expect(seen).toEqual(['click:SPAN:false', 'click:INPUT:true', 'input:INPUT:true', 'change:INPUT:true']);
+    p.tap('.sw__label');
+    expect(p.root.querySelector('.sr').checked).toBe(false);
+  });
+
+  it('puts the state back when a handler cancels the click', () => {
+    p = page(SWITCH);
+    const change = vi.fn();
+    p.root.querySelector('.sr').addEventListener('click', (e: El) => e.preventDefault());
+    p.root.addEventListener('change', change);
+    p.tap('.sw__track');
+    expect(p.root.querySelector('.sr').checked).toBe(false);
+    expect(checkedClass('.sr')).toBe(false);
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it('submits a checked box with its value, `on` without one, and nothing for an unchecked one', () => {
+    p = page(SWITCH);
+    p.tap('.save');
+    expect(p.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ fields: { news: 'weekly' } }));
+    p.root.querySelector('.sr').checked = true;
+    p.tap('.save');
+    expect(p.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ fields: { mail: 'on', news: 'weekly' } }));
+  });
+
+  it('follows the checked attribute until a tap or a script has set it, and fires nothing for a script', () => {
+    p = page(SWITCH);
+    const sr = p.root.querySelector('.sr');
+    const change = vi.fn();
+    p.root.addEventListener('change', change);
+    sr.setAttribute('checked', '');
+    expect(sr.checked).toBe(true);
+    sr.checked = false;
+    sr.setAttribute('checked', '');
+    expect(sr.checked).toBe(false);
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it('checks one radio of a group at a time; a tap on the checked one changes nothing', () => {
+    p = page(
+      '<fieldset><label class="l1"><input class="r1" type="radio" name="theme" value="light" checked><span>Light</span></label>' +
+        '<label class="l2"><input class="r2" type="radio" name="theme" value="dark"><span>Dark</span></label>' +
+        '<label class="l3"><input class="r3" type="radio" name="lang" value="pt" checked><span>PT</span></label></fieldset>',
+    );
+    const change = vi.fn();
+    p.root.addEventListener('change', change);
+    p.tap('.l2');
+    expect([1, 2, 3].map((i) => p.root.querySelector(`.r${i}`).checked)).toEqual([false, true, true]);
+    expect([1, 2].map((i) => checkedClass(`.r${i}`))).toEqual([false, true]);
+    expect(change).toHaveBeenCalledTimes(1);
+    p.tap('.l2');
+    expect(change).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets the classes of what follows a toggled box again: Lynx does not restyle a `+` sibling by itself', () => {
+    p = page(SWITCH);
+    const setClasses = vi.spyOn(globalThis as unknown as { __SetClasses: (el: unknown, c: string) => void }, '__SetClasses');
+    p.tap('.sw__track');
+    expect(setClasses.mock.calls.some(([el]) => el === p.native('.sw__track'))).toBe(true);
+    setClasses.mockRestore();
+  });
+
+  it('reaches a control by the label\'s `for`, and refuses `checked` on anything else', () => {
+    p = page('<label class="l" for="x">Agree</label><input id="x" class="x" type="checkbox"><div class="d"></div>');
+    p.tap('.l');
+    expect(p.root.querySelector('.x').checked).toBe(true);
+    expect(() => p.root.querySelector('.d').checked).toThrow(/<div>\.checked/);
   });
 });

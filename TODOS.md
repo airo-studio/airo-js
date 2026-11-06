@@ -135,4 +135,16 @@ Follow-ups for the planned `@airo-js/lynx` native render adapter (one package, `
 **Priority:** P3
 **Depends on:** Nothing
 
+### Report Lynx's grid row sizing for `aspect-ratio` content upstream
+
+**What:** report to lynx-family/lynx that a grid's auto row is sized 0 when its content's height comes from `aspect-ratio` (with `auto-size`, the image's natural height instead), and drop the runtime's inline image heights once a release fixes it.
+
+**Why:** the runtime pins every image's laid-out height inline to work round it (`syncImages` in `tree.ts`), which a later class change on that image cannot undo. A non-image box with `aspect-ratio` in a grid row is still sized 0, because computed style does not report `aspect-ratio` and the runtime cannot find it.
+
+**Context:** measured on the iOS simulator, 6 Nov 2026, with `examples/lynx-native`'s controls page: one-column, two-column and implicit grids, with and without wrappers, `align-items: start` included; the boxes inside lay out right, the row does not. Opening an external issue needs its own go-ahead. Trigger: before 0.2 of the adapter, or the first consumer page with an `aspect-ratio` box in a grid.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** Explicit approval to open the external issue
+
 ## Completed

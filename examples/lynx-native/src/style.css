@@ -163,3 +163,25 @@ figcaption { font-size: 0.8125rem; color: var(--muted); }
   background-color: var(--card);
 }
 .tabbar__link { color: var(--primary); font-weight: 600; text-decoration: none; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-weight: 600; }
+.switch__track { position: relative; flex: none; width: 2.75rem; height: 1.5rem; border-radius: 999px; background-color: var(--line); }
+.switch input:checked + .switch__track { background-color: var(--primary); }
+.seg { display: flex; gap: 0.5rem; }
+.seg__pill { display: flex; padding: 0.375rem 0.875rem; border: 1px solid var(--line); border-radius: 999px; }
+.seg input:checked + .seg__pill { background-color: var(--foreground); color: var(--background); }
+
+.item { display: grid; gap: 1rem; }
+.item__gallery { min-width: 0; }
+.gallery { position: relative; margin: 0; overflow: hidden; border-radius: var(--radius-lg); }
+.gallery__img { width: 100%; aspect-ratio: 4 / 3; }

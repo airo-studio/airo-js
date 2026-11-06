@@ -29,8 +29,12 @@ export interface Page {
   tap(selector: string, child?: number): void;
 }
 
-export function page(html: string, options: Pick<FacadeHostOptions, 'pick'> = {}): Page {
-  const fake = installFakePapi();
+export function page(
+  html: string,
+  options: Pick<FacadeHostOptions, 'pick'> & { layout?: (el: FakeElement, key: string) => string } = {},
+): Page {
+  const { layout, ...hostOptions } = options;
+  const fake = installFakePapi(undefined, layout);
   const papi = getPapi();
   const pageRef = papi.createPage('0', 0);
   const errors: LynxErrorInfo[] = [];
@@ -42,7 +46,7 @@ export function page(html: string, options: Pick<FacadeHostOptions, 'pick'> = {}
     baseUrl: 'https://shop.example/',
     onControlEvent: (el, event, native) => host.onControlEvent(el, event, native),
   });
-  host = new FacadeHost({ tree, reporter: (info) => errors.push(info), navigate, ...options });
+  host = new FacadeHost({ tree, reporter: (info) => errors.push(info), navigate, ...hostOptions });
   papi.addEventListener(pageRef, 'tap', (e) => host.onTap(e));
   const model = new LynxElement('div', false);
   insertChildren(model, fromParsed(tokenize(html)));

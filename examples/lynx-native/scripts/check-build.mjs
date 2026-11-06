@@ -46,6 +46,7 @@ for (const present of [
   'airo-lynx-closed',
   'airo-lynx-modal',
   'airo-lynx-backdrop--sheet',
+  'airo-lynx-checked',
 ]) {
   check(bundle.includes(present), `"${present}" is missing from the encoded stylesheet`);
 }
@@ -53,7 +54,7 @@ for (const present of [
 const expected = {
   'page-selector': 1,
   'page-font-size': 1,
-  'type-selector': 3,
+  'type-selector': 5,
   'attribute-selector': 5,
   'inline-flex': 2,
   'font-shorthand': 1,
@@ -64,6 +65,7 @@ const expected = {
   'color-scheme-media': 1,
   'display-none-clip': 2,
   empty: 1,
+  checked: 2,
   backdrop: 1,
 };
 for (const [kind, n] of Object.entries(expected)) {

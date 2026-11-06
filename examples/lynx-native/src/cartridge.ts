@@ -78,7 +78,12 @@ const controlsBehaviour = (root: HTMLElement, ctx: Ctx): (() => void) => {
   ];
   if (sheet) {
     offs.push(wireDialog(sheet));
-    if (ctx.app.data.open) sheet.showModal();
+    if (ctx.app.data.open) {
+      sheet.showModal();
+      // Checked by a script, so a check without taps sees the restyle after a change as well as the first paint.
+      const digest = root.querySelector<HTMLInputElement>('[data-digest]');
+      if (digest) digest.checked = true;
+    }
   }
   return () => {
     shown = -1;

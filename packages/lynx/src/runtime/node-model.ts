@@ -51,6 +51,10 @@ export class LynxElement {
   selected = false;
   /** A `<dialog>` opened with `showModal()`, until it closes. */
   modal = false;
+  /** A checkbox's or radio's checkedness: from its `checked` attribute, then from taps and scripts. */
+  checked = false;
+  /** Set once a tap or a script changed `checked`: the attribute stops reaching it. */
+  checkedDirty = false;
 
   constructor(
     readonly tag: string,
@@ -72,10 +76,21 @@ export function fromParsed(nodes: ParsedNode[]): LynxNode[] {
       el.children.push(child);
     }
     if (el.tag === 'textarea') el.value = textContent(el);
-    else if (el.tag === 'input') el.value = el.attrs.get('value') ?? '';
+    else if (el.tag === 'input') {
+      const checkable = isCheckable(el);
+      el.value = el.attrs.get('value') ?? (checkable ? 'on' : '');
+      if (checkable) el.checked = el.attrs.has('checked');
+    }
     else if (el.tag === 'option') el.selected = el.attrs.has('selected');
     return el;
   });
+}
+
+/** A checkbox or a radio: an input whose value is its checkedness. */
+export function isCheckable(el: LynxElement): boolean {
+  if (el.tag !== 'input') return false;
+  const type = (el.attrs.get('type') ?? '').toLowerCase();
+  return type === 'checkbox' || type === 'radio';
 }
 
 /** Every element below `el`, in tree order. */

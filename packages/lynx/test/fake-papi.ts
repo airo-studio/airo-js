@@ -46,7 +46,15 @@ const NAMES = [
   '__InvokeUIMethod', '__FlushElementTree',
 ];
 
-export function installFakePapi(scope: Record<string, unknown> = globalThis as unknown as Record<string, unknown>): FakeLynx {
+/**
+ * `layout`, when given, answers `__GetComputedStyleByKey` (a laid-out size or
+ * colour as the engine reports it); without it the global is absent, as the
+ * runtime must also cope with.
+ */
+export function installFakePapi(
+  scope: Record<string, unknown> = globalThis as unknown as Record<string, unknown>,
+  layout?: (el: FakeElement, key: string) => string,
+): FakeLynx {
   let uid = 0;
   let flushes = 0;
   let page: FakeElement | null = null;
@@ -127,6 +135,7 @@ export function installFakePapi(scope: Record<string, unknown> = globalThis as u
     },
   };
   for (const name of NAMES) scope[name] = api[name];
+  if (layout) scope.__GetComputedStyleByKey = layout;
 
   const all = (root: FakeElement): FakeElement[] => [root, ...root.children.flatMap(all)];
   const render = (el: FakeElement): string => {
@@ -159,6 +168,7 @@ export function installFakePapi(scope: Record<string, unknown> = globalThis as u
     render: (root) => render(root ?? page!),
     uninstall() {
       for (const name of NAMES) delete scope[name];
+      delete scope.__GetComputedStyleByKey;
     },
   };
 }

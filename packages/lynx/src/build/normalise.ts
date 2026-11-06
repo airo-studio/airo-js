@@ -16,7 +16,7 @@
  * | `display: none` → plus `overflow: hidden` | Lynx lays a `display: none` box out at 0×0 but still paints the text inside it |
  * | the HTML UA rule `[hidden] { display: none }`, as `.a-hidden` | there is no UA stylesheet on device |
  * | `.airo-lynx-viewport` fills the page | the mount's scroller stands in for the viewport, which is the size of the screen |
- * | `:empty` → `.airo-lynx-empty`, `:modal` → `.airo-lynx-modal` | both parse and never match; the runtime puts the class on the elements they would match |
+ * | `:empty`, `:modal`, `:checked` → `.airo-lynx-empty`, `-modal`, `-checked` | they parse and never match; the runtime puts the class on the elements they would match |
  * | `X::backdrop` → `X`'s classes as `.airo-lynx-backdrop--<class>` | the encoder rejects `::backdrop`; a modal's backdrop is an element on device, carrying one such class per class of its dialog |
  * | the HTML UA rules for `<dialog>` that place it: closed, modal, backdrop | there is no UA stylesheet on device |
  * | `font` shorthand → longhands | the encoder removes the shorthand |
@@ -48,6 +48,7 @@ import {
   backdropClass,
   CLOSED_DIALOG_CLASS,
   DARK_CLASS,
+  CHECKED_CLASS,
   EMPTY_CLASS,
   MODAL_CLASS,
   PAGE_CLASS,
@@ -107,6 +108,7 @@ export type RewriteKind =
   | 'aspect-ratio-width'
   | 'empty'
   | 'modal'
+  | 'checked'
   | 'backdrop'
   | 'colour-function'
   | 'color-mix'
@@ -375,6 +377,7 @@ class Normaliser {
         'aspect-ratio-width': 0,
         empty: 0,
         modal: 0,
+        checked: 0,
         backdrop: 0,
         'colour-function': 0,
         'color-mix': 0,
@@ -537,9 +540,9 @@ class Normaliser {
           }
           case 'PseudoClassSelector': {
             const name = node.name.toLowerCase();
-            if (name === 'empty' || name === 'modal') {
+            if (name === 'empty' || name === 'modal' || name === 'checked') {
               this.report.rewrites[name]++;
-              return cls(name === 'empty' ? EMPTY_CLASS : MODAL_CLASS);
+              return cls(name === 'empty' ? EMPTY_CLASS : name === 'modal' ? MODAL_CLASS : CHECKED_CLASS);
             }
             if (REJECTED_PSEUDO_CLASSES.has(name)) rejected ??= `:${name} is rejected by the Lynx encoder`;
             else if (NEVER_MATCHING_PSEUDO_CLASSES.has(name)) warn(`:${name} parses but never matches on device`);
