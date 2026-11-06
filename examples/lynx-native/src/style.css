@@ -191,3 +191,18 @@ figcaption { font-size: 0.8125rem; color: var(--muted); }
 .profile { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .profile__city { width: 8rem; height: 2.25rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: var(--radius); background-color: var(--card); color: var(--foreground); }
 .pick { padding: 0.5rem 0.875rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background-color: var(--card); }
+
+/* The layout page: a block link as a card, a cover SVG filling a square, a centring grid, a photo under a base img rule, pre. */
+.listings { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.listing { display: block; color: inherit; text-decoration: none; background-color: var(--card); border-radius: var(--radius); overflow: hidden; position: relative; }
+.listing__media { aspect-ratio: 1; background-color: var(--line); }
+.listing__img { width: 100%; height: 100%; }
+.listing__cover { width: 100%; aspect-ratio: 1; background-color: var(--line); }
+.listing__body { padding: 0.5rem; }
+.listing__title, .listing__price { margin: 0; }
+.listing__go { position: absolute; right: 0.5rem; bottom: 0.5rem; width: 2rem; height: 2rem; display: grid; place-items: center; border-radius: 999px; background-color: var(--primary); color: var(--primary-foreground); }
+.based img { max-width: 100%; height: auto; }
+.based { display: grid; gap: 1rem; }
+.based__gallery { margin: 0; }
+.based__img { width: 100%; }
+.code { font-family: ui-monospace, monospace; white-space: pre; background-color: var(--card); padding: 0.5rem; }

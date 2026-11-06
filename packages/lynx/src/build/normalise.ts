@@ -13,6 +13,8 @@
  * | `[n]` → `.a-n`, `[n="v"]` → `.a-n--v` | attribute selectors parse but never match; the runtime mirrors attributes into these classes |
  * | selectors the encoder rejects are split out of their list | the encoder drops the whole rule when one selector in its list fails to parse |
  * | `display: inline-flex` → `flex` | `inline-flex` falls back to Lynx's linear layout |
+ * | `display: block`, `flow-root`, `list-item` → `linear` | Lynx lays `block` out as a flex row (a card's photo beside its body, measured); `linear` stacks, as a box with no `display` does |
+ * | `place-items`, `place-content`, `place-self` → their two longhands | the encoder removes the shorthands; Lynx's grid honours `align-items` + `justify-items` (measured) |
  * | `display: none` → plus `overflow: hidden` | Lynx lays a `display: none` box out at 0×0 but still paints the text inside it |
  * | the HTML UA rule `[hidden] { display: none }`, as `.a-hidden` | there is no UA stylesheet on device |
  * | `.airo-lynx-viewport` fills the page | the mount's scroller stands in for the viewport, which is the size of the screen |
@@ -100,6 +102,8 @@ export type RewriteKind =
   | 'attribute-selector'
   | 'rejected-selector-split'
   | 'inline-flex'
+  | 'display-block'
+  | 'place-shorthand'
   | 'display-none-clip'
   | 'font-shorthand'
   | 'inset'
@@ -232,6 +236,29 @@ const LEGACY_SYNTAX = new Set(['rgb', 'rgba']);
 const COLOUR_CALL = new RegExp(`(^|[^\\w-])(${COLOUR_FUNCTIONS.join('|')})\\(`, 'i');
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+/** `place-*` shorthands and their longhands, align first (CSS Box Alignment 3 §5.5–5.7). */
+const PLACE_SHORTHANDS: Record<string, readonly [string, string]> = {
+  'place-items': ['align-items', 'justify-items'],
+  'place-content': ['align-content', 'justify-content'],
+  'place-self': ['align-self', 'justify-self'],
+};
+
+/**
+ * A `place-*` value → its align and justify values. One value sets both.
+ * `first baseline` and `safe center` are one value of two words, so a
+ * leading `first`/`last`/`safe`/`unsafe` takes the word after it with it.
+ */
+function splitPlace(value: string): [string, string] {
+  const words = value.trim().split(/\s+/);
+  const take = (): string => {
+    const first = words.shift() ?? '';
+    return /^(first|last|safe|unsafe)$/i.test(first) && words.length ? `${first} ${words.shift()}` : first;
+  };
+  const align = take();
+  const justify = words.length ? take() : align;
+  return [align, justify];
+}
 
 const gen = (node: Plain): string => csstree.generate(csstree.fromPlainObject(structuredClone(node)));
 
@@ -369,6 +396,8 @@ class Normaliser {
         'attribute-selector': 0,
         'rejected-selector-split': 0,
         'inline-flex': 0,
+        'display-block': 0,
+        'place-shorthand': 0,
         'display-none-clip': 0,
         'font-shorthand': 0,
         inset: 0,
@@ -666,6 +695,18 @@ class Normaliser {
       if (property === 'display' && /^inline-flex$/i.test(value)) {
         this.report.rewrites['inline-flex']++;
         value = 'flex';
+      }
+      if (property === 'display' && /^(block|flow-root|list-item)$/i.test(value)) {
+        this.report.rewrites['display-block']++;
+        value = 'linear';
+      }
+
+      const place = PLACE_SHORTHANDS[property];
+      if (place) {
+        const [align, justify] = splitPlace(value);
+        this.report.rewrites['place-shorthand']++;
+        out.push(decl(place[0], align, d.important), decl(place[1], justify, d.important));
+        continue;
       }
 
       if (property === 'font') {

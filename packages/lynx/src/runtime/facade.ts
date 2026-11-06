@@ -1015,7 +1015,7 @@ class FacadeEvent {
   }
 }
 
-const membersOf = (proto: object): Set<string> =>
+export const membersOf = (proto: object): Set<string> =>
   new Set(Object.getOwnPropertyNames(proto).filter((k) => k !== 'constructor'));
 
 const ELEMENT_MEMBERS = membersOf(ElementFacade.prototype);
@@ -1051,7 +1051,7 @@ const EVENT_SETTABLE = new Set<string>();
  * throws a named refusal. Methods are bound to the target, so private
  * fields work and the proxy never sees its own internals.
  */
-function refusingProxy(target: object, kind: string, members: Set<string>, settable: Set<string>, host: FacadeHost): object {
+export function refusingProxy(target: object, kind: string, members: ReadonlySet<string>, settable: ReadonlySet<string>, host: FacadeHost): object {
   return new Proxy(target, {
     get(t, key) {
       if (typeof key === 'symbol') return Reflect.get(t, key, t);
@@ -1074,7 +1074,13 @@ function refusingProxy(target: object, kind: string, members: Set<string>, setta
 
 // ── browser globals ──────────────────────────────────────────────────────────
 
-/** Browser globals that are not DOM: host capabilities (M13) or not on device. */
+/**
+ * Browser globals that are not DOM: host capabilities (M13) or not on
+ * device. `URL` and `Intl` are missing from the main thread's engine; a
+ * guard turns "Intl is not defined" into a refusal the host's `onError`
+ * hears. Only uses after the mount starts: a module that builds an
+ * `Intl.DateTimeFormat` as it is imported runs before any mount exists.
+ */
 const GUARDED_GLOBALS = [
   'window',
   'document',
@@ -1093,6 +1099,9 @@ const GUARDED_GLOBALS = [
   'requestAnimationFrame',
   'setInterval',
   'clearInterval',
+  'URL',
+  'URLSearchParams',
+  'Intl',
   'alert',
   'confirm',
   'prompt',

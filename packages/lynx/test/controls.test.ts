@@ -78,8 +78,24 @@ describe('img sizes, settled after the first layout', () => {
     await flushed();
     expect(p.native('.logo')).not.toBe(before);
     expect(p.native('.logo').attrs['auto-size']).toBe(true);
+    // The height it was laid out at stays: auto-size alone hands a grid row the picture's natural height.
+    expect(p.native('.logo').style).toBe('height: 56px');
     // No size at all, in a parent with a width: no size from the stylesheet either.
     expect(p.native('.bare').attrs['auto-size']).toBe(true);
+  });
+
+  it('gives an img with no height the ratio of its width and height attributes, as a browser does, then settles it', async () => {
+    // As measured with `max-width: 100%`: the computed width reads 0 while the height follows the real width.
+    const ratioLayout = (el: { classes: string; style?: string }, key: string): string => {
+      if (el.classes.split(' ').includes('frame')) return key === 'width' ? '350px' : '0px';
+      if (!el.classes.split(' ').includes('shot')) return '';
+      return key === 'height' && el.style?.includes('aspect-ratio') ? '262.5px' : '0px';
+    };
+    p = page('<figure class="frame"><img class="shot" src="/s.jpg" width="1024" height="768"></figure>', { layout: ratioLayout });
+    p.tree.markDirty();
+    await flushed();
+    expect(p.native('.shot').attrs['auto-size']).toBe(true);
+    expect(p.native('.shot').style).toBe('aspect-ratio: 1024 / 768; height: 262.5px');
   });
 
   it('waits while an image and its parent have no size (a hidden parent)', async () => {
@@ -93,6 +109,18 @@ describe('img sizes, settled after the first layout', () => {
 });
 
 describe('img with an SVG source', () => {
+  it('pins its height once laid out, so a parent with no height of its own counts it', async () => {
+    const svgLayout = (el: { classes: string }, key: string): string =>
+      el.classes.split(' ').includes('cover') ? (key === 'width' ? '169px' : '169px') : '';
+    p = page('<div class="media"><img class="cover" src="/c.svg" width="10" height="10"><img class="half" src="/h.svg"></div>', { layout: svgLayout });
+    p.tree.markDirty();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(p.native('.cover').style).toBe('aspect-ratio: 10 / 10; height: 169px');
+    // Not laid out with both sides: no picture to take one from, so it waits, and is never auto-sized.
+    expect(p.native('.half').style).toBe('');
+    expect(p.native('.half').attrs['auto-size']).toBeUndefined();
+  });
+
   it('is an svg with that src, since a Lynx image does not draw SVG, and swaps element when the source changes kind', () => {
     p = page('<img class="logo" src="/logo.svg?v=2" width="360" height="136" alt="Logo"><img class="d" src="data:image/svg+xml,%3Csvg%3E">');
     expect(p.native('.logo')).toMatchObject({ tag: 'svg', attrs: { src: 'https://shop.example/logo.svg?v=2', 'accessibility-label': 'Logo' } });

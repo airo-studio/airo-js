@@ -129,6 +129,11 @@ describe('whitespace', () => {
     expect(inner()).toBe('view.tag-div(text.tag-p("a"), text.tag-p("b"))');
   });
 
+  it('keeps <pre> text as written, less the newline straight after the tag, inline tags included', () => {
+    build('<pre class="code">\nmount({\n  fetch,   <b>x</b>\n})</pre>');
+    expect(inner()).toBe('text.code.tag-pre("mount({\\n  fetch,   ", text.tag-b("x"), "\\n})")');
+  });
+
   it('turns <br> in running text into a line break', () => {
     build('<p>a<br>b</p>');
     expect(inner()).toBe('text.tag-p("a", "\\n", "b")');

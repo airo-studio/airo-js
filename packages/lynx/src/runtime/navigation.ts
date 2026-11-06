@@ -30,8 +30,8 @@ export interface NavigateRequest {
    * host does the same.
    */
   fields: Record<string, string | string[]>;
-  /** What started it. */
-  source: 'link' | 'form';
+  /** What started it: a tapped link, a submitted form, or page code setting `location`. */
+  source: 'link' | 'form' | 'location';
 }
 
 /** The request a tapped link makes, or null for one that stays on the page. */

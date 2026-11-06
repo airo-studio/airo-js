@@ -11,7 +11,8 @@
  *   - the bundle is one chunk: a split chunk (`exports.ids=…`) is CommonJS
  *     the vanilla loader runs on neither thread, and the card never starts;
  *   - nothing after the normaliser undid it: no `inset` reached the encoder
- *     (lightningcss merges four sides back into one, which the encoder removes);
+ *     (lightningcss merges four sides back into one, which the encoder removes),
+ *     and no `place-items` (the encoder removes the shorthand);
  *   - the report was written, and counts what this stylesheet exercises.
  */
 
@@ -54,12 +55,14 @@ for (const present of [
 const expected = {
   'page-selector': 1,
   'page-font-size': 1,
-  'type-selector': 5,
+  'type-selector': 6,
   'attribute-selector': 5,
   'inline-flex': 2,
+  'display-block': 1,
+  'place-shorthand': 1,
   'font-shorthand': 1,
   calc: 1,
-  'aspect-ratio-width': 1,
+  'aspect-ratio-width': 2,
   'color-mix': 5,
   'colour-function': 13,
   'color-scheme-media': 1,
@@ -76,6 +79,10 @@ check(
   'report: the :focus-visible selector is not listed as rejected',
 );
 check(Array.isArray(report.removedProperties), 'report: no removedProperties section');
+check(
+  !report.removedProperties.some((p) => p.property === 'place-items'),
+  'the encoder removed `place-items`: the normaliser no longer splits it into align-items and justify-items',
+);
 check(
   !report.removedProperties.some((p) => p.property === 'inset'),
   'the encoder removed `inset`: something after the normaliser merged top/right/bottom/left back into it',

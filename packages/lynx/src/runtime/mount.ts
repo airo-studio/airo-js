@@ -39,7 +39,9 @@ import { EventBus, resolveMountEntry } from '@airo-js/core';
 import { type Cartridge, createCartridgeApp, getDefaultRenderResolver, type Template, templateToAppConfig } from '@airo-js/cartridge-kit';
 
 import { type LynxErrorInfo, log, report } from './errors.js';
-import { FacadeHost, installGlobalGuards } from './facade.js';
+import { FacadeHost, installGlobalGuards, membersOf, refusingProxy } from './facade.js';
+import { HISTORY_SETTABLE, LOCATION_SETTABLE, MountHistory, MountLocation } from './location.js';
+import { MountURLSearchParams } from './url-search-params.js';
 import type { NavigateRequest } from './navigation.js';
 import { formDataClass } from './form-data.js';
 import type { PickAnswer, PickRequest } from './select.js';
@@ -57,6 +59,13 @@ export interface LynxPage<TData = unknown> {
   snapshot: TData;
   /** The navigation state the server rendered for; `page` names the page in the template. */
   nav: Partial<NavigationState> & { page: string };
+  /**
+   * The url this page is, as the host asked its server for it (after
+   * redirects): absolute, or a path resolved against `baseUrl`. Page code
+   * reads `location` and `history.replaceState` from it; without it they
+   * are refused.
+   */
+  url?: string;
 }
 
 export type ColorScheme = 'light' | 'dark';
@@ -141,6 +150,8 @@ export interface LynxMount {
   setColorScheme(scheme: ColorScheme): void;
   /** The navigation state of the page on screen, or null before the first. */
   readonly nav: NavigationState | null;
+  /** The url of the page on screen: its `LynxPage.url`, as `history.replaceState` has changed it since. Null when it has none. */
+  readonly url: string | null;
   /** The cartridge app on screen, or null. */
   readonly app: App | null;
   /** Tear down the app, the elements, the listeners and the global guards. */
@@ -209,6 +220,7 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
   let app: App | null = null;
   let host: LynxElement | null = null;
   let nav: NavigationState | null = null;
+  let url: string | null = null;
 
   // Newest request wins (D12): each navigation takes a number; a result for
   // an older number than the newest is dropped, as a browser drops the load
@@ -262,9 +274,21 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
   );
   const timerMembers = { setTimeout: timers.setTimeout, clearTimeout: timers.clear, setInterval: timers.setInterval, clearInterval: timers.clear };
   const lent = opts.fetch ? { fetch: opts.fetch } : {};
+  const locationDeps = {
+    current: () => url,
+    setCurrent: (next: string) => {
+      url = next;
+    },
+    base: opts.baseUrl,
+    navigate: (to: string) => navigate({ url: to, method: 'get', fields: {}, source: 'location' }),
+    refuse: (member: string, detail?: string): never => facadeHost.refuse(member, detail),
+  };
+  const location = refusingProxy(new MountLocation(locationDeps), 'location', membersOf(MountLocation.prototype), LOCATION_SETTABLE, facadeHost);
+  const history = refusingProxy(new MountHistory(locationDeps), 'history', membersOf(MountHistory.prototype), HISTORY_SETTABLE, facadeHost);
+  const own = { FormData, URLSearchParams: MountURLSearchParams, location, history };
   const uninstallGuards = installGlobalGuards(facadeHost, {
-    globals: { setInterval: timers.setInterval, clearInterval: timers.clear, FormData, ...lent },
-    window: { ...timerMembers, FormData, ...lent },
+    globals: { setInterval: timers.setInterval, clearInterval: timers.clear, ...own, ...lent },
+    window: { ...timerMembers, ...own, ...lent },
   });
   const onTap: NativeListener = (native) => facadeHost.onTap(native);
   papi.addEventListener(pageRef, 'tap', onTap);
@@ -299,6 +323,7 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
     if (previousRef) papi.replace(nextRef, previousRef);
     else papi.append(pageRef, nextRef);
     host = next;
+    url = page.url ?? null;
     tree.markDirty();
     tree.flushNow();
 
@@ -345,6 +370,9 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
     },
     get nav() {
       return nav;
+    },
+    get url() {
+      return url;
     },
     get app() {
       return app;

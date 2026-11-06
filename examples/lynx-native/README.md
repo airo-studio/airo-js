@@ -6,13 +6,15 @@ What it exercises:
 
 - **Build**: a stylesheet written for a browser — `body` font shorthand, type selectors, `[hidden]` and `[aria-expanded]` state, `inline-flex` buttons, a `calc()` radius token, `color-mix()` hovers, an `oklch()` literal, an `aspect-ratio` box with no width, dark mode in `@media` — through `pluginAiroLynx()`.
 - **Runtime**: hydrate-only views (what a server-rendered site ships to the browser) running on device through the DOM facade: a delegated click counter, a `hidden` toggle with `aria-expanded`, a live echo of a search field, a search form (`get`), a subscribe form (`post`, hidden field), links between pages.
+- **The controls page** (`/controls`, `?open=1` opens it without a tap): details, select, a bottom-sheet dialog, switches and radios, a file input, timers, the host's `fetch` and `FormData`.
+- **The layout page** (`/layout?q=hello`): a block link as a card around a square SVG cover, a centring grid, a photo under `img { max-width: 100%; height: auto }`, a `<pre>`, and a line that reads its query through `location` and drops it with `history.replaceState`.
 
 ```sh
 pnpm --filter @airo-js-examples/lynx-native build   # dist/main.lynx.bundle + dist/airo-lynx-report.{json,md}
 pnpm --filter @airo-js-examples/lynx-native check   # the bundle carries what the plugin is for (CI runs this)
 ```
 
-On a device: build with a collector and run the package's device check, then tap through the card in the Simulator.
+On a device: build with a collector and run the package's device check, then tap through the card in DeviceHub (Xcode 27's replacement for Simulator.app). `AIRO_LYNX_START` picks the first page.
 
 ```sh
 AIRO_LYNX_COLLECTOR=http://localhost:3299/__collect pnpm --filter @airo-js-examples/lynx-native build

@@ -156,6 +156,32 @@ function controls(data: NotesData): string {
   );
 }
 
+/**
+ * Layouts a browser draws and the device has to be told about: a link that
+ * is a block (a card: photo box, then body), an SVG cover filling a square
+ * box, a grid that centres its one child, a photo under the common base
+ * rule `img { max-width: 100%; height: auto }`, and preformatted text.
+ */
+function layout(): string {
+  return frame(
+    [
+      `<a class="back" href="/">${icon('m15 18-6-6 6-6')}All notes</a>`,
+      '<h1>Layout</h1>',
+      '<p class="where">Query <span data-q>none</span>, address after <span data-href>unchanged</span></p>',
+      '<pre class="code" data-probe="pre">mountLynx({\n  fetch,\n})</pre>',
+      '<div class="listings"><a class="listing" href="/notes/one-snapshot" data-probe="card">',
+      '<div class="listing__media" data-probe="media"><img class="listing__img" src="logo.svg" alt="" data-probe="cover"></div>',
+      '<div class="listing__body" data-probe="body"><p class="listing__title">Why one snapshot</p><p class="listing__price">€53,76</p></div>',
+      `<span class="listing__go" data-probe="go">${icon('m9 18 6-6-6-6')}</span></a>`,
+      '<a class="listing" href="/notes/one-snapshot" data-probe="card2">',
+      '<img class="listing__cover" src="logo.svg" alt="" data-probe="cover2">',
+      '<div class="listing__body" data-probe="body2"><p class="listing__title">Ratio on the image</p></div></a></div>',
+      '<div class="based"><figure class="based__gallery" data-probe="gallery"><img class="based__img" src="photo.png" width="1024" height="768" alt="A field" data-probe="photo"></figure>',
+      '<p class="based__after" data-probe="after">This line follows the photo.</p></div>',
+    ].join(''),
+  );
+}
+
 function subscribed(data: NotesData): string {
   return frame(
     `<a class="back" href="/">${icon('m15 18-6-6 6-6')}All notes</a><h1>Subscribed</h1><p class="lede">You are on the ${esc(data.list ?? '')} list.</p>`,
@@ -169,12 +195,18 @@ const field = (fields: NavigateRequest['fields'], name: string): string => {
 
 /** What the server would answer for a request. */
 export function renderPage(req: Pick<NavigateRequest, 'url' | 'method' | 'fields'>): LynxPage<NotesData> {
+  // The url a page is, which page code reads through `location`.
+  return { ...answer(req), url: req.url };
+}
+
+function answer(req: Pick<NavigateRequest, 'url' | 'method' | 'fields'>): LynxPage<NotesData> {
   const [path = '/', query = ''] = req.url.split('?');
   const data: NotesData = { notes: NOTES };
   if (path === '/controls') {
     data.open = /(^|&)open=1(&|$)/.test(query);
     return { html: controls(data), snapshot: data, nav: { page: 'controls' } };
   }
+  if (path === '/layout') return { html: layout(), snapshot: data, nav: { page: 'layout' } };
   if (path === '/search') {
     data.query = field(req.fields, 'q');
     return { html: search(data), snapshot: data, nav: { page: 'search' } };

@@ -115,6 +115,21 @@ const controlsBehaviour = (root: HTMLElement, ctx: Ctx): (() => void) => {
   };
 };
 
+/**
+ * Reads the page's own query and drops it from the address, as a page does
+ * with a one-time flag: `location` and `URLSearchParams` are the mount's,
+ * from the url the host gave the page.
+ */
+const layoutBehaviour = (root: HTMLElement): void => {
+  const q = root.querySelector('[data-q]');
+  const href = root.querySelector('[data-href]');
+  if (q) q.textContent = new URLSearchParams(window.location.search).get('q') ?? 'none';
+  if (window.location.search) {
+    window.history.replaceState(null, '', window.location.pathname);
+    if (href) href.textContent = window.location.pathname + window.location.search;
+  }
+};
+
 const view = (pageType: string, hydrate: (root: HTMLElement, ctx: Ctx) => (() => void) | void) => ({
   id: `${pageType}-view`,
   displayName: pageType,
@@ -141,6 +156,7 @@ export const cartridge: Cartridge<NotesData, Record<string, never>> = {
     view('search', () => {}),
     view('done', () => {}),
     view('controls', controlsBehaviour),
+    view('layout', layoutBehaviour),
   ],
   templates: [],
   defaultConfig: {},
@@ -158,5 +174,6 @@ export const template: Template<Record<string, never>> = {
     { id: 'search', type: 'search', enabled: true },
     { id: 'done', type: 'done', enabled: true },
     { id: 'controls', type: 'controls', enabled: true },
+    { id: 'layout', type: 'layout', enabled: true },
   ],
 };

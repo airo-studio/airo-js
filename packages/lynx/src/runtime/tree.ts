@@ -57,7 +57,7 @@ import { optionLabel, selectedOption, selectOf } from './select.js';
 const TEXT_TAGS = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'dt', 'dd', 'figcaption', 'legend', 'blockquote', 'address',
   'label', 'span', 'strong', 'em', 'b', 'i', 'small', 'time', 'mark', 'abbr', 'code', 'cite', 'q', 's', 'u',
-  'sub', 'sup', 'kbd', 'data', 'var', 'samp', 'del', 'ins', 'bdi', 'bdo', 'summary',
+  'sub', 'sup', 'kbd', 'data', 'var', 'samp', 'del', 'ins', 'bdi', 'bdo', 'summary', 'pre',
 ]);
 
 /** Can sit inside running text as a nested `text`. */
@@ -169,8 +169,12 @@ export class NativeTree {
   private readonly unmeasuredImages = new Set<LynxElement>();
   /** Images the stylesheet sizes, with the ratio they were laid out at: their height is set inline. */
   private readonly pinnedImages = new Map<LynxElement, { ratio: number; width: number }>();
-  /** Images the stylesheet leaves unsized: built with `auto-size`, which Lynx reads only at creation. */
-  private readonly autoSizedImages = new Set<LynxElement>();
+  /** Images whose width comes from the picture: built with `auto-size`, which Lynx reads only at creation. Kept across a rebuild. */
+  private readonly autoSizedImages = new WeakSet<LynxElement>();
+  /** Images given an `aspect-ratio` from their `width` and `height` attributes, as a browser does, while unmeasured. */
+  private readonly ratioImages = new WeakSet<LynxElement>();
+  /** The inline styles the tree gives each image (`height`, `aspect-ratio`): written again after a rebuild. */
+  private readonly imageStyles = new WeakMap<LynxElement, Map<string, string>>();
   /** Each modal dialog on screen, and the backdrop it is drawn inside: what stands in its parent's place. */
   private readonly backdrops = new Map<LynxElement, ElementRef>();
 
@@ -273,6 +277,8 @@ export class NativeTree {
         // With no computed style to read, always.
         if (this.autoSizedImages.has(el) || !this.papi.computedStyle) this.papi.setAttribute(ref, 'auto-size', true);
         else if (!this.pinnedImages.has(el)) this.unmeasuredImages.add(el);
+        const inline = this.imageStyles.get(el);
+        if (inline) this.papi.setInlineStyles(ref, inlineText(inline));
         const alt = el.attrs.get('alt');
         if (alt) this.papi.setAttribute(ref, 'accessibility-label', alt);
         break;
@@ -288,8 +294,15 @@ export class NativeTree {
           // Lynx's svg has no picture size to fall back on (an image's
           // auto-size), so the ratio is set here, inline: it beats an author
           // `aspect-ratio` on the same img, where a browser's would lose.
+          //
+          // Its height is then pinned after layout, as an image's is: a
+          // parent with no height of its own does not count a height that
+          // comes from `aspect-ratio` (a card 64 tall around a 169-tall
+          // cover, measured).
           const ratio = attributeRatio(el);
-          this.papi.setInlineStyles(ref, ratio ? `aspect-ratio: ${ratio}` : '');
+          if (ratio) this.imageStyle(el).set('aspect-ratio', ratio);
+          this.papi.setInlineStyles(ref, inlineText(this.imageStyles.get(el) ?? new Map()));
+          if (this.papi.computedStyle && !this.pinnedImages.has(el)) this.unmeasuredImages.add(el);
           break;
         }
         this.papi.setAttribute(ref, 'content', serialize(el));
@@ -325,14 +338,23 @@ export class NativeTree {
     return wrapper;
   }
 
-  /** Inline content of a `text` element: raw text and nested `text` for inline tags. */
-  private projectInline(el: LynxElement, into: ElementRef, edges: { first: boolean; last: boolean }): void {
+  /**
+   * Inline content of a `text` element: raw text and nested `text` for
+   * inline tags. Inside a `<pre>` the text is kept as written, spaces and
+   * line breaks included (Lynx's `white-space` has no `pre`), less the one
+   * newline straight after `<pre>` that an HTML parser drops.
+   */
+  private projectInline(el: LynxElement, into: ElementRef, edges: { first: boolean; last: boolean }, pre = el.tag === 'pre'): void {
     const n = el.children.length;
     el.children.forEach((child, i) => {
       if (child.kind === 'text') {
-        let text = collapse(child.data);
-        if (edges.first && i === 0) text = text.replace(/^ /, '');
-        if (edges.last && i === n - 1) text = text.replace(/ $/, '');
+        let text = pre ? child.data : collapse(child.data);
+        if (pre) {
+          if (el.tag === 'pre' && i === 0) text = text.replace(/^\r?\n/, '');
+        } else {
+          if (edges.first && i === 0) text = text.replace(/^ /, '');
+          if (edges.last && i === n - 1) text = text.replace(/ $/, '');
+        }
         if (text) this.papi.append(into, this.papi.createRawText(text));
         return;
       }
@@ -350,10 +372,15 @@ export class NativeTree {
       child.as = 'text';
       this.own(child, nested);
       this.applyAttributes(child);
-      this.projectInline(child, nested, {
-        first: edges.first && i === 0,
-        last: edges.last && i === n - 1,
-      });
+      this.projectInline(
+        child,
+        nested,
+        {
+          first: edges.first && i === 0,
+          last: edges.last && i === n - 1,
+        },
+        pre,
+      );
       this.papi.append(into, nested);
     });
   }
@@ -534,7 +561,8 @@ export class NativeTree {
     this.papi.flush();
     this.flushes++;
     // A second flush only when an icon's colour changed, which is rare after the first paint.
-    if (this.syncImages() || this.syncSvgColours()) {
+    // An image given a ratio is measured again after the next layout, so up to twice more.
+    for (let pass = 0; pass < 2 && (this.syncImages() || this.syncSvgColours()); pass++) {
       this.papi.flush();
       this.flushes++;
     }
@@ -550,23 +578,33 @@ export class NativeTree {
   }
 
   /**
-   * After a layout, settle each image's size the way a browser would have:
+   * After a layout, settle each image's size the way a browser would have.
+   * Read from the computed `width` and `height`:
    *
-   *   - **Sized by the stylesheet** (laid out with a width and a height): its
-   *     height is set inline, at the height it was laid out at, and follows
-   *     its width afterwards. Lynx's grid sizes an auto row as 0 when its
-   *     content's height comes from `aspect-ratio`, though the image itself
-   *     lays out right (a 263-tall photo in a 0-tall row, measured); with a
-   *     height of its own the row is right.
-   *   - **One side left at 0** by the stylesheet (`height` alone): rebuilt
-   *     with `auto-size`, which takes the other side from the picture. Lynx
-   *     reads `auto-size` only when it creates the image (set later, even
-   *     with `src` set again, it does nothing: measured).
-   *   - **Both sides 0**: no size from the stylesheet, or a hidden parent.
-   *     With a parent that has a width it is the former, and gets
-   *     `auto-size`; otherwise it waits for a later layout.
+   *   - **Both sides**: sized by the stylesheet. Its height is set inline,
+   *     at the height it was laid out at, and follows its width afterwards.
+   *     Lynx's grid sizes an auto row as 0 when its content's height comes
+   *     from `aspect-ratio`, though the image itself lays out right (a
+   *     263-tall photo in a 0-tall row, measured); with a height of its own
+   *     the row is right.
+   *   - **A height, no width**: a height from the stylesheet and the width
+   *     from the picture (a logo sized by its height), or a width the
+   *     engine reads as 0: with `max-width: 100%` the computed width is 0
+   *     while the height follows the real width (measured, 0 × 128 for a
+   *     171 × 128 photo). Either way it is rebuilt with `auto-size`, which
+   *     Lynx reads only when it creates the image, and keeps its height
+   *     inline: `auto-size` alone hands a grid row the picture's natural
+   *     height (768 around a 128-tall photo, measured).
+   *   - **No height**: the stylesheet left it open (`height: auto`). An img
+   *     with `width` and `height` attributes gets their ratio inline, as a
+   *     browser maps them to `aspect-ratio`, and is measured again. One
+   *     without them, or still unsized, is rebuilt with `auto-size` once its
+   *     parent has a width; a hidden parent waits for a later layout.
    *
-   * Returns whether an inline height changed, so the caller flushes again.
+   * An SVG drawn by an `<img>` is pinned in the same way once it has both
+   * sides; it has no picture to take a missing side from.
+   *
+   * Returns whether an inline style changed, so the caller lays out again.
    */
   private syncImages(): boolean {
     const read = this.papi.computedStyle;
@@ -575,34 +613,61 @@ export class NativeTree {
     let changed = false;
     const rebuild: LynxElement[] = [];
     for (const el of this.unmeasuredImages) {
-      if (!el.ref || el.as !== 'image') {
+      if (!el.ref || (el.as !== 'image' && el.as !== 'svg')) {
         this.unmeasuredImages.delete(el);
         continue;
       }
       const w = size(el, 'width');
       const h = size(el, 'height');
       if (w > 0 && h > 0) {
-        this.papi.setInlineStyles(el.ref, `height: ${h}px`);
+        this.setImageStyle(el, 'height', `${h}px`);
         this.pinnedImages.set(el, { ratio: w / h, width: w });
         this.unmeasuredImages.delete(el);
         changed = true;
-      } else if (w > 0 || h > 0 || (el.parent?.ref && size(el.parent, 'width') > 0)) {
+      } else if (el.as === 'image' && h > 0) {
+        this.imageStyle(el).set('height', `${h}px`);
+        this.autoSizedImages.add(el);
+        this.unmeasuredImages.delete(el);
+        rebuild.push(el);
+      } else if (el.as === 'image' && (w > 0 || (el.parent?.ref && size(el.parent, 'width') > 0))) {
+        const ratio = attributeRatio(el);
+        if (ratio && !this.ratioImages.has(el)) {
+          this.ratioImages.add(el);
+          this.setImageStyle(el, 'aspect-ratio', ratio);
+          changed = true;
+          continue;
+        }
         this.autoSizedImages.add(el);
         this.unmeasuredImages.delete(el);
         rebuild.push(el);
       }
+      // Otherwise it waits for a later layout: a hidden parent, or an svg, which has no picture to take a missing side from.
     }
     for (const [el, pin] of this.pinnedImages) {
       if (!el.ref) continue;
       const w = size(el, 'width');
       if (w > 0 && Math.abs(w - pin.width) > 0.5) {
-        this.papi.setInlineStyles(el.ref, `height: ${w / pin.ratio}px`);
+        this.setImageStyle(el, 'height', `${w / pin.ratio}px`);
         pin.width = w;
         changed = true;
       }
     }
     for (const el of rebuild) this.reproject(el);
     return changed;
+  }
+
+  private imageStyle(el: LynxElement): Map<string, string> {
+    const known = this.imageStyles.get(el);
+    if (known) return known;
+    const styles = new Map<string, string>();
+    this.imageStyles.set(el, styles);
+    return styles;
+  }
+
+  private setImageStyle(el: LynxElement, property: string, value: string): void {
+    const styles = this.imageStyle(el);
+    styles.set(property, value);
+    this.papi.setInlineStyles(el.ref!, inlineText(styles));
   }
 
   /**
@@ -635,6 +700,8 @@ export class NativeTree {
     return resolveUrl(src, base);
   }
 }
+
+const inlineText = (styles: ReadonlyMap<string, string>): string => [...styles].map(([p, v]) => `${p}: ${v}`).join('; ');
 
 /** The engine reports some colours as `argb(a, r, g, b)` with alpha 0–255; CSS wants `rgba()`. */
 function cssColour(value: string): string | null {

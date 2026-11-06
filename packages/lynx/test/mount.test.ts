@@ -319,6 +319,96 @@ describe('what hydrate code gets in place of a refusal', () => {
     mount!.destroy();
     start();
     expect(() => win().fetch!('/api/x')).toThrow(/window\.fetch is not available on device/);
-    expect(() => win().location).toThrow(/window\.location/);
+    expect(() => win().localStorage).toThrow(/window\.localStorage/);
+  });
+
+  // biome-ignore lint/suspicious/noExplicitAny: location and history stand in for the browser's
+  const loc = (): any => (win() as any).location;
+  // biome-ignore lint/suspicious/noExplicitAny: as above
+  const hist = (): any => (win() as any).history;
+
+  it('location reads the url the host gave the page, resolved against baseUrl', () => {
+    start({ page: { ...HOME, url: '/l/bike?published=1&from=a%20b#top' } });
+    expect(loc().href).toBe('https://shop.example/l/bike?published=1&from=a%20b#top');
+    expect([loc().origin, loc().host, loc().pathname, loc().search, loc().hash]).toEqual([
+      'https://shop.example',
+      'shop.example',
+      '/l/bike',
+      '?published=1&from=a%20b',
+      '#top',
+    ]);
+    const params = new (win().URLSearchParams as unknown as new (s: string) => URLSearchParams)(loc().search);
+    expect([params.has('published'), params.get('from')]).toEqual([true, 'a b']);
+    expect(() => loc().ancestorOrigins).toThrow(/location\.ancestorOrigins is not available on device/);
+  });
+
+  it('is refused by name when the page has no url', () => {
+    start();
+    expect(() => loc().search).toThrow(/location\.search/);
+    expect(errors.at(-1)?.error.message).toMatch(/give LynxPage a `url`/);
+    expect(mount!.url).toBeNull();
+  });
+
+  it('history.replaceState records the url without a request, and the host reads it from the mount', async () => {
+    const onNavigate = vi.fn();
+    start({ page: { ...HOME, url: '/me?published=1' }, onNavigate });
+    hist().replaceState({ step: 2 }, '', loc().pathname);
+    expect(mount!.url).toBe('/me');
+    expect(loc().search).toBe('');
+    expect(hist().state).toEqual({ step: 2 });
+    hist().replaceState(null, '', '?tab=bids');
+    expect(mount!.url).toBe('/me?tab=bids');
+    expect(() => hist().pushState(null, '', '/x')).toThrow(/history\.pushState is not available on device/);
+    await flushed();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('assign, replace, setting href and reload ask the host for the page, as a tapped link does', async () => {
+    const onNavigate = vi.fn();
+    start({ page: { ...HOME, url: '/me' }, onNavigate });
+    loc().assign('/l/1');
+    loc().replace('/l/2');
+    loc().href = '/l/3';
+    loc().reload();
+    await flushed();
+    expect(onNavigate.mock.calls.map(([r]) => r)).toEqual(
+      ['/l/1', '/l/2', '/l/3', '/me'].map((url) => ({ url, method: 'get', fields: {}, source: 'location' })),
+    );
+    loc().assign('#reviews');
+    await flushed();
+    expect(onNavigate).toHaveBeenCalledTimes(4);
+    expect(mount!.url).toBe('https://shop.example/me#reviews');
+  });
+
+  it('a new page brings its own url', () => {
+    start({ page: { ...HOME, url: '/me?x=1' } });
+    mount!.show(ITEM);
+    expect(mount!.url).toBeNull();
+  });
+});
+
+describe('a refusal page code catches', () => {
+  it('leaves the page wired: only a hydrate that throws loses its listeners', async () => {
+    const tolerant = {
+      ...cartridge,
+      views: [
+        view('home', (root) => {
+          root.addEventListener('click', () => {
+            root.querySelector('.count').textContent = 'still wired';
+          });
+          try {
+            (globalThis as unknown as { document: { addEventListener(t: string, f: () => void): void } }).document.addEventListener('visibilitychange', () => {});
+          } catch {
+            // A convenience the page works without, as a site's optional() wrapper does.
+          }
+        }),
+      ],
+    };
+    start({ cartridge: tolerant });
+    await flushed();
+    expect(errors.map((e) => e.member)).toEqual(['document.addEventListener']);
+    fake.tap(fake.byClass('count'));
+    await flushed();
+    expect(screen()).toContain('text.count.tag-p("still wired")');
   });
 });

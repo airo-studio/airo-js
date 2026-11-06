@@ -63,6 +63,8 @@ Every rewrite answers a gap measured on device:
 | `[n]`, `[n="v"]` | `.a-n`, `.a-n--v` (the runtime mirrors attributes into these classes) | attribute selectors parse but never match |
 | a selector list holding one the encoder rejects | the rest of the list, kept | the encoder drops the whole rule otherwise |
 | `display: inline-flex` | `display: flex` | falls back to linear layout |
+| `display: block`, `flow-root`, `list-item` | `display: linear` | `block` lays out as a flex row (a card's photo beside its body); `linear` stacks, as a box with no `display` does |
+| `place-items`, `place-content`, `place-self` | their `align-*` and `justify-*` longhands | the encoder removes the shorthands |
 | `display: none` | plus `overflow: hidden` | the box is 0×0 but its text still paints |
 | `font: …` | the longhands | the encoder removes the shorthand |
 | `inset: …` | `top`, `right`, `bottom`, `left` | the encoder removes the shorthand |
@@ -160,13 +162,16 @@ Lynx has no picker, and the framework draws no UI, so a tapped `<select>` or `<i
 
 and returns (or resolves with) the value picked for a select, the files picked for a file input, or nothing to leave it. A file is an object of the host's own (a photo-library item, a path): hydrate code reads it from `input.files` and hands it back to the host through the host's `fetch` or a `FormData`; the framework never reads it. A form holding a picked file cannot be posted through `onNavigate` (its fields are strings): that is reported, and the upload belongs in the host's `fetch`. Show your own action sheet or wheel; the example card, with no native picker to call, takes the next option. A picked value changes the select and fires `input` then `change`, as a browser's does; a value that is not an enabled option is reported. Without `onPick`, a tap on a select is reported and changes nothing.
 
-### Network, timers and `FormData` for hydrate code
+### Network, timers, `FormData`, `location` for hydrate code
 
-The main thread has no network, no `setInterval` and no `FormData`.
+The main thread has no network, no `setInterval`, no `FormData`, no `URLSearchParams`, no `URL` and no `Intl`.
 
 - **`fetch` is the host's, when it lends one** (`mountLynx({ fetch })`), as `onNavigate` is (M13): post the request to the background thread, run it there, and resolve with what browser code reads of a `Response` (`ok`, `status`, `json()`, `text()`). The url is as written. Without it, `fetch` is refused by name.
 - **Timers are the mount's.** `window.setTimeout`, `setInterval` and their clears work, as globals too where the engine lacks them; `destroy()` clears what is left, and a callback that throws is reported.
 - **`FormData` is the mount's**, where the engine has none: `new FormData(form)` takes the entries a submission would, a file input's files included.
+- **`URLSearchParams` is the mount's**, where the engine has none, by the URL Standard's form-urlencoded rules.
+- **`location` and `history` read the page's url**, the `url` the host gives `LynxPage` (absolute, or a path resolved against `baseUrl`): `location.search`, `pathname`, `href` and the rest. `history.replaceState(state, '', url)` changes that url without a request, and the host reads it back from the mount's `url`. `location.assign`, `replace`, `reload` and setting `href` are a navigation, as a tapped link is: `onNavigate` gets `{ url, method: 'get', fields: {}, source: 'location' }`. The device keeps no history of its own, so `pushState`, `back` and the rest are refused by name, and so is `location` on a page with no `url`.
+- **`URL` and `Intl` are refused by name** (`Intl.DateTimeFormat is not available on device`). Only once the mount has started: a module that builds an `Intl.DateTimeFormat` as it is imported runs before any mount and fails with the engine's own `ReferenceError`, which only the device log shows. Build those on first use.
 
 ### Links and forms
 
@@ -195,7 +200,7 @@ Hydrate handlers receive element objects that implement this subset over a JS mo
 | `addEventListener`, `removeEventListener` | `click` (a tap), `input`, `change` (on blur or return, when the value changed; on a pick), `submit`, `focus`, `blur`, `toggle` (a details opened or closed), `close` (a dialog closed) |
 | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only |
 
-**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `<div>.showModal()`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window` (apart from its timers, and `fetch` and `FormData` when present), `document`, `location`, `history`, storage, `navigator`, `fetch` unless the host lends one, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays.
+**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `<div>.showModal()`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window` (apart from its timers, `location`, `history`, `URLSearchParams`, and `fetch` and `FormData` when present), `document`, storage, `navigator`, `fetch` unless the host lends one, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays. A refusal hydrate code catches is still reported, and the call carries on with its listeners: wrapping a convenience the page works without (a `keydown` shortcut, `visibilitychange`) in a `try` keeps the rest of the page's behaviour.
 
 Run a page on device, read the refusals in `onError`, and rewrite those parts of the handler for native or move them to the host. Mutations are flushed once per task, however many a handler makes.
 
@@ -203,9 +208,9 @@ Run a page on device, read the refusals in `onError`, and rewrite those parts of
 
 | HTML | Lynx |
 |---|---|
-| text-level tags with only text and inline tags (`p`, `h1`–`h6`, `li`, `span`, …) | `text`, inline tags nested |
+| text-level tags with only text and inline tags (`p`, `h1`–`h6`, `li`, `span`, `pre`, …) | `text`, inline tags nested; a `pre`'s text keeps its spaces and line breaks, since Lynx's `white-space` has no `pre`. A text-only `span` your CSS makes a grid or flex container is still a `text`, which lays nothing out: `place-items: center` does not centre its label. Use a `div`, or give it a child element |
 | other containers; `a` and `button` outside running text | `view`, loose text wrapped in `text` |
-| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device). After the first layout, an image the stylesheet sizes gets its laid-out height inline, so a grid row around it is sized right (Lynx's grid sizes an `aspect-ratio` image's row as 0); one the stylesheet leaves a side of at 0 is rebuilt with `auto-size`, taking the picture's size; an SVG source (`.svg`, an `image/svg+xml` data url) is an `svg` with that `src`, since `image` draws no SVG, sized by the `width` / `height` attributes' ratio as a browser sizes it |
+| `img` | `image` (`scaleToFill`: `object-fit` does not reach the device). After the first layout each image gets its laid-out height inline, because a parent with no height of its own does not count a height that comes from `aspect-ratio`: a grid row around the photo is 0 tall, and so is a card around a square cover box. An image with no height of its own (`height: auto`) first gets its `width` / `height` attributes' ratio, as a browser maps them; one whose width comes from the picture (a logo sized by its height) is rebuilt with `auto-size`. An SVG source (`.svg`, an `image/svg+xml` data url) is an `svg` with that `src`, since `image` draws no SVG, sized by the attributes' ratio and pinned the same way. A box with `aspect-ratio` and no image inside it is still not counted by its parent: give it a height |
 | `svg` | `svg` with its markup as `content`; `currentColor` follows the CSS `color` around it where the engine reports computed colour (verified on iOS) |
 | `input` (text, search, url, email, tel, password, number), `textarea` | `input`, `textarea` |
 | `details`, `summary` | `view`s (`text` when the summary is only text); closed, only the first `summary` is on screen; a tap on it toggles `open` |

@@ -333,6 +333,9 @@ describe('browser globals', () => {
     expect(() => (scope.localStorage as El).getItem('k')).toThrow(/localStorage\.getItem/);
     expect(() => new (scope.IntersectionObserver as El)(() => {})).toThrow(/new IntersectionObserver\(\)/);
     expect(() => (scope.fetch as El)('/x')).toThrow(/fetch\(\)/);
+    // Missing from the engine's main thread: a refusal onError hears, not "Intl is not defined".
+    expect(() => new (scope.Intl as El).DateTimeFormat('pt')).toThrow(/Intl\.DateTimeFormat is not available on device/);
+    expect(() => new (scope.URL as El)('/x', 'https://a.example')).toThrow(/new URL\(\)/);
     expect(typeof scope.setTimeout).toBe('function');
     expect(() => (scope.setTimeout as () => number)()).not.toThrow();
     undo();

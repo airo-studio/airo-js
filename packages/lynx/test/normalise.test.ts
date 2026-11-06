@@ -120,6 +120,30 @@ describe('display', () => {
   it('leaves inline-block alone', () => {
     expect(body('.b{display:inline-block}')).toBe('.b{display:inline-block}');
   });
+
+  it('block, flow-root and list-item → linear, which stacks where block lays out as a row', () => {
+    expect(body('a.card{display:block}.f{display:flow-root!important}.l{display:list-item}')).toBe(
+      '.tag-a.card{display:linear}.f{display:linear!important}.l{display:linear}',
+    );
+    expect(normaliseCss('.a{display:block}.b{display:block}').report.rewrites['display-block']).toBe(2);
+  });
+});
+
+describe('place-* shorthands', () => {
+  it('one value sets both longhands, at the same importance', () => {
+    expect(body('.go{display:grid;place-items:center}.s{place-self:end!important}')).toBe(
+      '.go{display:grid;align-items:center;justify-items:center}.s{align-self:end!important;justify-self:end!important}',
+    );
+  });
+
+  it('two values are align then justify', () => {
+    expect(body('.c{place-content:start space-between}')).toBe('.c{align-content:start;justify-content:space-between}');
+  });
+
+  it('keeps a two-word value together: first baseline, safe center', () => {
+    expect(body('.a{place-items:first baseline}')).toBe('.a{align-items:first baseline;justify-items:first baseline}');
+    expect(body('.b{place-items:safe center end}')).toBe('.b{align-items:safe center;justify-items:end}');
+  });
 });
 
 describe('inset', () => {
