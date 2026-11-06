@@ -124,7 +124,8 @@ lynx.getEngine().addEventListener('__RenderPage', () => {
     baseUrl: 'https://example.com/', // relative <img src> resolve here
     colorScheme: 'dark',       // from the OS; there is no media query on device
     onNavigate: (request) => askBackgroundThread(request), // yours: → { html, snapshot, nav } or nothing
-    onPick: (request) => showActionSheet(request),          // yours: a tapped <select> → the value picked, or nothing
+    onPick: (request) => showPicker(request),               // yours: a tapped <select> → a value; a file input → files
+    fetch: (url, init) => askBackgroundThread(url, init),   // yours: fetch for hydrate code, run on the background thread
     onError: ({ phase, member, error }) => report(phase, member, error),
   });
   // The first page usually arrives from the background thread (your plumbing):
@@ -148,15 +149,24 @@ A server that renders airo-js pages already has all three: answer native request
 
 **Know where a form landed from the page itself.** Lynx's `fetch` on iOS follows a redirect without saying so: `response.url` stays the request's, `redirected` is undefined, and `redirect: 'manual'` is ignored. So a host cannot read the landing url off the response; the page data should carry its own url (the first consumer reads its snapshot's path), and the host asks for that page. The same `fetch` keeps the session cookie across requests and launches, so a server's own cookie sign-in works from the background thread. `nav.page` must name an enabled entry page of the template; if it does not, the page is shown without behaviour and `onError` says why, rather than hydrating the wrong handlers over it.
 
-### Selects
+### Selects and file inputs
 
-Lynx has no picker, and the framework draws no UI, so a tapped `<select>` asks the host. `onPick` receives
+Lynx has no picker, and the framework draws no UI, so a tapped `<select>` or `<input type="file">` (or its label) asks the host. `onPick` receives one of
 
 ```ts
 { kind: 'select', name: 'sort', value: 'old', options: [{ value: 'new', label: 'Newest', disabled: false }, { value: 'az', label: 'A to Z', disabled: false, group: 'Other' }, …] }
+{ kind: 'file', name: 'photo', accept: 'image/*', multiple: false }
 ```
 
-and returns (or resolves with) the value picked, or nothing to leave it. Show your own action sheet or wheel; the example card, with no native picker to call, takes the next option. A picked value changes the select and fires `input` then `change`, as a browser's does; a value that is not an enabled option is reported. Without `onPick`, a tap on a select is reported and changes nothing.
+and returns (or resolves with) the value picked for a select, the files picked for a file input, or nothing to leave it. A file is an object of the host's own (a photo-library item, a path): hydrate code reads it from `input.files` and hands it back to the host through the host's `fetch` or a `FormData`; the framework never reads it. A form holding a picked file cannot be posted through `onNavigate` (its fields are strings): that is reported, and the upload belongs in the host's `fetch`. Show your own action sheet or wheel; the example card, with no native picker to call, takes the next option. A picked value changes the select and fires `input` then `change`, as a browser's does; a value that is not an enabled option is reported. Without `onPick`, a tap on a select is reported and changes nothing.
+
+### Network, timers and `FormData` for hydrate code
+
+The main thread has no network, no `setInterval` and no `FormData`.
+
+- **`fetch` is the host's, when it lends one** (`mountLynx({ fetch })`), as `onNavigate` is (M13): post the request to the background thread, run it there, and resolve with what browser code reads of a `Response` (`ok`, `status`, `json()`, `text()`). The url is as written. Without it, `fetch` is refused by name.
+- **Timers are the mount's.** `window.setTimeout`, `setInterval` and their clears work, as globals too where the engine lacks them; `destroy()` clears what is left, and a callback that throws is reported.
+- **`FormData` is the mount's**, where the engine has none: `new FormData(form)` takes the entries a submission would, a file input's files included.
 
 ### Links and forms
 
@@ -181,10 +191,11 @@ Hydrate handlers receive element objects that implement this subset over a JS mo
 | `open`, `show()`, `showModal()`, `close(result)`, `returnValue` | `<details>` and `<dialog>`; a modal makes the page below inert, and a tap outside it is a click on the dialog, as on its backdrop |
 | `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules; a script's change fires nothing, as in a browser |
 | `checked` | checkboxes and radios; a checked radio unchecks the rest of its group; a script's change fires nothing |
+| `files` | file inputs: the host's objects from `onPick`; `value = ''` clears them, as in a browser |
 | `addEventListener`, `removeEventListener` | `click` (a tap), `input`, `change` (on blur or return, when the value changed; on a pick), `submit`, `focus`, `blur`, `toggle` (a details opened or closed), `close` (a dialog closed) |
 | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only |
 
-**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `<div>.showModal()`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window`, `document`, `location`, `history`, storage, `navigator`, `fetch`, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays.
+**Everything else is refused by name**: the call throws `LynxRefusalError` (`member` says what: `Element.getBoundingClientRect`, `<div>.showModal()`, `window.location`, `localStorage.getItem`, `selector "li:first-child"`, …), after logging it on the `lynx` channel and passing it to `onError`. That includes the browser globals that are host capabilities, not DOM — `window` (apart from its timers, and `fetch` and `FormData` when present), `document`, `location`, `history`, storage, `navigator`, `fetch` unless the host lends one, observers, `matchMedia` — which the mount defines as refusing objects when the main thread lacks them. A hydrate call that throws has the listeners it attached removed again, so a page is never half wired; the painted page stays.
 
 Run a page on device, read the refusals in `onError`, and rewrite those parts of the handler for native or move them to the host. Mutations are flushed once per task, however many a handler makes.
 
@@ -200,10 +211,11 @@ Run a page on device, read the refusals in `onError`, and rewrite those parts of
 | `details`, `summary` | `view`s (`text` when the summary is only text); closed, only the first `summary` is on screen; a tap on it toggles `open` |
 | `dialog` | closed: an empty `view` with `.airo-lynx-closed`. `showModal()`: inside a backdrop `view` that covers the screen, with `.airo-lynx-modal` |
 | `select` | a `view` holding the selected option's label; a tap asks `onPick`. `multiple` and `size` > 1 are refused |
+| `input type="file"` | an empty `view` the stylesheet draws; a tap on it or on its `<label>` asks `onPick` for files, then fires `input` and `change` |
 | `input type="checkbox"`, `"radio"` | an empty `view` the stylesheet draws, with `.airo-lynx-checked` while checked. A tap on it or on its `<label>` toggles it before its `click`, then fires `input` and `change`; a cancelled click puts it back |
 | `input type="hidden"`, `script`, `template`, `noscript`, `option`, `optgroup` | the model only |
 | the mount's root (what the server rendered into) | a vertical `scroll-view` with `.airo-lynx-viewport`: the browser's viewport scrolls, a Lynx `view` does not |
-| anything else (tables, file inputs, `video`, …) | refused: `UnmappedElementError` |
+| anything else (tables, `range`, `date`, `color` inputs, `video`, …) | refused: `UnmappedElementError` |
 
 The tokenizer is strict on purpose. It reads what `escapeHtml` writes — the five entities `&amp; &lt; &gt; &quot; &#39;`, numeric references, void elements, raw-text `script`/`style`, `svg` as foreign content — and a bare `&` exactly as the HTML parser does, so `href="/g?a=1&so=x"` keeps its `&`. It refuses a named entity such as `&nbsp;`, a bare `&copy` a browser would turn into ©, an unclosed or mis-nested element, or a stray `<`, with an `HtmlParseError` that gives line and column. A conformance test holds its trees equal to a browser-grade parser's on real pages.
 

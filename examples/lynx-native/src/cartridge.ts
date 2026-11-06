@@ -76,6 +76,30 @@ const controlsBehaviour = (root: HTMLElement, ctx: Ctx): (() => void) => {
       if (picked) picked.textContent = (select as HTMLSelectElement).value;
     }),
   ];
+  // A timer, as browser code writes one.
+  const ticks = root.querySelector<HTMLElement>('[data-ticks]');
+  let n = 0;
+  const ticker = window.setInterval(() => {
+    if (ticks) ticks.textContent = String(++n);
+  }, 100);
+  offs.push(() => window.clearInterval(ticker));
+  const file = root.querySelector<HTMLElement>('[data-file]');
+  offs.push(
+    on(root, 'change', 'input[type="file"]', (_e, input) => {
+      const picked = (input as HTMLInputElement).files?.[0];
+      if (file) file.textContent = picked ? picked.name : 'No photo';
+    }),
+  );
+  if (ctx.app.data.open) {
+    // The host's fetch, and FormData read from a form: what an api helper does.
+    const form = root.querySelector<HTMLFormElement>('[data-profile]');
+    const stock = root.querySelector<HTMLElement>('[data-stock]');
+    void fetch('/api/stock')
+      .then((res) => res.json() as Promise<{ left: number }>)
+      .then((data) => {
+        if (stock) stock.textContent = `${data.left} left near ${form ? String(new FormData(form).get('city')) : '?'}`;
+      });
+  }
   if (sheet) {
     offs.push(wireDialog(sheet));
     if (ctx.app.data.open) {

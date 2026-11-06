@@ -55,6 +55,8 @@ export class LynxElement {
   checked = false;
   /** Set once a tap or a script changed `checked`: the attribute stops reaching it. */
   checkedDirty = false;
+  /** A file input's files: the host's own objects, from `onPick`. */
+  files: readonly unknown[] = [];
 
   constructor(
     readonly tag: string,
@@ -84,6 +86,11 @@ export function fromParsed(nodes: ParsedNode[]): LynxNode[] {
     else if (el.tag === 'option') el.selected = el.attrs.has('selected');
     return el;
   });
+}
+
+/** An `<input type="file">`. */
+export function isFileInput(el: LynxElement): boolean {
+  return el.tag === 'input' && (el.attrs.get('type') ?? '').toLowerCase() === 'file';
 }
 
 /** A checkbox or a radio: an input whose value is its checkedness. */

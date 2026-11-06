@@ -11,6 +11,7 @@
  * | `svg` | `svg` with `content` set to the element's own markup |
  * | `input` (text-like types), `textarea` | `input`, `textarea`; value from the markup, then from typing |
  * | `input type="checkbox"`, `"radio"` | an empty `view` the stylesheet draws; checked, it carries `.airo-lynx-checked`. A tap on it or its `<label>` toggles it |
+ * | `input type="file"` | an empty `view` the stylesheet draws; a tap on it or its `<label>` asks the host's `onPick` for files |
  * | `details`, `summary` | `view`s (a summary of text and inline tags is a `text`); a closed `details` shows its first `summary` only, and a tap on that summary toggles `open` |
  * | `dialog` | a `view`, empty and hidden while closed; opened with `showModal()`, it sits inside a `view` that is its backdrop |
  * | `select` | a `view` holding the selected option's label; a tap asks the host's `onPick` for a choice (`./select.ts`). `multiple` and `size` > 1 are refused |
@@ -197,8 +198,8 @@ export class NativeTree {
         const type = (el.attrs.get('type') ?? 'text').toLowerCase();
         if (type === 'hidden') return 'none';
         if (INPUT_TYPES[type]) return 'input';
-        // No native checkbox: an empty view the stylesheet draws, its state a class.
-        if (type === 'checkbox' || type === 'radio') return 'view';
+        // No native checkbox or file picker: an empty view the stylesheet draws.
+        if (type === 'checkbox' || type === 'radio' || type === 'file') return 'view';
         throw new UnmappedElementError(`input type="${type}"`);
       }
       case 'select':

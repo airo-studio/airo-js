@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { noopSink, resetSink, setSink } from '@airo-js/log';
 
-import type { PickRequest } from '../src/runtime/select.js';
+import type { PickAnswer, PickRequest } from '../src/runtime/select.js';
+import { formDataClass } from '../src/runtime/form-data.js';
 import { BACKDROP_CLASS, CHECKED_CLASS, CLOSED_DIALOG_CLASS, EMPTY_CLASS, MODAL_CLASS, backdropClass } from '../src/shared/attr-class.js';
 import { type El, type Page, page } from './harness.js';
 
@@ -455,5 +456,69 @@ describe('checkbox and radio', () => {
     p.tap('.l');
     expect(p.root.querySelector('.x').checked).toBe(true);
     expect(() => p.root.querySelector('.d').checked).toThrow(/<div>\.checked/);
+  });
+});
+
+describe('file input', () => {
+  const HTML =
+    '<form class="f" action="/up" method="post"><label class="pick"><span>Photo</span>' +
+    '<input class="file" type="file" name="photo" accept="image/*"></label><input name="title" value="Chair"><button class="go">Send</button></form>';
+  const photo = { name: 'chair.jpg', type: 'image/jpeg', uri: 'ph://1' };
+
+  it('asks the host for files on a tap on its label, then sets them and fires input and change', async () => {
+    const pick = vi.fn((_r: PickRequest): PickAnswer => [photo, { name: 'other.jpg' }]);
+    p = page(HTML, { pick });
+    const seen: string[] = [];
+    p.root.addEventListener('change', (e: El) => seen.push(`${e.target.files.length}:${e.target.value}`));
+    expect(p.native('.file').tag).toBe('view');
+    p.tap('.pick');
+    expect(pick).toHaveBeenCalledWith({ kind: 'file', name: 'photo', accept: 'image/*', multiple: false });
+    await settle();
+    const input = p.root.querySelector('.file');
+    expect(input.files).toEqual([photo]);
+    expect(seen).toEqual(['1:C:\\fakepath\\chair.jpg']);
+    input.value = '';
+    expect(input.files).toEqual([]);
+    expect(() => {
+      input.value = 'x';
+    }).toThrow(/only to ""/);
+  });
+
+  it('refuses to post a form holding a picked file through onNavigate, which cannot carry it', async () => {
+    p = page(HTML, { pick: () => [photo] });
+    p.tap('.pick');
+    await settle();
+    p.tap('.go');
+    expect(p.navigate).not.toHaveBeenCalled();
+    expect(p.errors.map((e) => String(e.error))).toEqual([expect.stringMatching(/onNavigate cannot carry files/)]);
+  });
+
+  it('gives FormData its entries by the form rules, the host\'s file objects included', async () => {
+    p = page(HTML + '<div class="d"></div>', { pick: () => [photo] });
+    p.tap('.pick');
+    await settle();
+    const FormData = formDataClass((v) => p.host.unwrap(v), (m) => p.host.refuse(m));
+    const data = new FormData(p.root.querySelector('.f'));
+    expect([...data.entries()]).toEqual([
+      ['photo', photo],
+      ['title', 'Chair'],
+    ]);
+    expect(data.get('title')).toBe('Chair');
+    data.set('title', 'Table');
+    data.append('tag', 7);
+    expect(data.getAll('tag')).toEqual(['7']);
+    expect(data.get('title')).toBe('Table');
+    expect(() => new FormData(p.root.querySelector('.d'))).toThrow(/new FormData/);
+  });
+
+  it('reports an answer that is not a list, and a select answered with a list', async () => {
+    p = page(HTML + '<select class="s"><option>a</option><option>b</option></select>', { pick: (r) => (r.kind === 'file' ? 'nope' : ['b']) });
+    p.tap('.pick');
+    p.tap('.s');
+    await settle();
+    expect(p.errors.map((e) => String(e.error))).toEqual([
+      expect.stringMatching(/not a list of files/),
+      expect.stringMatching(/not a value/),
+    ]);
   });
 });

@@ -326,7 +326,7 @@ describe('browser globals', () => {
   it('a missing global refuses every use by name; the engine’s own globals are left alone', () => {
     p = page('<div></div>');
     const scope: Record<string, unknown> = { setTimeout: () => 0 };
-    const undo = installGlobalGuards(p.host, scope);
+    const undo = installGlobalGuards(p.host, undefined, scope);
     const win = scope.window as El;
     expect(typeof win).toBe('function');
     expect(() => win.location.assign('/x')).toThrow(/window\.location is not available on device/);
@@ -337,5 +337,21 @@ describe('browser globals', () => {
     expect(() => (scope.setTimeout as () => number)()).not.toThrow();
     undo();
     expect('window' in scope).toBe(false);
+  });
+});
+
+describe('globals the mount provides', () => {
+  it('installs what it is given where the main thread has none, and guards the rest', () => {
+    p = page('<p>x</p>');
+    const scope: Record<string, unknown> = { setTimeout };
+    const setInterval = (): number => 1;
+    const undo = installGlobalGuards(p.host, { globals: { setInterval, FormData: class {} }, window: { setInterval } }, scope);
+    expect(scope.setInterval).toBe(setInterval);
+    expect(typeof scope.FormData).toBe('function');
+    expect((scope.window as Record<string, unknown>).setInterval).toBe(setInterval);
+    expect(() => (scope.fetch as () => void)()).toThrow(/fetch\(\) is not available on device/);
+    expect(() => (scope.window as Record<string, unknown>).localStorage).toThrow(/window\.localStorage/);
+    undo();
+    expect('setInterval' in scope).toBe(false);
   });
 });

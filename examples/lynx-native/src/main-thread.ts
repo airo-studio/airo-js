@@ -46,10 +46,18 @@ lynx.getEngine().addEventListener('__RenderPage', () => {
     // next enabled option. An app opens its action sheet here and resolves
     // with the value the person picked.
     onPick: (request) => {
+      // No photo library either: a file is an object of the host's own, here a url it could upload from.
+      if (request.kind === 'file') return [{ name: 'photo.png', type: 'image/png', uri: `${AIRO_LYNX_ASSETS}photo.png` }];
       const enabled = request.options.filter((o) => !o.disabled);
       const next = enabled[(enabled.findIndex((o) => o.value === request.value) + 1) % enabled.length];
       report(`picked-${next?.value}`);
       return next?.value;
+    },
+    // An app posts this to the background thread and runs it there; this card answers in-bundle.
+    fetch: async (url) => {
+      const body = url === '/api/stock' ? { left: 3 } : { error: 'not found' };
+      const status = url === '/api/stock' ? 200 : 404;
+      return { ok: status === 200, status, json: async () => body, text: async () => JSON.stringify(body) };
     },
     onNavigate: (request) =>
       new Promise((resolve) => {

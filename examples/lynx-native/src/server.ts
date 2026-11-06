@@ -117,7 +117,9 @@ function search(data: NotesData): string {
  * The elements a browser gives behaviour of its own, and the things a device
  * does not size or match by itself: a logo sized by its height only, a toast
  * hidden by `:empty`, switches drawn by `:checked + …`, and a photo in a grid
- * whose height comes from its width and `aspect-ratio`.
+ * whose height comes from its width and `aspect-ratio`. Its behaviour also
+ * uses what the mount provides: `window.setInterval`, a file input answered
+ * by the host's `onPick`, the host's `fetch`, and `FormData`.
  */
 function controls(data: NotesData): string {
   return frame(
@@ -137,6 +139,11 @@ function controls(data: NotesData): string {
       '<label class="switch"><span>Weekly digest</span><input class="sr-only" type="checkbox" name="digest" data-digest><span class="switch__track"></span></label>',
       '<div class="seg"><label><input class="sr-only" type="radio" name="theme" value="light" checked><span class="seg__pill">Light</span></label>',
       '<label><input class="sr-only" type="radio" name="theme" value="dark"><span class="seg__pill">Dark</span></label></div>',
+      '<p class="ticker">Ticks: <span class="ticker__n" data-ticks>0</span></p>',
+      '<form class="profile" data-profile><input class="profile__city" name="city" value="Lisboa">',
+      '<label class="pick"><span>Choose a photo</span><input class="sr-only" type="file" name="photo" accept="image/*"></label>',
+      '<span class="picked-file" data-file>No photo</span></form>',
+      '<p class="stock">Stock: <span class="stock__n" data-stock>unknown</span></p>',
       '<div class="item"><div class="item__gallery"><figure class="gallery"><img class="gallery__img" src="photo.png" width="1024" height="768" alt="A field"></figure></div>',
       '<p class="item__after">The photo is as tall as its width and ratio make it; this line follows it.</p></div>',
       '<div class="row"><button class="btn" type="button" data-action="sheet">Open the sheet</button>',

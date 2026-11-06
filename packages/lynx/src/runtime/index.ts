@@ -4,9 +4,18 @@
  * handlers through the bounded DOM facade.
  */
 
-export { mountLynx, type ColorScheme, type LynxMount, type LynxPage, type MountLynxOptions } from './mount.js';
+export {
+  mountLynx,
+  type ColorScheme,
+  type LynxFetch,
+  type LynxFetchInit,
+  type LynxMount,
+  type LynxPage,
+  type LynxResponse,
+  type MountLynxOptions,
+} from './mount.js';
 export type { NavigateRequest } from './navigation.js';
-export type { PickOption, PickRequest } from './select.js';
+export type { FilePickRequest, PickAnswer, PickOption, PickRequest, SelectPickRequest } from './select.js';
 export {
   LynxRefusalError,
   UnmappedElementError,

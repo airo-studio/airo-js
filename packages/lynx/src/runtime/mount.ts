@@ -26,7 +26,9 @@
  *
  * The host owns the network (M13): on Lynx that is the background thread,
  * so `onNavigate` typically posts the request there and resolves with the
- * page that comes back as JSON.
+ * page that comes back as JSON, and a `fetch` it lends hydrate code works
+ * the same way. Timers and `FormData` are the mount's own: the main thread
+ * lacks `setInterval` and `FormData`, and neither is a host capability.
  *
  * Gates, routers and `update()` are not part of this mount: auth gates stay
  * on the server and in the host, and every page change is a server render.
@@ -39,7 +41,9 @@ import { type Cartridge, createCartridgeApp, getDefaultRenderResolver, type Temp
 import { type LynxErrorInfo, log, report } from './errors.js';
 import { FacadeHost, installGlobalGuards } from './facade.js';
 import type { NavigateRequest } from './navigation.js';
-import type { PickRequest } from './select.js';
+import { formDataClass } from './form-data.js';
+import type { PickAnswer, PickRequest } from './select.js';
+import { MountTimers } from './timers.js';
 import { fromParsed, insertChildren, LynxElement } from './node-model.js';
 import { type ElementRef, getPapi, type NativeListener, type Papi } from './papi.js';
 import { tokenize } from './tokenize.js';
@@ -56,6 +60,27 @@ export interface LynxPage<TData = unknown> {
 }
 
 export type ColorScheme = 'light' | 'dark';
+
+/** What hydrate code passes to `fetch`, as far as a host needs to read it. */
+export interface LynxFetchInit {
+  method?: string;
+  headers?: Record<string, string> | [string, string][];
+  /** A string, the `FormData` the mount provides, or a host file object from `onPick`. */
+  body?: unknown;
+  [key: string]: unknown;
+}
+
+/** The parts of a `Response` browser code reads. */
+export interface LynxResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly headers?: { get(name: string): string | null };
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+}
+
+/** The host's `fetch`, lent to hydrate code: the network is the host's (it runs on the background thread). */
+export type LynxFetch = (input: string, init?: LynxFetchInit) => Promise<LynxResponse>;
 
 type AnyFactory = PageRendererFactory<string, unknown>;
 
@@ -88,7 +113,17 @@ export interface MountLynxOptions<TData, TConfig, TPageType extends string = str
    * fires `input` and `change`, as a browser's does. Without it, a tap on a
    * select is reported and changes nothing.
    */
-  onPick?: (request: PickRequest) => Promise<string | null | undefined> | string | null | undefined;
+  onPick?: (request: PickRequest) => Promise<PickAnswer> | PickAnswer;
+  /**
+   * A `fetch` for hydrate code, which on device has none: the main thread
+   * has no network. The host's, as `onNavigate` is (M13): it typically
+   * posts the request to the background thread, runs it there, and resolves
+   * with what browser code reads of a `Response` (`ok`, `status`, `json()`,
+   * `text()`). The url is as written; resolve it as for `onNavigate`. A
+   * `FormData` body is the mount's own: read its `entries()`. Without it,
+   * `fetch` is refused by name, as before.
+   */
+  fetch?: LynxFetch;
   /** Every render, hydrate, event and navigation error, including refusals. Also logged. */
   onError?: (info: LynxErrorInfo) => void;
   /**
@@ -215,7 +250,22 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
     navigate,
     ...(opts.onPick ? { pick: opts.onPick } : {}),
   });
-  const uninstallGuards = installGlobalGuards(facadeHost);
+  const engineSetTimeout = (globalThis as unknown as { setTimeout: (fn: () => void, ms: number) => unknown }).setTimeout;
+  const timers = new MountTimers(
+    (fn, ms) => engineSetTimeout(fn, ms),
+    (err) => report(onError, 'event', err),
+    (member, detail) => facadeHost.refuse(member, detail),
+  );
+  const FormData = formDataClass(
+    (value) => facadeHost.unwrap(value),
+    (member, detail) => facadeHost.refuse(member, detail),
+  );
+  const timerMembers = { setTimeout: timers.setTimeout, clearTimeout: timers.clear, setInterval: timers.setInterval, clearInterval: timers.clear };
+  const lent = opts.fetch ? { fetch: opts.fetch } : {};
+  const uninstallGuards = installGlobalGuards(facadeHost, {
+    globals: { setInterval: timers.setInterval, clearInterval: timers.clear, FormData, ...lent },
+    window: { ...timerMembers, FormData, ...lent },
+  });
   const onTap: NativeListener = (native) => facadeHost.onTap(native);
   papi.addEventListener(pageRef, 'tap', onTap);
   tree.setPageTheme(pageRef, opts.colorScheme ?? 'light');
@@ -307,6 +357,7 @@ export function mountLynx<TData, TConfig, TPageType extends string = string>(
       if (host?.ref) papi.remove(pageRef, host.ref);
       host = null;
       papi.removeEventListener(pageRef, 'tap', onTap);
+      timers.clearAll();
       uninstallGuards();
       tree.markDirty();
       tree.flushNow();

@@ -17,7 +17,7 @@
  * value, in tree order.
  */
 
-import { descendants, isCheckable, type LynxElement } from './node-model.js';
+import { descendants, isCheckable, isFileInput, type LynxElement } from './node-model.js';
 import { isDisabledOption, optionValue, selectedOption } from './select.js';
 
 export interface NavigateRequest {
@@ -60,16 +60,18 @@ export function formOf(el: LynxElement): LynxElement | null {
   return null;
 }
 
-/** The request a submitted form makes, by the HTML rules. Null for `method="dialog"`. */
-export function formRequest(form: LynxElement, submitter: LynxElement | null): NavigateRequest | null {
-  const method = (submitter?.attrs.get('formmethod') ?? form.attrs.get('method') ?? 'get').toLowerCase();
-  if (method === 'dialog') return null;
-  const url = submitter?.attrs.get('formaction') ?? form.attrs.get('action') ?? '';
-  const entries: [string, string][] = [];
+/**
+ * A form's entries by the HTML rules, as `FormData` gives them: strings, and
+ * a file input's files (the host's objects) as they are.
+ */
+export function formEntries(form: LynxElement, submitter: LynxElement | null = null): [string, unknown][] {
+  const entries: [string, unknown][] = [];
   for (const el of descendants(form)) {
     const name = el.attrs.get('name');
     if (!name || isDisabled(el, form)) continue;
-    if (isCheckable(el)) {
+    if (isFileInput(el)) {
+      for (const file of el.files) entries.push([name, file]);
+    } else if (isCheckable(el)) {
       if (el.checked) entries.push([name, el.value]);
     } else if (el.tag === 'input') {
       entries.push([name, el.value]);
@@ -82,8 +84,27 @@ export function formRequest(form: LynxElement, submitter: LynxElement | null): N
       entries.push([name, el.attrs.get('value') ?? '']);
     }
   }
+  return entries;
+}
+
+/** Whether a form holds a picked file, which a `NavigateRequest` cannot carry. */
+export function hasPickedFiles(form: LynxElement): boolean {
+  for (const el of descendants(form)) if (isFileInput(el) && el.files.length > 0) return true;
+  return false;
+}
+
+/**
+ * The request a submitted form makes, by the HTML rules. Null for
+ * `method="dialog"`. A file input contributes nothing: a request's fields
+ * are strings (see `hasPickedFiles`).
+ */
+export function formRequest(form: LynxElement, submitter: LynxElement | null): NavigateRequest | null {
+  const method = (submitter?.attrs.get('formmethod') ?? form.attrs.get('method') ?? 'get').toLowerCase();
+  if (method === 'dialog') return null;
+  const url = submitter?.attrs.get('formaction') ?? form.attrs.get('action') ?? '';
   const fields: Record<string, string | string[]> = {};
-  for (const [name, value] of entries) {
+  for (const [name, value] of formEntries(form, submitter)) {
+    if (typeof value !== 'string') continue;
     const prior = fields[name];
     fields[name] = prior === undefined ? value : Array.isArray(prior) ? [...prior, value] : [prior, value];
   }

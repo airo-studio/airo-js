@@ -17,6 +17,7 @@
  * | `open`, `show()`, `showModal()`, `close()`, `returnValue` | `<details>` and `<dialog>`: the `open` attribute, re-projected; `toggle` and `close` fire after the current task |
  * | `options`, `selectedIndex`, `selected`, `text` | `<select>` and `<option>`, by HTML's selectedness rules (`./select.ts`) |
  * | `checked` | checkboxes and radios; a checked radio unchecks the rest of its group |
+ * | `files` | file inputs: the host's own objects, from `onPick`; `value = ''` clears them |
  * | `addEventListener`, `removeEventListener` | `click`, `input`, `change`, `submit`, `focus`, `blur`, `toggle`, `close` (below) |
  * | `tagName`, `nodeName`, `nodeType`, `parentElement` | read-only, from the model |
  *
@@ -38,6 +39,7 @@
  *                                                    method="dialog", its dialog closes
  *                                              a details' summary → `open` toggles → toggle
  *                                              checkbox / radio → toggled first, then input, change
+ *                                              file input → onPick → input, change
  *                                              <label> → a click on its control
  *                                              <select> → onPick → input, change
  *  … while a modal dialog is open, a tap outside it is a tap on the dialog (its backdrop)
@@ -69,6 +71,7 @@ import {
   optionsOf,
   optionText,
   optionValue,
+  type PickAnswer,
   type PickRequest,
   pickRequest,
   selectedOption,
@@ -81,6 +84,7 @@ import {
   defaultButton,
   formOf,
   formRequest,
+  hasPickedFiles,
   isSubmitButton,
   linkRequest,
 } from './navigation.js';
@@ -90,6 +94,7 @@ import {
   fromParsed,
   insertChildren,
   isCheckable,
+  isFileInput,
   type LynxElement,
   type LynxNode,
   LynxText,
@@ -183,8 +188,8 @@ export interface FacadeHostOptions {
   reporter?: ErrorReporter;
   /** A link was tapped or a form submitted, and nothing prevented it. */
   navigate: (request: NavigateRequest) => void;
-  /** A select was tapped: the host shows the choice and resolves with the value picked, or nothing. */
-  pick?: (request: PickRequest) => Promise<string | null | undefined> | string | null | undefined;
+  /** A select or file input was tapped: the host shows the choice and resolves with it, or nothing. */
+  pick?: (request: PickRequest) => Promise<PickAnswer> | PickAnswer;
 }
 
 const camel = (dataName: string): string => dataName.slice(5).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
@@ -384,9 +389,10 @@ export class FacadeHost {
     }
     const request = pickRequest(select);
     // Asked within the tap, so the host's picker opens in the same frame; a throw becomes a rejection.
-    new Promise<string | null | undefined>((resolve) => resolve(ask(request)))
+    new Promise<PickAnswer>((resolve) => resolve(ask(request)))
       .then((value) => {
         if (value === null || value === undefined) return;
+        if (typeof value !== 'string') throw new Error(`[@airo-js/lynx] onPick answered ${named} with something that is not a value`);
         const root = this.tree.viewport;
         if (root && !contains(root, select)) return;
         const option = optionsOf(select).find((o) => optionValue(o) === value && !isDisabledOption(o));
@@ -514,7 +520,8 @@ export class FacadeHost {
     if (!target) return;
     switch (target.tag) {
       case 'input':
-        if (undo) {
+        if (isFileInput(target)) this.pickFiles(target);
+        else if (undo) {
           this.dispatch(target, 'input', { bubbles: true, cancelable: false });
           this.dispatch(target, 'change', { bubbles: true, cancelable: false });
         }
@@ -549,10 +556,41 @@ export class FacadeHost {
     }
   }
 
+  /** A tapped file input: ask the host for files, then set them as a user's choice. */
+  private pickFiles(input: LynxElement): void {
+    const ask = this.opts.pick;
+    const name = input.attrs.get('name');
+    const named = `<input type="file"${name ? ` name="${name}"` : ''}>`;
+    if (!ask) {
+      report(this.opts.reporter, 'event', new Error(`[@airo-js/lynx] ${named} was tapped: mountLynx has no onPick to choose files`));
+      return;
+    }
+    const request: PickRequest = { kind: 'file', name: name ?? '', accept: input.attrs.get('accept') ?? '', multiple: input.attrs.has('multiple') };
+    new Promise<PickAnswer>((resolve) => resolve(ask(request)))
+      .then((files) => {
+        if (files === null || files === undefined) return;
+        if (!Array.isArray(files)) throw new Error(`[@airo-js/lynx] onPick answered ${named} with something that is not a list of files`);
+        if (files.length === 0) return;
+        const root = this.tree.viewport;
+        if (root && !contains(root, input)) return;
+        input.files = Object.freeze(request.multiple ? [...files] : [files[0]]);
+        this.dispatch(input, 'input', { bubbles: true, cancelable: false });
+        this.dispatch(input, 'change', { bubbles: true, cancelable: false });
+      })
+      .catch((err: unknown) => {
+        report(this.opts.reporter, 'event', err);
+      });
+  }
+
   /** Submit `form`: a cancellable `submit`, then the request, or for `method="dialog"` the dialog's close. */
   submit(form: LynxElement, submitter: LynxElement | null): void {
     const event = this.dispatch(form, 'submit', { bubbles: true, cancelable: true, submitter });
     if (event.defaultPrevented) return;
+    if (hasPickedFiles(form)) {
+      // A request's fields are strings, so the files would be dropped without a word.
+      report(this.opts.reporter, 'event', new Error('[@airo-js/lynx] a form holding a picked file was submitted: onNavigate cannot carry files; upload them through the host\'s fetch instead'));
+      return;
+    }
     const request = formRequest(form, submitter);
     if (request) {
       this.opts.navigate(request);
@@ -807,6 +845,10 @@ class ElementFacade {
   // form controls
   get value(): string {
     const el = this.#el;
+    if (isFileInput(el)) {
+      const first = el.files[0] as { name?: unknown } | undefined;
+      return first ? `C:\\fakepath\\${typeof first.name === 'string' ? first.name : ''}` : '';
+    }
     if (el.tag === 'input' || el.tag === 'textarea') return el.value;
     if (el.tag === 'select') {
       const selected = selectedOption(el);
@@ -818,6 +860,12 @@ class ElementFacade {
   }
   set value(value: string) {
     const el = this.#el;
+    if (isFileInput(el)) {
+      // A browser lets a script clear a file input, and nothing else.
+      if (String(value) !== '') this.#host.refuse('setting <input type="file">.value', 'only to "", which clears it');
+      el.files = [];
+      return;
+    }
     if (el.tag === 'input' || el.tag === 'textarea') {
       el.value = String(value);
       el.valueDirty = true;
@@ -833,6 +881,13 @@ class ElementFacade {
       return;
     }
     this.#host.refuse(`setting <${el.tag}>.value`);
+  }
+
+  // file input
+  get files(): readonly unknown[] {
+    const el = this.#el;
+    if (!isFileInput(el)) return this.#host.refuse(`<${el.tag}>.files`);
+    return el.files;
   }
 
   // checkbox and radio
@@ -1043,19 +1098,39 @@ const GUARDED_GLOBALS = [
   'prompt',
 ] as const;
 
+/** What the mount gives hydrate code in place of a guard: as a global where the engine lacks it, and as `window.<name>`. */
+export interface ProvidedGlobals {
+  /** Installed as globals only where the main thread has none. */
+  globals: Record<string, unknown>;
+  /** Answered from `window.<name>`; every other member of `window` is refused. */
+  window: Record<string, unknown>;
+}
+
 /**
  * Define each guarded global the main thread lacks as an object that
  * refuses every use by name: `window.location.assign(…)` fails as
  * "window.location is not available on device" instead of "window is not
- * defined". Globals the engine provides are left alone. Returns the undo.
+ * defined". What `provided` gives is installed instead: the mount's timers,
+ * `FormData`, and the host's `fetch` when it lends one. Globals the engine
+ * provides are left alone. Returns the undo.
  */
-export function installGlobalGuards(host: FacadeHost, scope: Record<string, unknown> = globalThis as unknown as Record<string, unknown>): () => void {
+export function installGlobalGuards(
+  host: FacadeHost,
+  provided: ProvidedGlobals = { globals: {}, window: {} },
+  scope: Record<string, unknown> = globalThis as unknown as Record<string, unknown>,
+): () => void {
   const installed: string[] = [];
-  for (const name of GUARDED_GLOBALS) {
+  for (const name of new Set<string>([...GUARDED_GLOBALS, ...Object.keys(provided.globals)])) {
     if (name in scope) continue;
+    if (name in provided.globals) {
+      Object.defineProperty(scope, name, { value: provided.globals[name], configurable: true, writable: true });
+      installed.push(name);
+      continue;
+    }
     const guard = new Proxy(function guarded() {}, {
       get(_, key) {
         if (typeof key === 'symbol' || INERT_KEYS.has(key) || key === 'prototype') return undefined;
+        if (name === 'window' && key in provided.window) return provided.window[key];
         return host.refuse(`${name}.${key}`);
       },
       set(_, key) {

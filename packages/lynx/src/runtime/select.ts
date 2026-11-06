@@ -29,9 +29,8 @@ export interface PickOption {
   group?: string;
 }
 
-/** What a tapped `<select>` asks the host's `onPick` for. */
-export interface PickRequest {
-  /** The control that asks. Only `'select'` today; a new kind would be a new picker the host draws. */
+/** What a tapped `<select>` asks the host's `onPick` for. Answer with the value picked. */
+export interface SelectPickRequest {
   kind: 'select';
   /** The select's `name`, or `''`. */
   name: string;
@@ -39,6 +38,28 @@ export interface PickRequest {
   value: string | null;
   options: PickOption[];
 }
+
+/**
+ * What a tapped `<input type="file">` (or its label) asks the host's
+ * `onPick` for. Answer with the files picked: objects of the host's own (a
+ * photo-library item, a path), which hydrate code reads from `input.files`
+ * and hands back to the host, through the host's `fetch` or a form's
+ * `FormData`. The framework never reads them.
+ */
+export interface FilePickRequest {
+  kind: 'file';
+  /** The input's `name`, or `''`. */
+  name: string;
+  /** The `accept` attribute as written (`image/*`, `.pdf`), or `''`. */
+  accept: string;
+  multiple: boolean;
+}
+
+/** What a tapped control asks the host's `onPick` for. */
+export type PickRequest = SelectPickRequest | FilePickRequest;
+
+/** What `onPick` answers: a value for a select, the files for a file input, or nothing to leave it. */
+export type PickAnswer = string | readonly unknown[] | null | undefined;
 
 const strip = (s: string): string => s.replace(/[\t\n\f\r ]+/g, ' ').trim();
 
@@ -87,7 +108,7 @@ export function selectOption(select: LynxElement, option: LynxElement | null): v
   select.valueDirty = true;
 }
 
-export function pickRequest(select: LynxElement): PickRequest {
+export function pickRequest(select: LynxElement): SelectPickRequest {
   const selected = selectedOption(select);
   return {
     kind: 'select',

@@ -293,3 +293,32 @@ describe('destroy', () => {
     expect('window' in globalThis).toBe(false);
   });
 });
+
+describe('what hydrate code gets in place of a refusal', () => {
+  const win = (): Record<string, (...a: unknown[]) => unknown> =>
+    (globalThis as unknown as { window: Record<string, (...a: unknown[]) => unknown> }).window;
+
+  it('window timers run, and the mount clears them when it is destroyed', async () => {
+    start();
+    let ticks = 0;
+    win().setInterval!(() => ticks++, 5);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(ticks).toBeGreaterThanOrEqual(2);
+    mount!.destroy();
+    const after = ticks;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(ticks).toBe(after);
+  });
+
+  it('window.fetch is the host\'s when it lends one, and refused by name when it does not', async () => {
+    const fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ hi: 1 }), text: async () => '' }));
+    start({ fetch });
+    const res = (await win().fetch!('/api/x', { method: 'POST' })) as { json(): Promise<unknown> };
+    expect(fetch).toHaveBeenCalledWith('/api/x', { method: 'POST' });
+    expect(await res.json()).toEqual({ hi: 1 });
+    mount!.destroy();
+    start();
+    expect(() => win().fetch!('/api/x')).toThrow(/window\.fetch is not available on device/);
+    expect(() => win().location).toThrow(/window\.location/);
+  });
+});
