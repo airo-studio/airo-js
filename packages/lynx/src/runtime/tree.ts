@@ -167,12 +167,14 @@ export class NativeTree {
   private readonly svgs = new Map<LynxElement, string | null>();
   /** Images not laid out yet: each is pinned or given `auto-size` once it is (`syncImages`). */
   private readonly unmeasuredImages = new Set<LynxElement>();
-  /** Images the stylesheet sizes, with the ratio they were laid out at: their height is set inline. */
-  private readonly pinnedImages = new Map<LynxElement, { ratio: number; width: number }>();
+  /** Images whose laid-out height is set inline, with the width they had then. */
+  private readonly pinnedImages = new Map<LynxElement, { width: number }>();
   /** Images whose width comes from the picture: built with `auto-size`, which Lynx reads only at creation. Kept across a rebuild. */
   private readonly autoSizedImages = new WeakSet<LynxElement>();
   /** Images given an `aspect-ratio` from their `width` and `height` attributes, as a browser does, while unmeasured. */
   private readonly ratioImages = new WeakSet<LynxElement>();
+  /** SVG `<img>`s laid out 0 wide with a height, given `max-width: auto` and measured again. */
+  private readonly uncappedSvgs = new WeakSet<LynxElement>();
   /** The inline styles the tree gives each image (`height`, `aspect-ratio`): written again after a rebuild. */
   private readonly imageStyles = new WeakMap<LynxElement, Map<string, string>>();
   /** Each modal dialog on screen, and the backdrop it is drawn inside: what stands in its parent's place. */
@@ -561,8 +563,8 @@ export class NativeTree {
     this.papi.flush();
     this.flushes++;
     // A second flush only when an icon's colour changed, which is rare after the first paint.
-    // An image given a ratio is measured again after the next layout, so up to twice more.
-    for (let pass = 0; pass < 2 && (this.syncImages() || this.syncSvgColours()); pass++) {
+    // An image given a ratio, uncapped or unpinned is measured again after the next layout, so up to three times more.
+    for (let pass = 0; pass < 3 && (this.syncImages() || this.syncSvgColours()); pass++) {
       this.papi.flush();
       this.flushes++;
     }
@@ -582,7 +584,8 @@ export class NativeTree {
    * Read from the computed `width` and `height`:
    *
    *   - **Both sides**: sized by the stylesheet. Its height is set inline,
-   *     at the height it was laid out at, and follows its width afterwards.
+   *     at the height it was laid out at. When its width changes it is
+   *     laid out again without that height and pinned anew.
    *     Lynx's grid sizes an auto row as 0 when its content's height comes
    *     from `aspect-ratio`, though the image itself lays out right (a
    *     263-tall photo in a 0-tall row, measured); with a height of its own
@@ -602,7 +605,13 @@ export class NativeTree {
    *     parent has a width; a hidden parent waits for a later layout.
    *
    * An SVG drawn by an `<img>` is pinned in the same way once it has both
-   * sides; it has no picture to take a missing side from.
+   * sides; it has no picture to take a missing side from. One laid out 0
+   * wide with a height, in a parent that has a width, gets `max-width:
+   * none` and is measured again: Lynx resolves a percentage `max-width` to
+   * 0 for an SVG inside an auto-width grid item (a 0 × 169 cover in a
+   * 169-wide box, measured; its rect is 0 wide too), which no browser CSS
+   * produces. `max-width: 100%` never narrows an image its own `width:
+   * 100%` already fits, which is how base stylesheets use it.
    *
    * Returns whether an inline style changed, so the caller lays out again.
    */
@@ -621,8 +630,12 @@ export class NativeTree {
       const h = size(el, 'height');
       if (w > 0 && h > 0) {
         this.setImageStyle(el, 'height', `${h}px`);
-        this.pinnedImages.set(el, { ratio: w / h, width: w });
+        this.pinnedImages.set(el, { width: w });
         this.unmeasuredImages.delete(el);
+        changed = true;
+      } else if (el.as === 'svg' && h > 0 && !this.uncappedSvgs.has(el) && el.parent?.ref && size(el.parent, 'width') > 0) {
+        this.uncappedSvgs.add(el);
+        this.setImageStyle(el, 'max-width', 'auto');
         changed = true;
       } else if (el.as === 'image' && h > 0) {
         this.imageStyle(el).set('height', `${h}px`);
@@ -643,12 +656,20 @@ export class NativeTree {
       }
       // Otherwise it waits for a later layout: a hidden parent, or an svg, which has no picture to take a missing side from.
     }
+    // A pinned image whose width changed is laid out again without its
+    // height and pinned at what it measures then. Deriving the height from
+    // the first ratio would carry a misread over: a cover first read
+    // 151 × 169 under a percentage `max-width`, then 169 wide, came out
+    // 169 × 189 (measured).
     for (const [el, pin] of this.pinnedImages) {
       if (!el.ref) continue;
       const w = size(el, 'width');
       if (w > 0 && Math.abs(w - pin.width) > 0.5) {
-        this.setImageStyle(el, 'height', `${w / pin.ratio}px`);
-        pin.width = w;
+        this.pinnedImages.delete(el);
+        const styles = this.imageStyle(el);
+        styles.delete('height');
+        this.papi.setInlineStyles(el.ref, inlineText(styles));
+        this.unmeasuredImages.add(el);
         changed = true;
       }
     }

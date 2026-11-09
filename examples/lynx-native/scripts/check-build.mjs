@@ -55,10 +55,10 @@ for (const present of [
 const expected = {
   'page-selector': 1,
   'page-font-size': 1,
-  'type-selector': 6,
+  'type-selector': 7,
   'attribute-selector': 5,
   'inline-flex': 2,
-  'display-block': 1,
+  'display-block': 2,
   'place-shorthand': 1,
   'font-shorthand': 1,
   calc: 1,

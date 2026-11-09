@@ -343,6 +343,27 @@ describe('browser globals', () => {
   });
 });
 
+describe('built-in methods the engine lacks', () => {
+  it('String.prototype.normalize is refused by name where missing, and removed again', () => {
+    p = page('<div></div>');
+    class Str {}
+    const scope: Record<string, unknown> = { String: Str };
+    const undo = installGlobalGuards(p.host, undefined, scope);
+    const call = (): unknown => (Str.prototype as unknown as { normalize(f: string): string }).normalize.call('é', 'NFD');
+    expect(call).toThrow(/String\.prototype\.normalize is not available on device/);
+    undo();
+    expect('normalize' in Str.prototype).toBe(false);
+  });
+
+  it('leaves an engine’s own normalize alone', () => {
+    p = page('<div></div>');
+    const undo = installGlobalGuards(p.host, undefined, { String });
+    expect('é'.normalize('NFD')).toHaveLength(2);
+    undo();
+    expect(typeof String.prototype.normalize).toBe('function');
+  });
+});
+
 describe('globals the mount provides', () => {
   it('installs what it is given where the main thread has none, and guards the rest', () => {
     p = page('<p>x</p>');

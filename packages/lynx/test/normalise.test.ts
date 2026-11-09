@@ -129,6 +129,14 @@ describe('display', () => {
   });
 });
 
+describe('max-width and max-height: none', () => {
+  it('becomes auto, which lifts the cap where Lynx ignores none', () => {
+    expect(body('.a{max-width:100%}.a.b{max-width:none;max-height:NONE!important}')).toBe(
+      '.a{max-width:100%}.a.b{max-width:auto;max-height:auto!important}',
+    );
+  });
+});
+
 describe('place-* shorthands', () => {
   it('one value sets both longhands, at the same importance', () => {
     expect(body('.go{display:grid;place-items:center}.s{place-self:end!important}')).toBe(

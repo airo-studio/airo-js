@@ -57,14 +57,21 @@ describe('img sizes, settled after the first layout', () => {
   };
   const flushed = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-  it('pins an image the stylesheet sizes at the height it was laid out at, and keeps the ratio as its width changes', async () => {
-    Object.assign(sizes, { photo: { width: 350, height: 262.5 } });
-    p = page('<div class="grid"><img class="photo" src="/p.jpg" width="1024" height="768"></div>', { layout });
+  it('pins an image the stylesheet sizes at the height it was laid out at, and pins it anew when its width changes', async () => {
+    // A 4:3 photo: its height follows its width unless a height is set inline.
+    let width = 350;
+    const photoLayout = (el: { classes: string; style?: string }, key: string): string => {
+      if (!el.classes.split(' ').includes('photo')) return '';
+      if (key === 'width') return `${width}px`;
+      return /height: [\d.]+px/.exec(el.style ?? '')?.[0].slice(8) ?? `${width * 0.75}px`;
+    };
+    p = page('<div class="grid"><img class="photo" src="/p.jpg" width="1024" height="768"></div>', { layout: photoLayout });
     p.tree.markDirty();
     await flushed();
     expect(p.native('.photo').style).toBe('height: 262.5px');
     expect(p.native('.photo').attrs['auto-size']).toBeUndefined();
-    sizes.photo = { width: 175, height: 262.5 };
+    // A first width read wrong, then right: the height is measured again, not derived from the first ratio.
+    width = 175;
     p.tree.markDirty();
     await flushed();
     expect(p.native('.photo').style).toBe('height: 131.25px');
@@ -116,7 +123,7 @@ describe('img with an SVG source', () => {
     p.tree.markDirty();
     await new Promise((r) => setTimeout(r, 0));
     expect(p.native('.cover').style).toBe('aspect-ratio: 10 / 10; height: 169px');
-    // Not laid out with both sides: no picture to take one from, so it waits, and is never auto-sized.
+    // Not laid out at all: no picture to take a side from, so it waits, and is never auto-sized.
     expect(p.native('.half').style).toBe('');
     expect(p.native('.half').attrs['auto-size']).toBeUndefined();
   });
@@ -129,6 +136,21 @@ describe('img with an SVG source', () => {
     expect(p.native('.d').tag).toBe('svg');
     p.root.querySelector('.logo').setAttribute('src', '/logo.png');
     expect(p.native('.logo')).toMatchObject({ tag: 'image', attrs: { src: 'https://shop.example/logo.png' } });
+  });
+});
+
+describe('an SVG <img> laid out 0 wide with a height', () => {
+  it('gets max-width: auto, as a percentage max-width collapsed it on device, then is pinned', async () => {
+    const collapsed = (el: { classes: string; style?: string }, key: string): string => {
+      if (el.classes.split(' ').includes('media')) return key === 'width' ? '169px' : '169px';
+      if (!el.classes.split(' ').includes('cover')) return '';
+      if (key === 'height') return '169px';
+      return el.style?.includes('max-width: auto') ? '169px' : '0px';
+    };
+    p = page('<div class="media"><img class="cover" src="/c.svg"></div>', { layout: collapsed });
+    p.tree.markDirty();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(p.native('.cover').style).toBe('max-width: auto; height: 169px');
   });
 });
 

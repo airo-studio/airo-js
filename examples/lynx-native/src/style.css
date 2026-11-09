@@ -197,6 +197,7 @@ figcaption { font-size: 0.8125rem; color: var(--muted); }
 .listing { display: block; color: inherit; text-decoration: none; background-color: var(--card); border-radius: var(--radius); overflow: hidden; position: relative; }
 .listing__media { aspect-ratio: 1; background-color: var(--line); }
 .listing__img { width: 100%; height: 100%; }
+.listings img { display: block; max-width: 100%; } /* the common base rule: on device a percentage max-width collapsed the cover SVG to 0 wide */
 .listing__cover { width: 100%; aspect-ratio: 1; background-color: var(--line); }
 .listing__body { padding: 0.5rem; }
 .listing__title, .listing__price { margin: 0; }

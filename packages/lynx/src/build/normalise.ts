@@ -14,6 +14,7 @@
  * | selectors the encoder rejects are split out of their list | the encoder drops the whole rule when one selector in its list fails to parse |
  * | `display: inline-flex` → `flex` | `inline-flex` falls back to Lynx's linear layout |
  * | `display: block`, `flow-root`, `list-item` → `linear` | Lynx lays `block` out as a flex row (a card's photo beside its body, measured); `linear` stacks, as a box with no `display` does |
+ * | `max-width: none`, `max-height: none` → `auto` | Lynx ignores `none`, so the cap it was meant to lift stays (a box capped at 30px stayed 30px, measured); `auto` lifts it |
  * | `place-items`, `place-content`, `place-self` → their two longhands | the encoder removes the shorthands; Lynx's grid honours `align-items` + `justify-items` (measured) |
  * | `display: none` → plus `overflow: hidden` | Lynx lays a `display: none` box out at 0×0 but still paints the text inside it |
  * | the HTML UA rule `[hidden] { display: none }`, as `.a-hidden` | there is no UA stylesheet on device |
@@ -104,6 +105,7 @@ export type RewriteKind =
   | 'inline-flex'
   | 'display-block'
   | 'place-shorthand'
+  | 'max-none'
   | 'display-none-clip'
   | 'font-shorthand'
   | 'inset'
@@ -398,6 +400,7 @@ class Normaliser {
         'inline-flex': 0,
         'display-block': 0,
         'place-shorthand': 0,
+        'max-none': 0,
         'display-none-clip': 0,
         'font-shorthand': 0,
         inset: 0,
@@ -699,6 +702,11 @@ class Normaliser {
       if (property === 'display' && /^(block|flow-root|list-item)$/i.test(value)) {
         this.report.rewrites['display-block']++;
         value = 'linear';
+      }
+
+      if ((property === 'max-width' || property === 'max-height') && /^none$/i.test(value)) {
+        this.report.rewrites['max-none']++;
+        value = 'auto';
       }
 
       const place = PLACE_SHORTHANDS[property];
