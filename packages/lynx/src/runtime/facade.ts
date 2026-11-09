@@ -1107,14 +1107,6 @@ const GUARDED_GLOBALS = [
   'prompt',
 ] as const;
 
-/**
- * Built-in methods the main thread's engine lacks, which code calls as if
- * every engine had them: a missing one fails as a bare "not a function"
- * with a minified stack. Each is installed, where missing, as a method that
- * refuses by name. `normalize` is Unicode data, as `Intl` is.
- */
-const GUARDED_METHODS = [['String', 'normalize']] as const;
-
 /** What the mount gives hydrate code in place of a guard: as a global where the engine lacks it, and as `window.<name>`. */
 export interface ProvidedGlobals {
   /** Installed as globals only where the main thread has none. */
@@ -1163,22 +1155,8 @@ export function installGlobalGuards(
     Object.defineProperty(scope, name, { value: guard, configurable: true, writable: true });
     installed.push(name);
   }
-  const methods: [Record<string, unknown>, string][] = [];
-  for (const [owner, method] of GUARDED_METHODS) {
-    const proto = (scope[owner] as { prototype?: Record<string, unknown> } | undefined)?.prototype;
-    if (!proto || typeof proto[method] === 'function') continue;
-    Object.defineProperty(proto, method, {
-      value: function refused(): never {
-        return host.refuse(`${owner}.prototype.${method}`);
-      },
-      configurable: true,
-      writable: true,
-    });
-    methods.push([proto, method]);
-  }
   return () => {
     for (const name of installed) delete scope[name];
-    for (const [proto, method] of methods) delete proto[method];
   };
 }
 
