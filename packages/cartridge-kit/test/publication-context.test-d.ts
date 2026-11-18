@@ -71,4 +71,32 @@ describe('PublicationContext — the page a render resolved', () => {
     };
     expectTypeOf(write).toBeFunction();
   });
+
+  // Every adapter in a run shares one context object. An adapter that could
+  // replace either field would change what the adapters after it are told,
+  // while the renderer kept the entry that was resolved.
+  test('an adapter cannot replace either', () => {
+    const replace = (ctx: PublicationContext<Config>, other: Page) => {
+      // @ts-expect-error — `page` is a readonly property.
+      ctx.page = other;
+      // @ts-expect-error — so is `navState`.
+      ctx.navState = { page: 'elsewhere' };
+      // @ts-expect-error — clearing one is a write too.
+      ctx.page = undefined;
+    };
+    expectTypeOf(replace).toBeFunction();
+  });
+
+  test('a host can still build a context with both, and the runner can still spread one', () => {
+    const page: Page = { id: 'product', type: 'product', enabled: true, layout: { regionOrder: [], regions: {} } };
+    const host: PublicationContext<Config> = {
+      config: { siteUrl: 'https://x.test' },
+      locale: 'en-GB',
+      country: 'GB',
+      page,
+      navState: { page: 'product', productId: 'p1' },
+    };
+    const assigned: PublicationContext<Config> = { ...host, page: undefined, navState: undefined };
+    expectTypeOf(assigned.page).toEqualTypeOf<Readonly<Page> | undefined>();
+  });
 });

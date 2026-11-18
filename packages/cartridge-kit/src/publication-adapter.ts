@@ -117,11 +117,17 @@ export interface PublicationContext<TConfig = unknown> {
    * be published is decided by what the snapshot holds.
    *
    * Passed by reference, like the snapshot. Do not mutate it.
+   *
+   * `readonly`, so an adapter cannot reassign it either. Every adapter in a
+   * run is handed the same context object: one that replaced `page` would
+   * change what the adapters after it are told, while the renderer kept the
+   * page that was resolved.
    */
-  page?: Readonly<Page>;
+  readonly page?: Readonly<Page>;
   /**
    * The navigation state the view receives as `ctx.navState`, with
-   * `navState.page === page.id`. Present exactly when `page` is. Frozen.
+   * `navState.page === page.id`. Present exactly when `page` is. Frozen,
+   * and `readonly` for the reason `page` is.
    *
    * After a fallback, `page` is the default entry while the other keys are
    * still the rejected request's, exactly as the view is handed them. So
@@ -133,7 +139,7 @@ export interface PublicationContext<TConfig = unknown> {
    * as content to emit. When it names nothing in the snapshot, answer the
    * way the view does — usually by publishing nothing (see `generate`).
    */
-  navState?: Readonly<NavigationState>;
+  readonly navState?: Readonly<NavigationState>;
 }
 
 export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
