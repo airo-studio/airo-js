@@ -106,7 +106,9 @@ export function headFromPublication(
     if (!result.included) continue;
 
     if (result.format === 'json-ld') {
-      if (opts.includeJsonLd) jsonLd.push(result.output);
+      // `null` is an adapter publishing nothing for this render; folding it
+      // in would emit a script whose whole body is `null`.
+      if (opts.includeJsonLd && result.output != null) jsonLd.push(result.output);
       continue;
     }
 

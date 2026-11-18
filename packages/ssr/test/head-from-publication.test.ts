@@ -92,6 +92,26 @@ describe('headFromPublication', () => {
     expect(patch.jsonLd).toEqual([{ '@type': 'Product' }]);
   });
 
+  // An adapter returns `null` to publish nothing for a render. Folded in
+  // unchecked, `renderDocument` emitted a script whose whole body was
+  // `null`; `undefined` threw inside the serialiser.
+  test('includeJsonLd: true skips an adapter that published nothing (null / undefined output)', () => {
+    const patch = headFromPublication(
+      [
+        result({ format: 'json-ld', output: null }),
+        result({ format: 'json-ld', output: { '@type': 'Product' } }),
+        result({ format: 'json-ld', output: undefined }),
+      ],
+      { includeJsonLd: true },
+    );
+    expect(patch.jsonLd).toEqual([{ '@type': 'Product' }]);
+
+    const nothing = headFromPublication([result({ format: 'json-ld', output: null })], {
+      includeJsonLd: true,
+    });
+    expect(nothing.jsonLd).toBeUndefined();
+  });
+
   test('folds alternates into hreflang links — the field the factory emits', () => {
     const patch = headFromPublication([
       result({

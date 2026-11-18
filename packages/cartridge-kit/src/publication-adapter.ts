@@ -16,7 +16,11 @@
  *   1. **Snapshot fidelity.** Adapters consume the SAME post-Transformer
  *      snapshot that views render and MCP tools answer from. Inline
  *      JSON-LD, an XML feed, and any MCP tool all answer the same
- *      question — what the rendered widget shows.
+ *      question — what the rendered widget shows. On the render path that
+ *      includes WHICH PAGE it shows: `ctx.page` and `ctx.navState` carry
+ *      the entry `renderAppWithPublication` resolved, so an output inlined
+ *      beside a deep-linked page can describe that page rather than the
+ *      whole snapshot.
  *   2. **Coverage gating.** Adapters declare `requires` (snapshot field
  *      paths, typed against `TData` so a path that cannot exist is a
  *      compile error). `runPublicationAdapters` skips an adapter whose
@@ -30,6 +34,8 @@
  *      serve the output and surfaces errors. The trust layer — never
  *      publish a broken feed to a downstream indexer.
  */
+
+import type { NavigationState, Page } from '@airo-js/core';
 
 import type { SnapshotPath } from './snapshot-path.js';
 
@@ -91,6 +97,43 @@ export interface PublicationContext<TConfig = unknown> {
   currency?: string;
   /** Tenant-side toggles — e.g. items disabled from publication. */
   tenantOverrides?: Record<string, unknown>;
+  /**
+   * The page this output is for: the entry page `renderAppWithPublication`
+   * resolved, after any fallback. It is the object the view receives as
+   * `ctx.page`, so its `componentSettings` are the ones the view read.
+   *
+   * Set by `renderAppWithPublication`, which replaces anything a host put
+   * here. `runPublicationAdapters` called directly forwards the context as
+   * it was given: a feed endpoint or a scheduled run that sets nothing
+   * leaves this `undefined`, and an adapter emits its page-less output. A
+   * host that does set it on a direct call owns the agreement with whatever
+   * it renders — take the page from `describeEntryResolution`.
+   *
+   * Use it to choose WHAT TO DESCRIBE (one product on a product page, the
+   * list on a listing page), never to withhold. Privacy is not decided
+   * here. `renderAppWithPublication` never runs an adapter for a `private`
+   * entry, so on that path `page` is never private; a direct call may carry
+   * no page at all, so a check on `page.private` protects nothing. What may
+   * be published is decided by what the snapshot holds.
+   *
+   * Passed by reference, like the snapshot. Do not mutate it.
+   */
+  page?: Readonly<Page>;
+  /**
+   * The navigation state the view receives as `ctx.navState`, with
+   * `navState.page === page.id`. Present exactly when `page` is. Frozen.
+   *
+   * After a fallback, `page` is the default entry while the other keys are
+   * still the rejected request's, exactly as the view is handed them. So
+   * branch on `page.type` first, and read a context key only on a page
+   * type that owns it.
+   *
+   * Keys other than `page` are url input the host decoded and the framework
+   * has not validated. Use one to look something up in the snapshot, never
+   * as content to emit. When it names nothing in the snapshot, answer the
+   * way the view does — usually by publishing nothing (see `generate`).
+   */
+  navState?: Readonly<NavigationState>;
 }
 
 export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
@@ -142,6 +185,14 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
    * Generate the surface-specific output from a post-Transformer snapshot.
    * Async because real adapters do non-trivial work (image validation,
    * external taxonomy lookups, locale mappings).
+   *
+   * Return `null` to publish nothing for this render — a page this adapter
+   * has nothing to say about, or a `ctx.navState` key that names nothing in
+   * the snapshot. `TOutput` must then include `null`, and `validate()` is
+   * still called with it: an adapter that publishes nothing on purpose says
+   * so by accepting `null`, and one that never should rejects it there.
+   * `renderAppWithPublication` and `headFromPublication` emit nothing for
+   * an output that is `null` or `undefined`.
    */
   generate(snapshot: TData, ctx: PublicationContext<TConfig>): Promise<TOutput>;
 
@@ -159,6 +210,10 @@ export interface PublicationAdapter<TData, TOutput, TConfig = unknown> {
    * Examples:
    *   - inline JSON-LD:    { min: 0, max: 6h }     (every render is fine)
    *   - signed XML feed:   { min: 1h, max: 24h }   (external poller; daily floor)
+   *
+   * An adapter that reads `ctx.page` or `ctx.navState` produces a different
+   * output per page. A host that reuses output inside this window must key
+   * it on both, or one page's output is served beside another.
    */
   refreshCadence: { min: Duration; max: Duration };
 
