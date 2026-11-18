@@ -211,6 +211,25 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 **Consumes POST-Transformer data.** Same as MCP tools. The "snapshot fidelity" contract guarantee: views, MCP tools, and publication adapters all see the same data.
 
+**An adapter on the render path is told which page rendered (0.11.3).** `renderAppWithPublication` puts the entry it resolved on the context: `ctx.page` is the `Page` the view receives as `ctx.page`, and `ctx.navState` is the state the view receives as `ctx.navState`. A multi-page cartridge over one snapshot needs this. Without it the widget opens on the deep-linked product while the JSON-LD beside it describes the whole catalogue, on every page. Four rules:
+
+- **Branch on `page.type` first, then read the context key that page type owns.** After a fallback (an unknown, disabled, subpage or gate id) `page` is the default entry while `navState` still carries the rejected request's other keys, exactly as the view is handed them. An adapter keyed on `navState.productId` alone describes a product beside a rendered listing.
+- **Both are absent off the render path.** `runPublicationAdapters` called directly (a feed endpoint, a schedule) forwards the context it was given, so the same adapter emits its page-less output there. Handle `undefined`; the types make you.
+- **`page` chooses what to describe. It never withholds.** No adapter runs for a `private` entry on the render path, and a direct call may carry no page at all, so a check on `page.private` protects nothing. What may be published is decided by what the snapshot holds (§4.9).
+- **Return `null` to publish nothing.** That covers a page the adapter has nothing to say about, and a key that names nothing in the snapshot (answer the way the view does). `TOutput` must include `null`, and `validate()` is still called with it: accepting `null` is how an adapter says it published nothing on purpose. Nothing is inlined for a `null` output.
+
+```ts
+generate: async (snapshot, ctx) => {
+  if (ctx.page?.type === 'product') {
+    const shown = snapshot.products.find((p) => p.id === ctx.navState?.productId);
+    return shown ? productNode(shown) : null; // the view shows "not found": publish nothing
+  }
+  return itemList(snapshot.products); // listing pages, and every page-less run
+},
+```
+
+Keys other than `page` are url input your host decoded: use one to look something up, never as content to emit. An output that depends on the page must also be cached per page — a host that reuses adapter output inside `refreshCadence` keys it on `page.id` and on every context key the adapter reads.
+
 **Validation is a hard gate (default).** `onValidationFail: 'block-publish'` is correct for almost all cases. `'publish-with-warnings'` only when downstream consumers (Google Merchant Center, Amazon Listings) have a "warnings allowed" mode.
 
 **`requires` enforces coverage — actually, as of 1.0.** Declare every schema field path the adapter needs. `runPublicationAdapters` checks the entries marked `required: 'always'` **before** calling `generate()`; if any hold no value in the snapshot the adapter does not run, and its result carries `included: false` plus `skipped: { reason: 'missing-required-fields', missing }` naming the absent paths.
@@ -858,7 +877,7 @@ The order of the three reads matters. **First `fellBack.reason === 'unknown-page
 
 **Key the private slice on the page, never on the session.** `member` is built only when the resolved entry page is `private: true`. A signed-in visitor's public pages are byte-identical to an anonymous visitor's, which is what makes them shared-cacheable at all; a slice keyed on "session present" leaks member data into a `Cache-Control: public` response the moment someone signed in loads the home page. Pin it with a smoke check.
 
-**Member data never enters a snapshot built for a machine route.** Adapters and MCP tools are page-blind: they publish whatever the snapshot holds. `/sitemap.xml`, `/llms.txt`, `/mcp/call` and every feed route build their snapshots without a session, so the private slice is simply never there. A host that co-locates tool dispatch with the page render — one snapshot, one call, every tool answer stamped with the page's id — splits the two on a private request; the tools never see the private slice.
+**Member data never enters a snapshot built for a machine route.** Adapters and MCP tools publish whatever the snapshot holds. An adapter on the render path is told the page (`ctx.page`, §1.9), but only to choose what to describe: none runs for a private entry, and off the render path it is told no page at all, so an adapter checking `page.private` protects nothing. `/sitemap.xml`, `/llms.txt`, `/mcp/call` and every feed route build their snapshots without a session, so the private slice is simply never there. A host that co-locates tool dispatch with the page render — one snapshot, one call, every tool answer stamped with the page's id — splits the two on a private request; the tools never see the private slice.
 
 **Headers are the guard.** `Cache-Control: private, no-store`, `Vary: Cookie`, `X-Robots-Tag: noindex` and a `<meta name="robots" content="noindex">` on every private response; `Disallow` the private prefixes in `robots.txt`. Derive them from the resolved entry page's `private` flag, never from a path prefix.
 

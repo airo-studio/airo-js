@@ -445,6 +445,7 @@ describe('replaceData — FIFO queue', () => {
 });
 
 describe('replaceData — the editor hook', () => {
+  // pregate-literal: VERSION='0.11.2' the runtime version that introduced the editor hook, not the ssr package's VERSION
   test('resolves null, applying nothing, for a mount whose runtime has no hook (older than 0.11.2)', async () => {
     const { result, h } = await mount();
     const renders = h.painted.length;

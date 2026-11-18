@@ -21,6 +21,21 @@
  *   - `inline-in-host` adapters that failed validation under the default
  *     `'block-publish'` policy. Output is in the result (`included: false`)
  *     for diagnostic, but never served.
+ *   - an output that is `null` or `undefined` (0.11.3): the adapter had
+ *     nothing to say for this render. It is still listed in
+ *     `adapterResults`.
+ *
+ * ## The page adapters are told (0.11.3)
+ *
+ * The entry page is resolved once, and every adapter this runs receives it
+ * on its context: `ctx.page` (the `Page` the view gets as `ctx.page`) and
+ * `ctx.navState` (the state the view gets as `ctx.navState`). A multi-page
+ * app over one snapshot can then inline output that describes the page
+ * that rendered, rather than the whole snapshot on every page. The renderer
+ * is handed the same resolved entry, so the two cannot be told different
+ * pages. Whatever a host put in those fields on `publicationCtx` is
+ * replaced. `runPublicationAdapters` called directly adds nothing: its
+ * context is the caller's.
  *
  * Inline placement: JSON-LD scripts go BEFORE the widget HTML. Host apps
  * embedding the SSR response into a `<head>`-or-`<body>` slot on the page
@@ -59,13 +74,12 @@
  * the fallback page is neither rendered nor published first.
  */
 
-import {
-  describeEntryResolution,
-  type AppConfig,
-  type EntryFallbackReason,
-  type NavigationState,
-  type Page,
-  type PageRendererFactory,
+import type {
+  AppConfig,
+  EntryFallbackReason,
+  NavigationState,
+  Page,
+  PageRendererFactory,
 } from '@airo-js/core';
 import type {
   Cartridge,
@@ -77,10 +91,7 @@ import { logger } from '@airo-js/log';
 
 import { buildJsonLdScript } from './build-json-ld-script.js';
 
-import {
-  renderAppToHTML,
-  type RenderToHTMLDeps,
-} from './render-app.js';
+import { renderResolvedEntry, resolveEntry } from './render-app.js';
 import {
   runPublicationAdapters,
   type AdapterRunResult,
@@ -100,7 +111,11 @@ export interface RenderWithPublicationOptions<
   appConfig: AppConfig<TPageType>;
   /** Post-Transformer snapshot — the same data views and adapters consume. */
   snapshot: TData;
-  /** Per-render publication context (locale, country, currency, …). */
+  /**
+   * Per-render publication context (locale, country, currency, …). Its
+   * `page` and `navState` are not yours to set here: the runner assigns
+   * both from the entry it resolves and replaces anything supplied.
+   */
   publicationCtx: PublicationContext<TConfig>;
   /** Document for SSR DOM construction. Required server-side. */
   document?: Document;
@@ -287,13 +302,15 @@ export async function renderAppWithPublication<
   // default entry — keeps the SSR path safe against tampered or stale
   // deeplinks. It has to come first because a private entry page must
   // stop the adapters from running at all (below).
+  //
+  // And ONCE. The adapters and the renderer are both handed this value, so
+  // an adapter that describes "the page" describes the page that rendered.
+  // Resolving again for the render would make that true only for as long
+  // as nothing changed during the adapters' await.
   const isGate = opts.isGatePage ?? (() => false);
-  const entryResolution = describeEntryResolution(
-    opts.appConfig.pages,
-    isGate,
-    opts.initialNavState?.page,
-  );
-  const entryPage = entryResolution.page;
+  const resolved = resolveEntry(opts.appConfig.pages, isGate, opts.initialNavState);
+  const entryResolution = resolved.resolution;
+  const entryPage = resolved.page;
   // Threaded onto every return path below, including both skips — a host
   // answering 404 must not have that decision depend on whether the
   // fallback page happened to be server-renderable.
@@ -375,18 +392,35 @@ export async function renderAppWithPublication<
   // Run adapters (public pages only) — surfaces validation errors before
   // we commit to rendering. Cheaper to abort here than after a full SSR
   // pass. Also means CSR-only views still get their JSON-LD surfaced to
-  // crawlers. A private page gets NO adapter run: adapters are page-blind
-  // and would happily publish whatever the private snapshot holds.
+  // crawlers. A private page gets NO adapter run: an adapter publishes
+  // whatever the snapshot holds, and being told the page does not change
+  // that — it chooses what to describe, it is not trusted to withhold.
+  //
+  // `page` and `navState` are ALWAYS assigned, so a value the host put on
+  // `publicationCtx` never reaches an adapter from here: with no entry
+  // resolved both are `undefined`, and otherwise they are the resolved
+  // entry the renderer is about to be given.
   const adapterResults: AdapterRunResult[] = isPrivate
     ? []
-    : await runPublicationAdapters(opts.cartridge, opts.snapshot, opts.publicationCtx, filter);
+    : await runPublicationAdapters(
+        opts.cartridge,
+        opts.snapshot,
+        { ...opts.publicationCtx, page: resolved.page, navState: resolved.navState },
+        filter,
+      );
 
   // Build the inline JSON-LD blocks up front — emitted regardless of
   // whether the widget renders.
+  //
+  // `output != null`: an adapter returns `null` to publish nothing for this
+  // render (a page it has nothing to say about). Without the check that
+  // was inlined as a script whose whole body is `null`, and `undefined`
+  // threw inside `buildJsonLdScript`. The result still lists the adapter.
   const inlineScripts = adapterResults
     .filter(
       (r) =>
         r.included &&
+        r.output != null &&
         r.format === 'json-ld' &&
         r.delivery === 'inline-in-host',
     )
@@ -433,27 +467,26 @@ export async function renderAppWithPublication<
       pageType: TPageType,
     ) => PageRendererFactory<TPageType, unknown> | undefined);
 
-  const renderDeps: RenderToHTMLDeps<TPageType, unknown> = {
-    document: opts.document,
-    resolveRenderer,
-    isGatePage: opts.isGatePage,
-    // Forward the full initialNavState so renderAppToHTML resolves the
-    // same entry page AND seeds the same ctx.navState the capability-
-    // gate branch saw. Both branches now agree on the page AND the
-    // context fields (productId, category, query params) the renderer
-    // reads.
-    initialNavState: opts.initialNavState,
-    appContext: {
-      cartridgeId: opts.cartridge.id,
-      config: opts.publicationCtx.config,
-      data: opts.snapshot,
+  // Render the entry resolved at the top — the one the capability gate
+  // branched on and the adapters were told about — with its navState
+  // (productId, category, query params). Nothing here re-reads
+  // `initialNavState` or `isGatePage`.
+  const { html: widgetHtml } = renderResolvedEntry<TPageType, unknown>(
+    opts.appConfig,
+    {
+      document: opts.document,
+      resolveRenderer,
+      appContext: {
+        cartridgeId: opts.cartridge.id,
+        config: opts.publicationCtx.config,
+        data: opts.snapshot,
+      },
+      // The private decision was made above; the low-level renderer keeps
+      // the same promise and must be told it was.
+      renderPrivate: privateUnlock,
     },
-    // The private decision was made above; the low-level renderer keeps
-    // the same promise and must be told it was.
-    renderPrivate: privateUnlock,
-  };
-
-  const { html: widgetHtml } = renderAppToHTML(opts.appConfig, renderDeps);
+    resolved,
+  );
 
   const html = inlineScripts ? `${inlineScripts}\n${widgetHtml}` : widgetHtml;
   return { html, adapterResults, gates, ...fellBack };

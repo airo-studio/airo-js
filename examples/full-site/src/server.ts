@@ -51,7 +51,8 @@
  *
  * 5. **Member data never enters a snapshot built for a machine route, and
  *    it is keyed on the PAGE, never on the session.** Adapters and MCP tools
- *    are page-blind; they publish whatever the snapshot holds. `/sitemap.xml`,
+ *    publish whatever the snapshot holds (an adapter is told the page only
+ *    to choose what to describe, never to withhold). `/sitemap.xml`,
  *    `/llms.txt` and `/mcp/call` build their snapshots without a session, so
  *    the private slice is simply never there. And the wildcard builds it
  *    only inside the `skipped.reason === 'private'` branch — a signed-in

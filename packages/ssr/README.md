@@ -24,11 +24,17 @@ Execute a cartridge's `PublicationAdapter`s and return per-adapter results. Use 
 
 Filterable by `id`, `format`, and `delivery`.
 
+The context is forwarded as you give it. `ctx.page` and `ctx.navState` are set by `renderAppWithPublication`, not here, so an adapter run from a feed endpoint or a schedule sees neither and emits its page-less output. If you set them yourself, you own their agreement with whatever you render.
+
 ### `renderAppWithPublication(opts)`
 
 Combines the above. Renders the entry page AND inlines the cartridge's `inline-in-host` JSON-LD outputs as `<script type="application/ld+json">` tags before the widget markup. The SEO landing path.
 
 JSON-LD payloads are escaped against `</script>` breakout — safe to inline strings from snapshot fields without manual sanitisation.
+
+**The page adapters are told (0.11.3).** Every adapter this runs receives the entry it resolved: `ctx.page` (the `Page` the view gets) and `ctx.navState` (the state the view gets, frozen). It is the resolved page, after any fallback, and the renderer is handed the same one — the entry is resolved once per render. So an inlined output can describe the page that rendered: one `Product` on a deep-linked product page, not the whole catalogue. Anything a host put in those two fields on `publicationCtx` is replaced. Branch on `page.type` before reading a `navState` key: after a fallback the page is the default entry and the rejected request's other keys are still there.
+
+**An adapter that publishes nothing (0.11.3).** An adapter returns `null` when it has nothing to say for this render. It is listed in `adapterResults` and no script is inlined for it; `headFromPublication({ includeJsonLd: true })` skips it too. Before 0.11.3 it was inlined as a script whose whole body was `null`. `validate()` is still called with the `null`.
 
 **Private pages (0.11.0).** A `Page.private: true` entry is refused, not published: no adapter runs, nothing is inlined, and the result is `{ html: '', skipped: { reason: 'private' }, gates }` — a 401 for a root-mounted host. Read `fellBack.reason === 'unknown-page'` first (the two can co-occur; an unknown url is a 404 whatever the fallback page's privacy). Pass `renderPrivate: true` only once your handler has verified a session for this request; the page then renders as HTML only, still adapter-free. `renderPrivate: { satisfiedGates: [...] }` names the private-scoped gates the render met when there is more than one. `skipped.reason` is an open union (`'csr-only' | 'private' | …`) — branch on the reason, never on presence.
 

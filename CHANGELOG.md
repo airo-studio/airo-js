@@ -2,6 +2,35 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why the page context is a patch, on two packages
+
+`PublicationContext` gains two optional fields, and `renderAppWithPublication` fills them in. An adapter that does not read them produces exactly what it produced before, and a direct `runPublicationAdapters` call is untouched. So each package takes its own patch: `@airo-js/cartridge-kit` 0.11.2 for the type, `@airo-js/ssr` 0.11.3 for the runner, with core, runtime, embed, mcp and log where they were. `CONTRACT_VERSION` stays `0.10.0`: nothing a consumer has written needs to change. Both fields are part of what 1.0 freezes.
+
+One thing in the ssr patch does change bytes, and it is a fix: an adapter output of `null` is no longer inlined. It is listed under "Fixed" with its own upgrade line.
+
+Reported by a consumer against a live page (`msg_mwm3ykco_f4b7ab`): a widget deep-linked to one product, with a JSON-LD `ItemList` of all 23 products beside it.
+
+## `@airo-js/cartridge-kit` 0.11.2 — 2026-11-18
+
+### Added
+- **`PublicationContext.page` and `PublicationContext.navState` — the page an output is for.** A multi-page app over one snapshot renders as a function of `(config, snapshot, navState)`, while an adapter was handed `(snapshot, ctx)` and `ctx` said nothing about the page. So the widget opened on the deep-linked product and the JSON-LD inlined beside it described the whole catalogue, on every page: guarantee 1 ("the same question — what the rendered widget shows") could not be kept by any adapter. `page` is the `Page` the view receives as `ctx.page` (the full object, so page-level `componentSettings` are the ones the view read); `navState` is the state the view receives as `ctx.navState`, read-only. Both are optional and both are set by `renderAppWithPublication` (`@airo-js/ssr` 0.11.3). Both properties are `readonly` as well: every adapter in a run shares one context object, and an adapter that replaced either would change what the adapters after it are told while the renderer kept the resolved page. They are flat, named as they are on the render, transformer and gate contexts. They sit on the context rather than in a third `generate()` argument because every wrapper already forwards the context: `defineCrawlerSurfaceAdapter` hands it to all eleven selectors, so a canonical or an `og:title` for a deep-linked page can use them with no further change.
+- **`generate()` may return `null` to publish nothing**, now that an adapter can tell it is on a page it has nothing to say about. `TOutput` must include `null`, and `validate()` is still called with it.
+
+**Upgrading:** nothing is required. To use the fields, branch on `ctx.page?.type` first and only then read the `ctx.navState` key that page type owns: after a fallback, `page` is the default entry and the rejected request's other keys are still present. Handle both being `undefined` — that is every run off the render path. Never use `page` to withhold: no adapter runs for a private entry, and a direct run carries no page. Best practices §1.9 has the four rules and a worked adapter. If your host caches adapter output, key it on the page and on every context key the adapter reads.
+
+## `@airo-js/ssr` 0.11.3 — 2026-11-18
+
+### Added
+- **`renderAppWithPublication` tells every adapter the entry it resolved**, as `ctx.page` and `ctx.navState`. It is the resolved page, after any fallback, never the requested one. A value a host put in those fields on `publicationCtx` is replaced; with no entry resolved both are `undefined`. A `csr-only` entry still gets them (its JSON-LD is still inlined). A private entry still runs no adapter, so on this path `page` is never private. `runPublicationAdapters` called directly forwards the context as given, so a feed endpoint or a scheduled run keeps emitting its page-less output from the same adapter.
+
+### Changed
+- **The entry is resolved once per render.** `renderAppWithPublication` resolved the entry, awaited the adapters, and then `renderAppToHTML` resolved it again from the same inputs. The two agreed because resolution is deterministic, which stopped being good enough the moment an adapter's output depended on it. The adapters and the renderer are now handed one resolved entry. `renderAppToHTML` is unchanged for its own callers, and no rendered byte changes.
+
+### Fixed
+- **An adapter that returned `null` was inlined as `<script type="application/ld+json">null</script>`**, and one that returned `undefined` threw inside `buildJsonLdScript`. Neither is inlined now. `headFromPublication({ includeJsonLd: true })` had the same hole on the compose-it-yourself path and skips them too. The adapter is still listed in `adapterResults`, and `validate()` is still called with the `null`: an adapter that should always emit rejects it there and is blocked as before.
+
+**Upgrading:** bump with `@airo-js/cartridge-kit` 0.11.2, which this version's peer range requires. If an adapter of yours returns `null` (an empty catalogue, say), your pages lose one `<script type="application/ld+json">null</script>`; if anything counts inlined blocks, expect one fewer.
+
 ## Why `replaceData` is `@airo-js/runtime` 0.11.2 alone, and why it is its own entry
 
 This release adds a new entry, `@airo-js/runtime/editor`, with one function in it. It also adds one new event, a versioned hook on the mount result, and a fix to how post-processors see an in-place swap. All of it is in one package. Nothing that exists changes signature, and no other package moves, so this is a patch on the runtime rather than a new line. The requesting consumer agreed the semantics on the bridge before the build (`msg_mvf2lxy8_1a82fa`).
