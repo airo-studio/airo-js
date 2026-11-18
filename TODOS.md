@@ -89,9 +89,9 @@ Follow-ups for the planned `@airo-js/lynx` native render adapter (one package, `
 
 ### Time HTML parsing and tree building on the UI thread
 
-**What:** add one timing row (tokenize plus tree build, per render and per facade `innerHTML` write) to the adapter's manual device script, and run it on the consumer's largest page.
+**What:** add timing rows to the adapter's manual device script and run them on the consumer's largest page: tokenize plus tree build (per render and per facade `innerHTML` write), and the two tree alternatives from `docs/designs/render-tree-contract.md`, `JSON.parse` of the page as tree JSON and a template building its tree on the device. This is gate 3 of that design.
 
-**Why:** pages arrive as server HTML, so every navigation and every `innerHTML` write from hydrate code is parsed on the thread that draws the screen. The tracer page has 84 elements; the consumer's largest page has 276, and its hydrate code writes `innerHTML` 18 times and `insertAdjacentHTML` 9 times. Nothing has been timed.
+**Why:** pages arrive as server HTML, so every navigation and every `innerHTML` write from hydrate code is parsed on the thread that draws the screen. The tracer page has 84 elements; the consumer's largest page has 276, and its hydrate code writes `innerHTML` 18 times and `insertAdjacentHTML` 9 times. In Node (V8) the tokenize takes 360–453 µs on that page, tree JSON 0.47–0.76× of that, and an on-device tree build 0.07–0.21×; the device runs PrimJS, so none of that transfers as an absolute number.
 
 **Context:** wrap the tokenizer and tree pass with a performance mark reported through the device script's collector. A simulator timing is indicative, not a phone measurement. Include the class strings in what is measured: the runtime mirrors every attribute into one or two classes (an `<img>` on the tracer page carries nine), and if that shows up, mirroring only the attribute names the build saw in selectors is the lever. Trigger: the step that extends the adapter beyond the tracer page.
 
