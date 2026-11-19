@@ -12,6 +12,8 @@ Runtime, ssr, embed, mcp and log are where they were: `RenderContext` is defined
 
 Three changes are behaviour a consumer might observe, and each has its own upgrade line: Back/Forward now replaces state instead of merging into it, the mount writes keys `initialNavState` added into a URL that lacks them, and a hash-mode navigation fires `navigation:changed` once instead of twice.
 
+**What it costs.** The closure reachable from `mountCartridge` grows by about 2.4 KB minified and 0.7 KB gzip: 28,585 → 31,057 B and 9,398 → 10,110 B (esbuild, ESM, es2022). All of it is core's navigation path, which every mount runs: the in-place apply, the ordered queue for navigations requested during another, the exact Back/Forward restore and the router echo check. cartridge-kit's factory option is tree-shaken out of this closure. The runtime budget is raised from 29 KB / 9.5 KB to 32 KB / 10 KB to pay for it. That is a deliberate line, not a silent edit, and it leaves about 130 B of gzip headroom. The embed's own bundle is unchanged at 2,248 B gzip.
+
 ## `@airo-js/core` 0.11.1 — 2026-11-19
 
 ### Added
