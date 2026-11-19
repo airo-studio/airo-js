@@ -298,16 +298,26 @@ export class QueryRouter implements IRouter {
 
   /**
    * Build a full pathname + search + hash URL with our prefixed slots
-   * updated to encode `state`. Other search params on the current URL
-   * are preserved — we delete only the OLD prefixed slots (the
-   * previous state's), then set the new ones. Host-page params that
-   * don't match the prefix (utm_*, ref, customer filters) survive.
+   * updated to encode `state`. Params that don't match the prefix
+   * (utm_*, ref, the host's own filters) are preserved. Every param that
+   * DOES match the prefix is deleted, then the slots of `state` are set:
+   * the prefix is the router's namespace, and the URL it writes holds
+   * exactly the state it was given.
+   *
+   * That includes a prefixed field the router never decoded. Without a
+   * `<prefix>nav` slot the URL decodes to no state at all
+   * (`paramsToState`), so `?airo_region=US` on its own reaches no
+   * renderer, and the mount's first write removes it. Keeping it would be
+   * worse: written back beside `<prefix>nav`, it would be decoded by the
+   * next reload or by whoever the link is shared with, but never by the
+   * page that wrote it. A host that wants such a field seeds it through
+   * `initialNavState`, the same way a server render does.
    */
   private buildUrl(state: RouteState): string {
     const params = new URLSearchParams(window.location.search);
-    // Drop any existing prefixed slots from the prior state — we'll
-    // re-set the current state's slots below. Without this, removing
-    // a field from state would leave its stale URL slot behind.
+    // Drop every prefixed slot, then set the current state's below.
+    // Without this, removing a field from state would leave its stale
+    // URL slot behind.
     for (const key of Array.from(params.keys())) {
       if (key.startsWith(this.paramPrefix)) params.delete(key);
     }

@@ -12,6 +12,7 @@ import type { IEventBus } from './events.js';
 import { EventBus } from './events.js';
 import type {
   PageRendererFactory,
+  NavigateOptions,
   NavigationState,
   SubpageActivation,
   UpdateResult,
@@ -109,7 +110,8 @@ export interface AppDeps<
  * navigation and tear the app down on host unmount.
  */
 export interface App {
-  navigate(state: Partial<NavigationState>): void;
+  /** Navigate. Same merge and options as `ctx.navigate` (see `RenderContext`). */
+  navigate(state: Partial<NavigationState>, opts?: NavigateOptions): void;
   showSubpage(subpage: SubpageActivation): void;
   getNavigationState(): NavigationState;
   /**
@@ -189,9 +191,9 @@ export function createApp<
   }
 
   return {
-    navigate(state) {
+    navigate(state, opts) {
       if (lifecycle === 'destroyed') return;
-      pageManager.navigate(state);
+      pageManager.navigate(state, opts);
     },
     showSubpage(subpage) {
       if (lifecycle === 'destroyed') return;
