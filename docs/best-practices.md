@@ -638,7 +638,7 @@ class CarouselRenderer implements PageRenderer<'product', AppCtx> {
 Four rules:
 
 1. **Return `true` only when the DOM shows `next`.** Take the keys the view can apply in place and decline the rest by returning `false`; the framework then renders the page again, as it does for a renderer without the method. Navigation state, the URL and `navigation:changed` are the same either way, so a declined key costs a render, never a stale URL.
-2. **Back and Forward arrive through the same method.** `next` is the whole history entry: a key the entry does not name is absent from `next`, never carried over from the state being left. Apply it as if the shopper had clicked to it.
+2. **Back and Forward arrive through the same method.** `next` is the whole history entry: a key the entry does not name is absent from `next`, never carried over from the state being left. Apply it as if the shopper had clicked to it. Its keys came from a URL anyone can write, so use them to look up your data and never write one into the DOM as markup. This path skips the template's escaping.
 3. **`history: 'replace'` for each step, the default push for a choice.** A carousel step that pushes fills the Back button with every slide. Push when Back should undo the change, such as opening a product from a list.
 4. **No `postRender` hook runs after an in-place apply, and `hydrate` does not run again.** Effects from the last render stay in place. A selection event the view emits fires from its own handler, once, not from a re-run of `hydrate`.
 
@@ -657,7 +657,7 @@ factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct, applyNavState: app
 
 Leave the markup as `template` would paint it for `next`, since a reload at the new URL is rendered from `template`. On a hydrate-only view the option is not an optimisation: a declined same-page navigation renders the page again, and `render` there throws.
 
-A `ctx.navigate` called from inside `render`, `hydrate` or `applyNavState` is applied after that call returns. It still costs a second pass, so resolve a fallback (empty data, an unknown id) in the template rather than by navigating from `render`.
+A `ctx.navigate` called from inside `render`, `hydrate` or `applyNavState` is a redirect. It is applied after that call returns, and it replaces the history entry the render was for rather than pushing a new one, so Back does not land on a page that redirects again. It still costs a second pass, so resolve a fallback (empty data, an unknown id) in the template rather than by navigating from `render`.
 
 ### 2.10 Cartridge metadata vs cartridge state
 

@@ -32,7 +32,7 @@ import { defineHydrateOnlyRenderer, defineSSRSafeRenderer } from '@airo-js/cartr
 import type { AiroEvent } from '@airo-js/log';
 import { resetLogLevels, resetSink, setLogLevel, setSink } from '@airo-js/log';
 
-type PageType = 'home' | 'product' | 'list';
+type PageType = 'home' | 'product' | 'list' | 'quickview';
 
 const PAGES: Page<PageType>[] = [
   { id: 'home', type: 'home', enabled: true } as Page<PageType>,
@@ -76,6 +76,8 @@ interface RendererBehaviour {
   apply?: ApplyImpl;
   /** Called inside `render` (and `hydrate`), after it is journalled. */
   onRender?: (ctx: RenderContext<PageType>) => void;
+  /** Present: the renderer implements `activateSubpage` with this body. */
+  activate?: (ctx: RenderContext<PageType>) => void;
 }
 
 function rendererFor(
@@ -97,6 +99,13 @@ function rendererFor(
       journal.calls.push(`destroy:${pageId}`);
     },
   };
+  if (behaviour.activate) {
+    const activate = behaviour.activate;
+    renderer.activateSubpage = (sub) => {
+      journal.calls.push(`activate:${pageId}:${sub.id}`);
+      activate(ctx as RenderContext<PageType>);
+    };
+  }
   if (behaviour.apply) {
     const apply = behaviour.apply;
     renderer.applyNavState = (next, previous) => {
@@ -113,6 +122,7 @@ function setup(
     behaviour?: Partial<Record<PageType, RendererBehaviour>>;
     initialNavState?: Partial<NavigationState>;
     postRender?: PageManagerOptions<PageType>['postRender'];
+    pages?: Page<PageType>[];
   } = {},
 ) {
   const journal: Journal = { calls: [], changes: [], ctxs: [] };
@@ -123,7 +133,7 @@ function setup(
   const container = document.createElement('div');
   const pm = new PageManager<PageType>({
     container,
-    pages: PAGES,
+    pages: opts.pages ?? PAGES,
     events,
     appContext: {},
     resolveRenderer: (type) => () => rendererFor(journal, type, opts.behaviour?.[type]),
@@ -131,8 +141,16 @@ function setup(
     initialNavState: opts.initialNavState,
     postRender: opts.postRender,
   });
+  live.push(pm);
   return { pm, journal, events };
 }
+
+// Every PageManager a test made, destroyed after it: a live router from an
+// earlier test would answer the next test's popstate and rewrite the URL.
+const live: PageManager<PageType>[] = [];
+afterEach(() => {
+  for (const pm of live.splice(0)) pm.destroy();
+});
 
 /** Navigate the browser to `url` and tell the router, as Back/Forward does. */
 function popTo(url: string): void {
@@ -729,6 +747,201 @@ describe('navigate during render — applied after the render returns', () => {
     pmRef = pm;
     pm.mountInitial({ hydrate: false });
     expect(journal.calls.some((c) => c.startsWith('render:list'))).toBe(false);
+  });
+});
+
+describe('history writes keep what is not ours, and redirects do not trap Back', () => {
+  test("query mode: the mount's rewrite keeps the entry's history.state", () => {
+    window.history.replaceState({ host: 'draft-42' }, '', '/shop?w_nav=product&w_item=a');
+    setup({ router: { mode: 'query', paramPrefix: 'w_' }, initialNavState: { region: 'US' } });
+    expect(new URLSearchParams(window.location.search).get('w_region')).toBe('US');
+    expect(window.history.state).toEqual({ host: 'draft-42' });
+  });
+
+  test("hash mode: a 'replace' navigation keeps the entry's history.state", () => {
+    window.location.hash = '';
+    const { pm } = setup({ router: { mode: 'hash' } });
+    pm.navigate({ page: 'product', item: 'a' });
+    window.history.replaceState({ host: 'route-7' }, '', window.location.href);
+    pm.navigate({ item: 'b' }, { history: 'replace' });
+    expect(window.location.hash).toBe('#product?item=b');
+    expect(window.history.state).toEqual({ host: 'route-7' });
+    pm.destroy();
+  });
+
+  test('path mode: replace keeps history.state too', () => {
+    window.history.replaceState({ host: 'p' }, '', '/c/product/a');
+    const { pm } = setup({ router: { mode: 'path', basePath: '/c' }, initialNavState: { region: 'US' } });
+    expect(window.history.state).toEqual({ host: 'p' });
+    pm.destroy();
+  });
+
+  test('a redirect from render replaces the entry the render was for: one entry, not two', () => {
+    let redirect = true;
+    const { pm } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      behaviour: {
+        product: {
+          onRender: (ctx) => {
+            if (redirect) ctx.navigate({ page: 'list' });
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'home' });
+    const before = window.history.length;
+
+    pm.navigate({ page: 'product' });
+
+    expect(window.history.length).toBe(before + 1);
+    expect(window.location.search).toBe('?w_nav=list');
+    expect(pm.getNavigationState().page).toBe('list');
+    redirect = false;
+  });
+
+  test('Back to an entry whose render redirects rewrites that entry and adds none, so forward history survives', () => {
+    const { pm } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      behaviour: { product: { onRender: (ctx) => ctx.navigate({ page: 'list' }) } },
+    });
+    pm.navigate({ page: 'home' });
+    const before = window.history.length;
+
+    popTo('/shop?w_nav=product');
+
+    expect(window.history.length).toBe(before);
+    expect(window.location.search).toBe('?w_nav=list');
+  });
+
+  test("an explicit history: 'push' from render is honoured", () => {
+    let redirect = true;
+    const { pm } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      behaviour: {
+        product: {
+          onRender: (ctx) => {
+            if (redirect) ctx.navigate({ page: 'list' }, { history: 'push' });
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'home' });
+    const before = window.history.length;
+    pm.navigate({ page: 'product' });
+    expect(window.history.length).toBe(before + 2);
+    redirect = false;
+  });
+});
+
+describe('queued navigations: copied, ordered, and dropped on failure', () => {
+  test('a queued navigation is a copy: mutating the object afterwards changes nothing', () => {
+    const { pm } = setup({
+      behaviour: {
+        product: {
+          onRender: (ctx) => {
+            if (ctx.navState.item) return;
+            const s: { item?: string } = { item: 'a' };
+            const o: { history?: 'push' | 'replace' } = { history: 'replace' };
+            ctx.navigate(s, o);
+            s.item = 'b';
+            o.history = 'push';
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'product' });
+    expect(pm.getNavigationState().item).toBe('a');
+  });
+
+  test("a postRender hook's navigation runs after the render's earlier redirect, so it wins", () => {
+    let pmRef: PageManager<PageType> | undefined;
+    let once = true;
+    const { pm } = setup({
+      behaviour: {
+        product: {
+          onRender: (ctx) => {
+            if (once) ctx.navigate({ page: 'list' });
+          },
+        },
+      },
+      postRender: ({ navState }) => {
+        if (once && navState.page === 'product') {
+          once = false;
+          pmRef?.navigate({ page: 'home' });
+        }
+      },
+    });
+    pmRef = pm;
+
+    pm.navigate({ page: 'product' });
+
+    expect(pm.getNavigationState().page).toBe('home');
+  });
+
+  test('a navigation:changed listener that navigates is applied after the current one, in order', () => {
+    const { pm, events, journal } = setup();
+    let once = true;
+    events.on('navigation:changed', (s: unknown) => {
+      if (once && (s as NavigationState).page === 'product') {
+        once = false;
+        pm.navigate({ page: 'list' });
+      }
+    });
+    pm.navigate({ page: 'product' });
+    expect(journal.changes.map((c) => c.page)).toEqual(['product', 'list']);
+    expect(pm.getNavigationState().page).toBe('list');
+  });
+
+  test('a subpage activation that queues a navigation and then throws drops the queue', () => {
+    const pages = [
+      ...PAGES,
+      { id: 'qv', type: 'quickview', enabled: true, parent: 'product' } as Page<PageType>,
+    ];
+    let throwOnce = true;
+    const { pm, journal } = setup({
+      pages,
+      behaviour: {
+        product: {
+          activate: (ctx) => {
+            if (!throwOnce) return;
+            throwOnce = false;
+            ctx.navigate({ page: 'list' });
+            throw new Error('activate failed');
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'product' });
+
+    expect(() => pm.navigate({ page: 'qv' })).toThrow('activate failed');
+    journal.calls.length = 0;
+    pm.navigate({ page: 'home' });
+
+    expect(pm.getNavigationState().page).toBe('home');
+    expect(journal.calls.some((c) => c.startsWith('render:list'))).toBe(false);
+  });
+
+  test('after a render threw, a router event naming that URL gets it another try', () => {
+    let throwOnce = true;
+    const { pm, journal } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      behaviour: {
+        product: {
+          onRender: () => {
+            if (!throwOnce) return;
+            throwOnce = false;
+            throw new Error('render failed');
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'home' });
+    expect(() => pm.navigate({ page: 'product' })).toThrow('render failed');
+    journal.calls.length = 0;
+
+    popTo('/shop?w_nav=product');
+
+    expect(journal.calls).toEqual(['render:product:-']);
   });
 });
 

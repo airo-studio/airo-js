@@ -128,12 +128,16 @@ export class HashRouter implements IRouter {
    * Replace current state without adding a history entry. Falls back to
    * direct hash assignment in srcDoc iframes where History API access is
    * cross-origin-restricted.
+   *
+   * The entry's `history.state` is kept. It belongs to whoever wrote it,
+   * often the host page's own router, and rewriting the URL is no reason
+   * to erase it. Every router's `replace` does the same.
    */
   replace(state: RouteState): void {
     const hash = '#' + stateToFragment(state, { pathContextKey: this.pathContextKey });
     try {
       const url = window.location.pathname + window.location.search + hash;
-      window.history.replaceState(null, '', url);
+      window.history.replaceState(window.history.state, '', url);
     } catch {
       if (window.location.hash !== hash) {
         window.location.hash = hash;
@@ -287,7 +291,8 @@ export class QueryRouter implements IRouter {
   replace(state: RouteState): void {
     const url = this.buildUrl(state);
     if (this.currentUrl() !== url) {
-      window.history.replaceState(null, '', url);
+      // Keep the entry's `history.state`: it may be the host page's.
+      window.history.replaceState(window.history.state, '', url);
     }
   }
 

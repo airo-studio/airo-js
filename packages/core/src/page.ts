@@ -140,9 +140,13 @@ export interface RenderContext<
   navState: NavigationState;
   /**
    * Navigate. `state` is merged over the current state, so pass only what
-   * changes. A navigation requested while this renderer is still inside
-   * `render` or `hydrate` is applied once that call returns, never
-   * re-entrantly.
+   * changes. A navigation requested while another is in progress (this
+   * renderer still inside `render`, `hydrate` or `applyNavState`, a
+   * `postRender` hook, a `navigation:changed` listener) is applied once
+   * that one completes, in order, never re-entrantly. One requested from
+   * inside `render`, `hydrate` or `applyNavState` is a redirect: unless
+   * `opts.history` says otherwise, it replaces the history entry instead
+   * of pushing one.
    */
   navigate: (state: Partial<NavigationState>, opts?: NavigateOptions) => void;
   /**
@@ -220,7 +224,12 @@ export interface PageRenderer<
    * `next` and `previous` are copies. During this call `ctx.navState` is
    * still `previous`; once it returns `true`, PageManager sets
    * `ctx.navState` to `next`. A `ctx.navigate` called from inside it is
-   * applied after it returns.
+   * applied after it returns, and defaults to `history: 'replace'`.
+   *
+   * On Back/Forward, `next` is decoded from the URL, so its keys other
+   * than `page` are whatever the link said. Look them up in your data;
+   * never write one into the DOM as markup. A re-render would have passed
+   * it through the template's escaping, but this path skips the template.
    */
   applyNavState?(next: NavigationState, previous: NavigationState): boolean;
 

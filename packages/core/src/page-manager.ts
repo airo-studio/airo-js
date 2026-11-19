@@ -188,14 +188,32 @@ export class PageManager<
   private router: IRouter | null = null;
   /**
    * Renderer calls in progress: `render`, `hydrate`, `applyNavState`. A
-   * `navigate` requested while this is above zero is queued in `deferred`
-   * and applied once the outermost call returns. Applying it re-entrantly
-   * ran before `activeRendererPageId` was recorded, so a renderer that
-   * navigated to its own page from `render` was rendered again, without
-   * bound.
+   * `navigate` requested inside one is a redirect, so it defaults to
+   * `history: 'replace'` (see `navigate`).
    */
   private rendererCallDepth = 0;
-  private deferred: Array<{ state: Partial<NavigationState>; opts?: NavigateOptions }> = [];
+  /**
+   * Navigations in progress (`runNavigation`). A `navigate` requested
+   * while this is above zero, from a renderer, a subpage activation, a
+   * `postRender` hook or a `navigation:changed` listener, is queued in
+   * `deferred` and applied in order once the current one completes.
+   * Applying it re-entrantly ran before `activeRendererPageId` was
+   * recorded, so a renderer that navigated to its own page from `render`
+   * was rendered again without bound, and a later request could be
+   * overtaken by an earlier queued one.
+   */
+  private navigationDepth = 0;
+  /**
+   * Queued navigations. `state` and `history` are copied when queued, so a
+   * caller that reuses or mutates its objects does not change what runs.
+   * `whole` marks a router-driven entry, which replaces the state instead
+   * of merging into it.
+   */
+  private deferred: Array<{
+    state: Partial<NavigationState>;
+    history: RouterWrite;
+    whole: boolean;
+  }> = [];
   private draining = false;
   private destroyed = false;
   /** Teardown returned by the most recent `postRender` invocation, if any. */
@@ -288,20 +306,47 @@ export class PageManager<
    * Back/Forward does not come through here: a history entry is the whole
    * state, so the router path replaces rather than merges (`initRouter`).
    *
-   * Called while a renderer is inside `render`, `hydrate` or
-   * `applyNavState`, the navigation is queued and applied once that call
-   * returns, through this same path.
+   * Called while another navigation is in progress (from a renderer, a
+   * subpage activation, a `postRender` hook or a `navigation:changed`
+   * listener), the navigation is queued and applied once that one
+   * completes, in the order requested, through this same path. One
+   * requested from inside `render`, `hydrate` or `applyNavState` is a
+   * redirect, so its default history write is `'replace'`: the entry the
+   * render was for is rewritten rather than left behind for Back to
+   * return to and redirect again.
    */
   navigate(state: Partial<NavigationState>, opts?: NavigateOptions): void {
     if (this.destroyed) return;
-    if (this.rendererCallDepth > 0) {
-      this.deferred.push({ state, opts });
-      log.debug('navigation requested during a renderer call; applied once it returns', {
+    if (this.navigationDepth > 0) {
+      this.deferred.push({
+        state: { ...state },
+        history: opts?.history ?? (this.rendererCallDepth > 0 ? 'replace' : 'push'),
+        whole: false,
+      });
+      log.debug('navigation requested during another; applied once it completes', {
         phase: 'navigate',
       });
       return;
     }
-    this.applyNavigation({ ...this.navState, ...state }, opts?.history ?? 'push');
+    const history = opts?.history ?? 'push';
+    this.runNavigation(() => this.applyNavigation({ ...this.navState, ...state }, history));
+  }
+
+  /**
+   * Run one top-level navigation, then apply what was queued during it.
+   * If it throws, what was queued is dropped: a navigation requested by a
+   * step that failed must not be applied after an unrelated later one.
+   */
+  private runNavigation(run: () => void): void {
+    this.navigationDepth++;
+    try {
+      run();
+    } catch (err) {
+      this.dropDeferred();
+      throw err;
+    } finally {
+      this.navigationDepth--;
+    }
     this.drainDeferred();
   }
 
@@ -392,7 +437,7 @@ export class PageManager<
 
   showSubpage(subpage: SubpageActivation<TPageType>): void {
     if (this.destroyed) return;
-    this.activeRenderer?.activateSubpage?.(subpage);
+    this.runNavigation(() => this.activeRenderer?.activateSubpage?.(subpage));
   }
 
   /**
@@ -431,6 +476,10 @@ export class PageManager<
    */
   hydrateEntry(pageId: PageId): void {
     if (this.destroyed) return;
+    this.runNavigation(() => this.hydrateNow(pageId));
+  }
+
+  private hydrateNow(pageId: PageId): void {
     const targetPage = this.pages.find((p) => p.id === pageId);
     if (!targetPage?.enabled || this.isGatePage(targetPage.type)) return;
 
@@ -484,9 +533,6 @@ export class PageManager<
         );
         renderer.render(this.opts.container, ctx);
       }
-    } catch (err) {
-      this.dropDeferred();
-      throw err;
     } finally {
       this.rendererCallDepth--;
     }
@@ -502,7 +548,6 @@ export class PageManager<
     });
     this.runPostRender();
     this.opts.events.emit('navigation:changed', this.navState);
-    this.drainDeferred();
   }
 
   applyPageStyles(pageId: PageId, styles: Record<string, string | number>): void {
@@ -566,8 +611,10 @@ export class PageManager<
       // Nothing to do when the URL names the state already showing. That is
       // every hash-mode `push`: assigning `location.hash` fires
       // `hashchange`, which came back here and fired `navigation:changed` a
-      // second time for one navigation.
-      if (sameRouteState(state as NavigationState, this.navState)) return;
+      // second time for one navigation. "Showing" needs a mounted renderer:
+      // after a render threw, the state names a page that is not on
+      // screen, and a router event to that URL is how it gets another try.
+      if (this.activeRenderer && sameRouteState(state as NavigationState, this.navState)) return;
       // A history entry is the whole state at that point, so restoring it
       // REPLACES the current state with the entry's, never merging into it
       // and never laying it over `initialNavState`: a key the entry does not
@@ -577,8 +624,11 @@ export class PageManager<
       // added (`initRouter`). A base here would also replay a runtime
       // remount's snapshot, which arrives as `initialNavState`, on every
       // later Back.
-      this.applyNavigation({ ...state } as NavigationState, 'none');
-      this.drainDeferred();
+      if (this.navigationDepth > 0) {
+        this.deferred.push({ state: { ...state }, history: 'none', whole: true });
+        return;
+      }
+      this.runNavigation(() => this.applyNavigation({ ...state } as NavigationState, 'none'));
     };
 
     try {
@@ -640,9 +690,6 @@ export class PageManager<
     this.rendererCallDepth++;
     try {
       renderer.render(this.opts.container, ctx);
-    } catch (err) {
-      this.dropDeferred();
-      throw err;
     } finally {
       this.rendererCallDepth--;
     }
@@ -654,8 +701,8 @@ export class PageManager<
   }
 
   /**
-   * A renderer call threw: drop what was queued. A navigation a failed
-   * renderer asked for must not be applied later, after an unrelated
+   * A navigation step threw: drop what was queued. A navigation a failed
+   * step asked for must not be applied later, after an unrelated
    * navigation the visitor made.
    */
   private dropDeferred(): void {
@@ -690,12 +737,13 @@ export class PageManager<
   }
 
   /**
-   * Apply the navigations queued while a renderer call was in progress, in
-   * order, each through the programmatic path. Runs at the end of every
-   * top-level call that can render. Bounded: see `MAX_DEFERRED_NAVIGATIONS`.
+   * Apply the navigations queued while another was in progress, in order.
+   * Each runs as a navigation of its own, so what it queues is applied
+   * after it. Runs once the outermost navigation completes. Bounded: see
+   * `MAX_DEFERRED_NAVIGATIONS`.
    */
   private drainDeferred(): void {
-    if (this.draining) return;
+    if (this.draining || this.navigationDepth > 0) return;
     this.draining = true;
     try {
       let applied = 0;
@@ -712,7 +760,16 @@ export class PageManager<
         const item = this.deferred.shift();
         if (!item) break;
         applied++;
-        this.applyNavigation({ ...this.navState, ...item.state }, item.opts?.history ?? 'push');
+        const next = (item.whole ? { ...item.state } : { ...this.navState, ...item.state }) as NavigationState;
+        this.navigationDepth++;
+        try {
+          this.applyNavigation(next, item.history);
+        } catch (err) {
+          this.dropDeferred();
+          throw err;
+        } finally {
+          this.navigationDepth--;
+        }
       }
     } finally {
       this.draining = false;
@@ -740,8 +797,7 @@ export class PageManager<
     if (!this.activeRendererPageId) return;
     const activePage = this.pages.find((p) => p.id === this.activeRendererPageId);
     if (!activePage) return;
-    this.swapRenderer(activePage);
-    this.drainDeferred();
+    this.runNavigation(() => this.swapRenderer(activePage));
   }
 
   /**
@@ -779,8 +835,7 @@ export class PageManager<
       this.activeRendererPageId = null;
       return;
     }
-    this.swapRenderer(activePage);
-    this.drainDeferred();
+    this.runNavigation(() => this.swapRenderer(activePage));
   }
 }
 

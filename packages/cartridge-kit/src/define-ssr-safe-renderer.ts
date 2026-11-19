@@ -98,6 +98,10 @@ export interface SSRSafeRendererOptions<
    * new URL is rendered from `template`, on the server or the client, so a
    * view that applies `next` differently shows the shopper two pages for
    * one URL. Listeners attached by `hydrate` stay; it does not run again.
+   *
+   * On Back/Forward `next` is decoded from the URL: look its keys up in
+   * your data, never write one into `root` as markup. This path skips the
+   * template, and with it the template's escaping.
    */
   applyNavState?: ApplyNavStateHandler<TPageType, TAppContext>;
 }
