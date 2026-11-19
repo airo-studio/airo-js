@@ -14,13 +14,14 @@ touches:
 ## Decided
 - A same-page context change asks the renderer first: optional `PageRenderer.applyNavState(next, previous)`; only `=== true` skips the destroy and render. Chosen over a `navigate(state, { render: false })` flag because Back/Forward must reach the same path, and a call-site flag cannot.
 - `navigate(state, { history: 'push' | 'replace' })`. Router-driven navigations write nothing (`RouterWrite = 'none'`), which replaced the old `suppressRouterPush` flag.
-- The router path REPLACES state with `{ ...initialNavState, ...parsedEntry }` (the mount ladder) and never merges over the current navState. Programmatic navigate still merges.
+- The router path REPLACES state with the parsed entry, exactly: no merge over the current navState, and no `initialNavState` base. It is exact because every history entry is complete: each write is the whole state, and `initRouter` rewrites the mount entry (with `replace`) whenever the URL doesn't name exactly the mounted state. Programmatic navigate still merges.
 - A `ctx.navigate` during render, hydrate or applyNavState is queued (`rendererCallDepth`) and drained after the top-level call, capped at 16 (`MAX_DEFERRED_NAVIGATIONS`).
 - QueryRouter erasing un-decoded prefixed params on its first write is intended. It is kept, and the comment is fixed.
 
 - Both cartridge-kit renderer factories (`defineSSRSafeRenderer`, `defineHydrateOnlyRenderer`) take `applyNavState(root, next, previous, ctx)` as an option, because only the factory holds root and ctx. A new optional `PageRenderer` hook needs the same treatment in both factories, or a factory-built view cannot use it. On a hydrate-only view a declined same-page navigation reaches `render`, which throws.
 
 ## Tried and ruled out
+- Rebuilding history entries on `{ ...initialNavState, ...parsed }`. The runtime remount after `update()` (mount-cartridge.ts) passes the live navState as `initialNavState`, so that base replayed the remount snapshot's keys on every later Back. The user chose the complete-entry approach in the review (2026-11-19).
 - QueryRouter tracking "owned" keys so that un-decoded prefixed params survive. Written back beside `<prefix>nav`, they would be decoded by a reload or a shared link but never by the viewer who wrote them.
 
 ## Watch out

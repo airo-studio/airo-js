@@ -566,18 +566,18 @@ export class PageManager<
       // Nothing to do when the URL names the state already showing. That is
       // every hash-mode `push`: assigning `location.hash` fires
       // `hashchange`, which came back here and fired `navigation:changed` a
-      // second time for one navigation. Compare the URL's own state, before
-      // the base below: a key the app cleared is absent from the URL it just
-      // wrote, and the base would put a seeded value back.
+      // second time for one navigation.
       if (sameRouteState(state as NavigationState, this.navState)) return;
       // A history entry is the whole state at that point, so restoring it
-      // REPLACES the current state rather than merging into it: a key the
-      // entry does not name must not survive from the state being left.
-      // The base is what a mount at that URL starts from (`initialNavState`
-      // under the URL, the same ladder as the constructor).
-      const next = { ...this.opts.initialNavState, ...state } as NavigationState;
-      if (sameRouteState(next, this.navState)) return;
-      this.applyNavigation(next, 'none');
+      // REPLACES the current state with the entry's, never merging into it
+      // and never laying it over `initialNavState`: a key the entry does not
+      // name must not survive from the state being left. That holds because
+      // every entry is complete: each write is the whole state, and the
+      // mount rewrites its own entry to include what `initialNavState`
+      // added (`initRouter`). A base here would also replay a runtime
+      // remount's snapshot, which arrives as `initialNavState`, on every
+      // later Back.
+      this.applyNavigation({ ...state } as NavigationState, 'none');
       this.drainDeferred();
     };
 
@@ -588,9 +588,14 @@ export class PageManager<
       this.router = createRouter(opt, onRouterNavigate, validPages);
       this.router.start();
       // The constructor already applied the URL via `resolveMountEntry`.
-      // When the URL named no state, write ours so the address bar
-      // reflects the entry page.
-      if (!this.router.parseCurrent()) {
+      // Unless the URL already names exactly the state showing, rewrite the
+      // current entry with it: when the URL named no state, so the address
+      // bar reflects the entry page; and when `initialNavState` added keys
+      // the URL lacks, so this entry carries them. Every history entry then
+      // holds the whole state, which is what lets Back/Forward restore an
+      // entry exactly (see `onRouterNavigate`).
+      const fromUrl = this.router.parseCurrent();
+      if (!fromUrl || !sameRouteState(fromUrl as NavigationState, this.navState)) {
         this.router.replace(this.navState as RouteState);
       }
     } catch (err) {

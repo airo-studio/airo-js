@@ -404,17 +404,57 @@ describe('the router path — a history entry replaces the state', () => {
     expect(window.history.length).toBe(before);
   });
 
-  test('the base under the entry is initialNavState, as for a mount at that URL', () => {
+  test('at mount, a URL that names a state is rewritten to carry the keys initialNavState added, without a new entry', () => {
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_item=a');
+    const before = window.history.length;
+
     const { pm } = setup({
       router: { mode: 'query', paramPrefix: 'w_' },
       initialNavState: { region: 'US' },
     });
-    pm.mountInitial({ hydrate: false });
-    pm.navigate({ page: 'product', item: 'a', region: 'CA' });
 
-    popTo('/shop?w_nav=list');
+    expect(pm.getNavigationState()).toEqual({ page: 'product', item: 'a', region: 'US' });
+    expect(new URLSearchParams(window.location.search).get('w_region')).toBe('US');
+    expect(window.history.length).toBe(before);
+  });
 
-    expect(pm.getNavigationState()).toEqual({ page: 'list', region: 'US' });
+  test('at mount, a URL that already names the whole state is left alone', () => {
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_item=a&w_region=US');
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    try {
+      setup({ router: { mode: 'query', paramPrefix: 'w_' }, initialNavState: { region: 'US' } });
+      expect(replaceState).not.toHaveBeenCalled();
+    } finally {
+      replaceState.mockRestore();
+    }
+  });
+
+  test('Back to the mount entry keeps the seeded key, because the mount entry carries it', () => {
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_item=a');
+    const { pm } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      initialNavState: { region: 'US' },
+    });
+    const mountUrl = window.location.pathname + window.location.search;
+    pm.navigate({ item: 'b', region: 'CA' });
+
+    popTo(mountUrl);
+
+    expect(pm.getNavigationState()).toEqual({ page: 'product', item: 'a', region: 'US' });
+  });
+
+  test('after a remount, a key from its snapshot does not survive Back to an entry without it', () => {
+    // A runtime remount hands the live state to the new PageManager as
+    // initialNavState; the URL already holds that state.
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_item=b&w_section=x');
+    const { pm } = setup({
+      router: { mode: 'query', paramPrefix: 'w_' },
+      initialNavState: { page: 'product', item: 'b', section: 'x' },
+    });
+
+    popTo('/shop?w_nav=product&w_item=a');
+
+    expect(pm.getNavigationState()).toEqual({ page: 'product', item: 'a' });
   });
 
   test('a router event naming the state already showing does nothing', () => {
