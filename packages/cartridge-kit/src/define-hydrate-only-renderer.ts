@@ -45,6 +45,9 @@
  *   - a remount — `update()` / `updatePages()` outside `hotSwapKeys`, where
  *     the runtime repaints rather than hydrates,
  *   - a client-side navigation to another page,
+ *   - a navigation that stays on this page but changes its context
+ *     (`ctx.navigate({ item })`, or Back to such an entry) and that
+ *     `applyNavState` did not take,
  *   - a view whose SSR was skipped (`capabilities: ['csr-only']`),
  *   - this cartridge handed to the SSR runner by mistake (`renderSSR`).
  *
@@ -53,6 +56,12 @@
  * `views[]` and load it on demand through `resolveView` / the chunk mailbox.
  * Throwing is deliberate — the alternative is a page that silently paints
  * nothing.
+ *
+ * The same-page case has a third answer: `applyNavState`, the same option
+ * `defineSSRSafeRenderer` takes. A view that changes in place (a carousel,
+ * a variant picker) applies the new state to the markup it hydrated, and is
+ * never rendered. Share the handler between the two halves, as for
+ * `hydrate`.
  */
 
 import type {
@@ -61,7 +70,7 @@ import type {
   RenderContext,
 } from '@airo-js/core';
 
-import type { HydrateCleanup } from './define-ssr-safe-renderer.js';
+import type { ApplyNavStateHandler, HydrateCleanup } from './define-ssr-safe-renderer.js';
 
 export interface HydrateOnlyRendererOptions<
   TPageType extends string,
@@ -77,6 +86,15 @@ export interface HydrateOnlyRendererOptions<
     root: HTMLElement,
     ctx: RenderContext<TPageType, TAppContext>,
   ) => HydrateCleanup | void;
+
+  /**
+   * Apply a same-page navigation to the hydrated markup in place. Same
+   * handler, same contract, as `SSRSafeRendererOptions.applyNavState`.
+   * Optional, but on a hydrate-only view it is the only way to take such a
+   * navigation: without it, or when it returns anything but `true`, the
+   * page is rendered again, and `render` here throws.
+   */
+  applyNavState?: ApplyNavStateHandler<TPageType, TAppContext>;
 }
 
 /**
@@ -107,7 +125,12 @@ export function defineHydrateOnlyRenderer<
 ): PageRendererFactory<TPageType, TAppContext> {
   return (): PageRenderer<TPageType, TAppContext> => {
     let cleanup: HydrateCleanup | void;
-    return {
+    // The root and context `hydrate` was given, for `applyNavState`.
+    let mounted:
+      | { root: HTMLElement; ctx: RenderContext<TPageType, TAppContext> }
+      | undefined;
+    const applyNavState = opts.applyNavState;
+    const renderer: PageRenderer<TPageType, TAppContext> = {
       render(_targetEl, ctx) {
         refuse('render', ctx as RenderContext<string, unknown>);
       },
@@ -115,12 +138,20 @@ export function defineHydrateOnlyRenderer<
         refuse('renderSSR', ctx as RenderContext<string, unknown>);
       },
       hydrate(targetEl, ctx) {
+        mounted = { root: targetEl, ctx };
         cleanup = opts.hydrate(targetEl, ctx);
       },
       destroy() {
         if (typeof cleanup === 'function') cleanup();
         cleanup = undefined;
+        mounted = undefined;
       },
     };
+    if (applyNavState) {
+      renderer.applyNavState = (next, previous) =>
+        mounted !== undefined &&
+        applyNavState(mounted.root, next, previous, mounted.ctx) === true;
+    }
+    return renderer;
   };
 }
