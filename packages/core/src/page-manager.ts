@@ -232,6 +232,13 @@ export class PageManager<
   private deferred: Array<{ state: Partial<NavigationState>; history: RouterWrite }> = [];
   private draining = false;
   private destroyed = false;
+  /**
+   * The last render or hydrate found no renderer for its page type: the
+   * page is waiting for its chunk, and `'renderer:missing'` has gone out
+   * for it. The router's echo of that navigation must not ask again (see
+   * `onRouterNavigate`); the recovery that follows the chunk paints it.
+   */
+  private awaitingChunk = false;
   /** Teardown returned by the most recent `postRender` invocation, if any. */
   private postRenderTeardown: (() => void) | null = null;
 
@@ -541,6 +548,7 @@ export class PageManager<
     }
 
     const factory = this.opts.resolveRenderer(targetPage.type);
+    this.awaitingChunk = !factory;
     if (!factory) {
       emitRendererMissing(this.opts.events, {
         pageType: targetPage.type,
@@ -653,13 +661,18 @@ export class PageManager<
       // Nothing to do when the URL names the state already showing. That is
       // every hash-mode `push`: assigning `location.hash` fires
       // `hashchange`, which came back here and fired `navigation:changed` a
-      // second time for one navigation. "Showing" needs a mounted renderer:
-      // after a render threw, the state names a page that is not on
-      // screen, and a router event to that URL is how it gets another try.
+      // second time for one navigation. "Showing" is a mounted renderer, or
+      // a page waiting for its chunk: the miss has been announced and the
+      // recovery paints it, so asking again only announced it twice and ran
+      // the recovery twice. After a render threw, though, the state names a
+      // page that is neither, and a router event to that URL is how it gets
+      // another try.
       // A key the URL leaves out because it holds its default is compared,
       // and restored, as that default (`navDefaults`).
       const entry = withNavDefaults({ ...state } as NavigationState, this.opts.navDefaults);
-      if (this.activeRenderer && sameRouteState(entry, this.navState)) return;
+      if ((this.activeRenderer || this.awaitingChunk) && sameRouteState(entry, this.navState)) {
+        return;
+      }
       // A history entry is the whole state at that point, so restoring it
       // REPLACES the current state with the entry's, never merging into it
       // and never laying it over `initialNavState`: a key the entry does not
@@ -714,6 +727,7 @@ export class PageManager<
     }
 
     const factory = this.opts.resolveRenderer(targetPage.type);
+    this.awaitingChunk = !factory;
     if (!factory) {
       emitRendererMissing(this.opts.events, {
         pageType: targetPage.type,
