@@ -307,6 +307,51 @@ describe('update() dispatcher', () => {
     expect(after.selected).toBe('category-shoes');
   });
 
+  test('navDefaults: the default holds, stays out of the URL, and survives a remount', async () => {
+    const original = window.location.href;
+    window.history.replaceState(null, '', '/shop');
+    try {
+      const seen: (string | undefined)[] = [];
+      const result = await mountCartridge<TestData, TestConfig>({
+        cartridge: fakeCartridge({
+          transformers: [
+            {
+              name: 'region-probe',
+              isEnabled: () => true,
+              transform: (data, ctx) => {
+                seen.push(ctx.navState.region);
+                return data;
+              },
+              errorPolicy: 'fail-render',
+            },
+          ],
+        }),
+        config: { locale: 'en-US' },
+        template: fakeTemplate(),
+        host,
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'query', paramPrefix: 'w_' },
+        navDefaults: { region: 'US-NY' },
+      });
+      if (result.blocked) throw new Error('expected unblocked');
+
+      expect(result.app.getNavigationState().region).toBe('US-NY');
+      expect(seen).toEqual(['US-NY']);
+      expect(window.location.search).not.toContain('w_region');
+
+      const update = await result.update({ locale: 'fr-FR' });
+      expect(update.mode).toBe('remount');
+      expect(result.app.getNavigationState().region).toBe('US-NY');
+      expect(window.location.search).not.toContain('w_region');
+
+      result.app.navigate({ region: 'US-CA' });
+      expect(new URLSearchParams(window.location.search).get('w_region')).toBe('US-CA');
+      result.destroy();
+    } finally {
+      window.history.replaceState(null, '', original);
+    }
+  });
+
   test('remount swaps the underlying App handle behind the getter', async () => {
     const result = await mountCartridge<TestData, TestConfig>({
       cartridge: fakeCartridge(),

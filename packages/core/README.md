@@ -7,9 +7,9 @@ The runtime engine for the airo framework. Pure rendering primitives — no doma
 ## What's in here
 
 - **App lifecycle** — `createApp`, `App`, `AppDeps`, lifecycle FSM
-- **Page rendering** — `PageManager`, `PageRenderer`, `PageRendererFactory`, `RenderContext`
+- **Page rendering** — `PageManager`, `PageRenderer` (with the optional `applyNavState`, for a view that applies a same-page navigation in place instead of being rendered again), `PageRendererFactory`, `RenderContext`
 - **Schema** — `Page`, `PageLayout`, `Region`, `Slot`, `AppConfig`, `ComponentSettings`
-- **Navigation** — `HashRouter` / `PathRouter` / `QueryRouter` (built from a `RouterOption` by `createRouter`), `NavigationState`, `resolveMountEntry` (the URL > `initialNavState` > default-entry ladder as one function, shared by `PageManager`, the SSR runner and the runtime's gate phase), `buildCrumbs` (data-only trail helper; cartridges render their own breadcrumb DOM)
+- **Navigation** — `HashRouter` / `PathRouter` / `QueryRouter` (built from a `RouterOption` by `createRouter`), `NavigationState`, `NavigateOptions` (`{ history: 'push' | 'replace' }` on `ctx.navigate` / `app.navigate`), `navDefaults` on `createApp` (values a context key holds whenever nothing names it, left out of the URL until they change: for state the host derives, such as a region from location), `resolveMountEntry` (the URL > `initialNavState` > default-entry ladder as one function, shared by `PageManager`, the SSR runner and the runtime's gate phase), `buildCrumbs` (data-only trail helper; cartridges render their own breadcrumb DOM)
 - **Events** — `EventBus`, `IEventBus` (snapshot-semantics observer)
 - **Style isolation** — `IsolationRoot`, `setupIsolationRoot`, `wrapInShadow` (Shadow DOM strategies: `light` / `shadow`; framework ships zero CSS — cartridges own every rule inside the shadow root)
 - **Theming** — `Theme` (CSS custom-property injection + `customCSS` escape hatch)

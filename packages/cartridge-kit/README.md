@@ -18,7 +18,7 @@ The cartridge contract for the airo framework. Defines the API surface every car
 
 ## Three contract guarantees
 
-1. **Snapshot fidelity.** Views, MCP tools, and publication adapters all consume the SAME post-Transformer snapshot. No drift between what the rendered widget shows, what an agent answers, and what a downstream indexer consumes.
+1. **Snapshot fidelity.** Views, MCP tools, and publication adapters all consume the SAME post-Transformer snapshot. No drift between what the rendered widget shows, what an agent answers, and what a downstream indexer consumes. On the render path that includes which page: `PublicationContext.page` and `.navState` carry the entry `renderAppWithPublication` resolved, so an output inlined beside a deep-linked page can describe that page. Both are absent when adapters run with no page.
 2. **Coverage gating.** Adapters and MCP tools declare `requires` (schema field paths). `runPublicationAdapters` and `dispatchTool` both skip a declaration whose `required: 'always'` paths hold no value in the snapshot, rather than emit broken output — sharing one predicate, `missingRequiredPaths`, exported from this package so the two surfaces cannot disagree about which snapshots are answerable. `'preferred'` and `'optional'` do not gate; host apps surface "this adapter needs field X" to the user via that metadata. Paths are typed against the snapshot (`SchemaFieldRef<TData>`), so a path the snapshot cannot have — `product.name` against `products: Product[]`, or `artists.name` where a segment after an array must be an index — is a compile error at the declaration rather than a skipped adapter at publish time.
 3. **Validation as a hard gate.** `validate(output)` runs before the host app publishes. If `valid: false`, the host app refuses to serve the output. Output trust > publish velocity.
 
@@ -69,6 +69,30 @@ my-cartridge/
 `runtime.ts` exports a `Cartridge` with `publicationAdapters` and `mcpTools` undefined. `full.ts` re-exports the same `Cartridge` but with those slots populated. Browser builds import from `<my-cartridge>/runtime`; SSR / publication-runner builds import from `<my-cartridge>/full`.
 
 This is **transparent**: no build-time magic, no conditional exports tooling. Cartridge author writes the split once. Bundlers tree-shake at the package boundary; nothing leaks.
+
+### The browser half of a view: listeners without templates (0.11.1)
+
+The two-envelope split above keeps adapters and MCP tools out of the browser. It does not keep out **view templates**, and on a server-rendered site those are usually bigger: `defineSSRSafeRenderer` takes `template` as a plain field and closes over it, so the bundle holds the template and everything it imports — markup helpers, UI components, copy. A consumer measured two-thirds of their entry bundle as markup code that a hydrate mount never calls.
+
+Chunking does not remove it. Reaching `hydrate()` means resolving the view, which means fetching the chunk the template sits in. The template has to be **absent from the browser's module graph**, not deferred inside it.
+
+So split the view the same way as the cartridge — one `hydrate` handler, imported by both halves:
+
+```ts
+// hydrate.ts — shared, so listeners cannot drift
+export function hydrateProduct(root: HTMLElement, ctx: Ctx) { … }
+
+// cartridge.server.ts
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct })
+
+// cartridge.browser.ts — nothing in its graph imports the template
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct })
+capabilities: [hydrate-only]
+```
+
+`PageManager.hydrateEntry` calls `hydrate()` and never `render()`, so a `mode: hydrate` mount needs nothing else. `render` and `renderSSR` on the browser half throw, naming the page: they are reachable only from a `mode: csr` mount, a remount after `update()`, a client-side navigation, a `csr-only` view, or the browser cartridge reaching the SSR runner by mistake. If your site takes one of those paths, give that page a full renderer in the browser too, or leave it out of `views[]` and load one through `resolveView` / the chunk mailbox.
+
+A navigation that stays on the page and changes its context (`ctx.navigate({ item })`, or Back to such an entry) renders the page again too, and so throws on the browser half. A view that changes in place takes it with `applyNavState(root, next, previous, ctx)`, which both factories accept. Write it once and give it to both halves, as with `hydrate`. Return `true` when the markup shows `next`. Best practices §2.9b has the rules.
 
 ### errorPolicy on Transformers
 

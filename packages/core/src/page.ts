@@ -27,6 +27,21 @@ export interface NavigationState {
   [key: string]: string | undefined;
 }
 
+/**
+ * Options for a programmatic `navigate()` — `ctx.navigate` inside a
+ * renderer, `app.navigate` from the host.
+ */
+export interface NavigateOptions {
+  /**
+   * How the router records this navigation. `'push'` (the default) adds a
+   * history entry, so Back returns to the state before it. `'replace'`
+   * rewrites the current entry: use it for state that should be in the
+   * shareable URL but not in the Back stack, such as each step of a
+   * carousel. Ignored when the App runs without a router.
+   */
+  history?: 'push' | 'replace';
+}
+
 export interface SubpageActivation<TPageType extends string = string> {
   type: TPageType;
   id: PageId;
@@ -117,8 +132,23 @@ export interface RenderContext<
   pages: ReadonlyArray<Page<TPageType>>;
   app: TAppContext;
   events: IEventBus;
+  /**
+   * The navigation state this renderer is showing. Set at render; after a
+   * navigation the renderer applied in place (`applyNavState` returned
+   * `true`), PageManager updates it on this same object.
+   */
   navState: NavigationState;
-  navigate: (state: Partial<NavigationState>) => void;
+  /**
+   * Navigate. `state` is merged over the current state, so pass only what
+   * changes. A navigation requested while another is in progress (this
+   * renderer still inside `render`, `hydrate` or `applyNavState`, a
+   * `postRender` hook, a `navigation:changed` listener) is applied once
+   * that one completes, in order, never re-entrantly. One requested from
+   * inside `render`, `hydrate` or `applyNavState` is a redirect: unless
+   * `opts.history` says otherwise, it replaces the history entry instead
+   * of pushing one.
+   */
+  navigate: (state: Partial<NavigationState>, opts?: NavigateOptions) => void;
   /**
    * Forward into the host's live config-delta dispatcher
    * (`MountCartridgeResult.update()` from `@airo-js/runtime`). When the
@@ -174,6 +204,34 @@ export interface PageRenderer<
   hydrate?(targetEl: HTMLElement, ctx: RenderContext<TPageType, TAppContext>): void;
 
   activateSubpage?(subpage: SubpageActivation<TPageType>): void;
+
+  /**
+   * Apply a navigation to this renderer's own page in place, instead of
+   * being destroyed and rendered again. Called when a navigation resolves
+   * to the page this renderer is showing and changes its context (any key
+   * other than `page`), whatever started it: `ctx.navigate`, the host's
+   * `app.navigate`, or Back/Forward.
+   *
+   * Return `true` when the DOM now shows `next`. Return anything else, or
+   * throw, and PageManager destroys this renderer and renders the page
+   * again, exactly as for a renderer without this method. So a renderer
+   * can take the keys it animates (a selected item) and decline the rest.
+   *
+   * Either way, navigation state, the URL and `navigation:changed` are
+   * the same: only the destroy and render are skipped. No `postRender`
+   * hook runs after an in-place apply, because nothing was rendered.
+   *
+   * `next` and `previous` are copies. During this call `ctx.navState` is
+   * still `previous`; once it returns `true`, PageManager sets
+   * `ctx.navState` to `next`. A `ctx.navigate` called from inside it is
+   * applied after it returns, and defaults to `history: 'replace'`.
+   *
+   * On Back/Forward, `next` is decoded from the URL, so its keys other
+   * than `page` are whatever the link said. Look them up in your data;
+   * never write one into the DOM as markup. A re-render would have passed
+   * it through the template's escaping, but this path skips the template.
+   */
+  applyNavState?(next: NavigationState, previous: NavigationState): boolean;
 
   applyPageStyles?(styles: Record<string, string | number>): void;
   applyComponentStyles?(componentId: string, styles: Record<string, string | number>): void;

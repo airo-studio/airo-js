@@ -20,6 +20,13 @@
  * is allowed and is a changelog line — the gate exists so growth is a
  * decision, not a discovery.
  *
+ * Raised for core 0.11.1 to 32 KB / 10 KB: the line measures 31,055 B /
+ * 10,115 B, from 28,585 B / 9,398 B on 0.11.0 (+2,470 B / +717 B). That is
+ * in-place navigation (`PageRenderer.applyNavState`), the ordered queue for
+ * navigations requested during another, the exact Back/Forward restore,
+ * the router echo check and `navDefaults`, all of it on the navigation path
+ * every mount runs.
+ *
  * Needs sibling packages built (`pnpm build` at the root) because the
  * peers resolve to their `dist` through the workspace links.
  */
@@ -28,8 +35,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
-const MAX_MIN = 29 * 1024;       // 29 KB
-const MAX_GZIP = 9.5 * 1024;     // 9.5 KB
+const MAX_MIN = 32 * 1024;       // 32 KB (29 KB until core 0.11.1)
+const MAX_GZIP = 10 * 1024;      // 10 KB (9.5 KB until core 0.11.1)
 
 // Resolved from this file, not the cwd, so the gate measures the same entry
 // however it is invoked.

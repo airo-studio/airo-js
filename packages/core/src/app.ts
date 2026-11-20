@@ -12,6 +12,7 @@ import type { IEventBus } from './events.js';
 import { EventBus } from './events.js';
 import type {
   PageRendererFactory,
+  NavigateOptions,
   NavigationState,
   SubpageActivation,
   UpdateResult,
@@ -80,6 +81,13 @@ export interface AppDeps<
    */
   initialNavState?: Partial<NavigationState>;
   /**
+   * The value each listed context key holds whenever nothing names it,
+   * kept out of the URL while it holds that value: for state the host
+   * derives (a region from location) rather than the visitor chooses.
+   * Forwarded to `PageManagerOptions.navDefaults`; see there.
+   */
+  navDefaults?: Readonly<Record<string, string>>;
+  /**
    * Host-supplied live config-delta dispatcher. When provided,
    * `PageManager` threads it into every `RenderContext` as
    * `ctx.update`, letting renderers fire delta updates from inside
@@ -109,7 +117,8 @@ export interface AppDeps<
  * navigation and tear the app down on host unmount.
  */
 export interface App {
-  navigate(state: Partial<NavigationState>): void;
+  /** Navigate. Same merge and options as `ctx.navigate` (see `RenderContext`). */
+  navigate(state: Partial<NavigationState>, opts?: NavigateOptions): void;
   showSubpage(subpage: SubpageActivation): void;
   getNavigationState(): NavigationState;
   /**
@@ -172,6 +181,7 @@ export function createApp<
     isGatePage: deps.isGatePage,
     enableRouter: deps.enableRouter,
     initialNavState: deps.initialNavState,
+    navDefaults: deps.navDefaults,
     hostUpdate: deps.hostUpdate,
     postRender: deps.postRender,
   });
@@ -189,9 +199,9 @@ export function createApp<
   }
 
   return {
-    navigate(state) {
+    navigate(state, opts) {
       if (lifecycle === 'destroyed') return;
-      pageManager.navigate(state);
+      pageManager.navigate(state, opts);
     },
     showSubpage(subpage) {
       if (lifecycle === 'destroyed') return;

@@ -56,7 +56,29 @@ interface JsonLdGraph {
   '@graph': Record<string, unknown>[];
 }
 
-export const jsonLdAdapter: PublicationAdapter<ProductSnapshot, JsonLdGraph, SharedConfig> = {
+type CatalogueProduct = ProductSnapshot['products'][number];
+
+function productNode(p: CatalogueProduct): Record<string, unknown> {
+  return {
+    '@type': 'Product',
+    gtin13: p.gtin,
+    name: p.title,
+    brand: { '@type': 'Brand', name: p.brand },
+    image: p.images,
+    offers: p.offers.map((o) => ({
+      '@type': 'Offer',
+      price: o.price,
+      priceCurrency: o.currency,
+      availability: `https://schema.org/${o.availability === 'in_stock' ? 'InStock' : 'OutOfStock'}`,
+      url: o.url,
+    })),
+  };
+}
+
+// `| null`: on a product page whose `productId` names nothing, this adapter
+// publishes nothing (the view shows its "not found" state there). The type
+// has to say so, and `validate` has to accept it.
+export const jsonLdAdapter: PublicationAdapter<ProductSnapshot, JsonLdGraph | null, SharedConfig> = {
   id: 'schema-org-json-ld',
   displayName: 'Schema.org JSON-LD',
   description: 'Inline structured data for Google Rich Results.',
@@ -73,25 +95,24 @@ export const jsonLdAdapter: PublicationAdapter<ProductSnapshot, JsonLdGraph, Sha
   requires: [{ path: 'products', required: 'always' }],
   generate: async (
     snapshot: ProductSnapshot,
-    _ctx: PublicationContext<SharedConfig>,
-  ): Promise<JsonLdGraph> => {
-    // Stub — real impl projects ProductSnapshot into Product/Offer/AggregateOffer nodes.
+    ctx: PublicationContext<SharedConfig>,
+  ): Promise<JsonLdGraph | null> => {
+    // One snapshot, several pages. `renderAppWithPublication` puts the
+    // entry it resolved on the context, so the block inlined beside a
+    // deep-linked product describes that product instead of the catalogue.
+    //
+    // Page type FIRST, then the key that page type owns: after a fallback
+    // `page` is the default entry while `navState` still carries the
+    // rejected request's `productId`.
+    if (ctx.page?.type === 'product') {
+      const shown = snapshot.products.find((p) => p.id === ctx.navState?.productId);
+      return shown ? { '@context': 'https://schema.org', '@graph': [productNode(shown)] } : null;
+    }
+    // Every other page, and every run with no page at all (a feed
+    // endpoint or a schedule calling `runPublicationAdapters` directly).
     return {
       '@context': 'https://schema.org',
-      '@graph': snapshot.products.map((p) => ({
-        '@type': 'Product',
-        gtin13: p.gtin,
-        name: p.title,
-        brand: { '@type': 'Brand', name: p.brand },
-        image: p.images,
-        offers: p.offers.map((o) => ({
-          '@type': 'Offer',
-          price: o.price,
-          priceCurrency: o.currency,
-          availability: `https://schema.org/${o.availability === 'in_stock' ? 'InStock' : 'OutOfStock'}`,
-          url: o.url,
-        })),
-      })),
+      '@graph': snapshot.products.map(productNode),
     };
   },
   validate: () => PASS,

@@ -24,15 +24,23 @@ Execute a cartridge's `PublicationAdapter`s and return per-adapter results. Use 
 
 Filterable by `id`, `format`, and `delivery`.
 
+The context is forwarded as you give it. `ctx.page` and `ctx.navState` are set by `renderAppWithPublication`, not here, so an adapter run from a feed endpoint or a schedule sees neither and emits its page-less output. If you set them yourself, you own their agreement with whatever you render.
+
 ### `renderAppWithPublication(opts)`
 
 Combines the above. Renders the entry page AND inlines the cartridge's `inline-in-host` JSON-LD outputs as `<script type="application/ld+json">` tags before the widget markup. The SEO landing path.
 
 JSON-LD payloads are escaped against `</script>` breakout — safe to inline strings from snapshot fields without manual sanitisation.
 
+**The page adapters are told (0.11.3).** Every adapter this runs receives the entry it resolved: `ctx.page` (the `Page` the view gets) and `ctx.navState` (the state the view gets, frozen). It is the resolved page, after any fallback, and the renderer is handed the same one — the entry is resolved once per render. So an inlined output can describe the page that rendered: one `Product` on a deep-linked product page, not the whole catalogue. Anything a host put in those two fields on `publicationCtx` is replaced. Branch on `page.type` before reading a `navState` key: after a fallback the page is the default entry and the rejected request's other keys are still there.
+
+**An adapter that publishes nothing (0.11.3).** An adapter returns `null` when it has nothing to say for this render. It is listed in `adapterResults` and no script is inlined for it; `headFromPublication({ includeJsonLd: true })` skips it too. Before 0.11.3 it was inlined as a script whose whole body was `null`. `validate()` is still called with the `null`.
+
 **Private pages (0.11.0).** A `Page.private: true` entry is refused, not published: no adapter runs, nothing is inlined, and the result is `{ html: '', skipped: { reason: 'private' }, gates }` — a 401 for a root-mounted host. Read `fellBack.reason === 'unknown-page'` first (the two can co-occur; an unknown url is a 404 whatever the fallback page's privacy). Pass `renderPrivate: true` only once your handler has verified a session for this request; the page then renders as HTML only, still adapter-free. `renderPrivate: { satisfiedGates: [...] }` names the private-scoped gates the render met when there is more than one. `skipped.reason` is an open union (`'csr-only' | 'private' | …`) — branch on the reason, never on presence.
 
 **Unknown urls (0.11.1).** A requested page id that names nothing falls back to the default entry and reports `fellBack: { reason: 'unknown-page' }`. That fallback is mandatory for a widget on someone else's page. A surface that owns its urls answers 404 from `fellBack`, and should also pass `unknownPage: 'refuse'`. The result is then `{ html: '', adapterResults: [], gates: { pending: [], satisfied: [] }, fellBack }`: the fallback page is not rendered, no adapter runs, and the fallback is logged at `debug` instead of `warn`. Only `'unknown-page'` is refused; a disabled page, a subpage and a gate page still fall back. `renderAppToHTML` takes the same option on its deps.
+
+**hreflang (0.11.2).** `headFromPublication` folds a crawler surface's `alternates: [{ hreflang, href }]` into `links: [{ rel: 'alternate', href, attrs: { hreflang } }]`. `defineCrawlerSurfaceAdapter` has emitted that field since 0.11.0 and this helper dropped it, so a two-language site served a canonical and no hreflang unless the host mapped it itself. The publish gate applies as everywhere else: an output `validate()` rejected contributes nothing. The patch replaces `links` rather than merging into yours — spread it first and put your own `links` after, or feed them through the adapter's `alternates` selector.
 
 **`gates: { pending, satisfied }`** on every result: the enabled gates the client's `mountCartridge` will run for this entry page (emit `data-airo-gate="pending"` on the mount root to hide until they resolve) and the `appliesTo: 'private'` gates a private render already met (emit them as `data-airo-gates-satisfied` and pass them to `mountCartridge({ satisfiedGates })`). The runner never runs gates — server-rendered HTML is un-gated by guarantee; private pages are refused, not gated.
 

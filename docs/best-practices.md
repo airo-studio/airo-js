@@ -211,6 +211,25 @@ const fullStoreTemplate: Template<MyConfig> = {
 
 **Consumes POST-Transformer data.** Same as MCP tools. The "snapshot fidelity" contract guarantee: views, MCP tools, and publication adapters all see the same data.
 
+**An adapter on the render path is told which page rendered (0.11.3).** `renderAppWithPublication` puts the entry it resolved on the context: `ctx.page` is the `Page` the view receives as `ctx.page`, and `ctx.navState` is the state the view receives as `ctx.navState`. A multi-page cartridge over one snapshot needs this. Without it the widget opens on the deep-linked product while the JSON-LD beside it describes the whole catalogue, on every page. Four rules:
+
+- **Branch on `page.type` first, then read the context key that page type owns.** After a fallback (an unknown, disabled, subpage or gate id) `page` is the default entry while `navState` still carries the rejected request's other keys, exactly as the view is handed them. An adapter keyed on `navState.productId` alone describes a product beside a rendered listing.
+- **Both are absent off the render path.** `runPublicationAdapters` called directly (a feed endpoint, a schedule) forwards the context it was given, so the same adapter emits its page-less output there. Handle `undefined`; the types make you.
+- **`page` chooses what to describe. It never withholds.** No adapter runs for a `private` entry on the render path, and a direct call may carry no page at all, so a check on `page.private` protects nothing. What may be published is decided by what the snapshot holds (§4.9).
+- **Return `null` to publish nothing.** That covers a page the adapter has nothing to say about, and a key that names nothing in the snapshot (answer the way the view does). `TOutput` must include `null`, and `validate()` is still called with it: accepting `null` is how an adapter says it published nothing on purpose. Nothing is inlined for a `null` output.
+
+```ts
+generate: async (snapshot, ctx) => {
+  if (ctx.page?.type === 'product') {
+    const shown = snapshot.products.find((p) => p.id === ctx.navState?.productId);
+    return shown ? productNode(shown) : null; // the view shows "not found": publish nothing
+  }
+  return itemList(snapshot.products); // listing pages, and every page-less run
+},
+```
+
+Keys other than `page` are url input your host decoded: use one to look something up, never as content to emit. An output that depends on the page must also be cached per page — a host that reuses adapter output inside `refreshCadence` keys it on `page.id` and on every context key the adapter reads.
+
 **Validation is a hard gate (default).** `onValidationFail: 'block-publish'` is correct for almost all cases. `'publish-with-warnings'` only when downstream consumers (Google Merchant Center, Amazon Listings) have a "warnings allowed" mode.
 
 **`requires` enforces coverage — actually, as of 1.0.** Declare every schema field path the adapter needs. `runPublicationAdapters` checks the entries marked `required: 'always'` **before** calling `generate()`; if any hold no value in the snapshot the adapter does not run, and its result carries `included: false` plus `skipped: { reason: 'missing-required-fields', missing }` naming the absent paths.
@@ -589,6 +608,67 @@ class CategoriesRenderer implements PageRenderer<'categories', AppCtx> {
 
 If a future cartridge needs dynamic page-graph composition, the framework adds `findNextEnabledPage(pages, fromId, direction)` to `@airo-js/core` (where `Page<T>` lives). Don't lift dynamic walks into individual cartridges.
 
+### 2.9b State in the URL without a re-render — `applyNavState`
+
+**The trap:** a view that changes in place (a carousel, a variant picker, tabs) has state that belongs in the shareable URL, so a shopper can copy it and a server render can open on it. `ctx.navigate({ item })` puts it there, but a context change on the same page destroys the renderer and renders it again: the transition is cut off, focus falls to `<body>`, and `hydrate` runs again, announcing the selection a second time. The workaround, calling `history.replaceState` from the view, leaves navigation state behind the URL, so `getNavigationState()` and Back/Forward disagree with what the address bar shows, and it re-implements the router's encoding for each router mode.
+
+**The fix:** implement `applyNavState(next, previous)` on the renderer and navigate as usual.
+
+```ts
+class CarouselRenderer implements PageRenderer<'product', AppCtx> {
+  private carousel!: Carousel;
+
+  render(targetEl, ctx) {
+    this.carousel = new Carousel(targetEl, ctx.navState.item);
+    this.carousel.onMove((item) => ctx.navigate({ item }, { history: 'replace' }));
+  }
+
+  applyNavState(next, previous) {
+    if (next.sort !== previous.sort) return false; // a new list: render again
+    this.carousel.show(next.item); // already there after a click; slides on Back
+    return true;
+  }
+
+  destroy() {
+    this.carousel.dispose();
+  }
+}
+```
+
+Four rules:
+
+1. **Return `true` only when the DOM shows `next`.** Take the keys the view can apply in place and decline the rest by returning `false`; the framework then renders the page again, as it does for a renderer without the method. Navigation state, the URL and `navigation:changed` are the same either way, so a declined key costs a render, never a stale URL.
+2. **Back and Forward arrive through the same method.** `next` is the whole history entry: a key the entry does not name is absent from `next`, never carried over from the state being left. Apply it as if the shopper had clicked to it. Its keys came from a URL anyone can write, so use them to look up your data and never write one into the DOM as markup. This path skips the template's escaping.
+3. **`history: 'replace'` for each step, the default push for a choice.** A carousel step that pushes fills the Back button with every slide. Push when Back should undo the change, such as opening a product from a list.
+4. **No `postRender` hook runs after an in-place apply, and `hydrate` does not run again.** Effects from the last render stay in place. A selection event the view emits fires from its own handler, once, not from a re-run of `hydrate`.
+
+**With the renderer factories (§5.2, §5.4a),** pass it as an option. Both `defineSSRSafeRenderer` and `defineHydrateOnlyRenderer` accept `applyNavState(root, next, previous, ctx)`, called with the root the view painted or hydrated. Give the same handler to both halves of a view, as you do with `hydrate`:
+
+```ts
+// hydrate.ts — shared by both halves
+export function applyProduct(root: HTMLElement, next: NavigationState, previous: NavigationState): boolean {
+  if (next.sort !== previous.sort) return false;
+  return slideTo(root, next.item);
+}
+
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct, applyNavState: applyProduct })
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct, applyNavState: applyProduct })
+```
+
+Leave the markup as `template` would paint it for `next`, since a reload at the new URL is rendered from `template`. On a hydrate-only view the option is not an optimisation: a declined same-page navigation renders the page again, and `render` there throws.
+
+A `ctx.navigate` called from inside `render`, `hydrate` or `applyNavState` is a redirect. It is applied after that call returns, and it replaces the history entry the render was for rather than pushing a new one, so Back does not land on a page that redirects again. It still costs a second pass, so resolve a fallback (empty data, an unknown id) in the template rather than by navigating from `render`.
+
+**Count views from what the view announces, not from `navigation:changed` alone.** An in-place step produces two signals in this order. First the view's own selection event fires from its handler, for the shopper's move. Then `navigation:changed` fires with no render behind it. A tracker that reads every `navigation:changed` without a fresh announcement as a new page view counts the step twice, and the second time the product is unknown. Treat a navigation whose only change is the key the view just announced as part of that announcement.
+
+**Keep values you derive out of the URL with `navDefaults`.** Everything in navigation state reaches the URL on the next write. That is right for what the shopper chose and wrong for what the host worked out, such as a region from the visitor's location or a locale from the request. A shared link then carries the sharer's region, and because the URL outranks every other source, it overrides the recipient's. Pass such a key in `navDefaults` (on `mountCartridge` or `createApp`) instead of `initialNavState`:
+
+```ts
+await mountCartridge({ ...opts, navDefaults: { region: regionFromGeo } });
+```
+
+The key holds that value whenever nothing names it, and the router leaves it out of the URL until the shopper changes it. A link with an explicit region still opens on that region, and Back to an entry that does not name it restores the default. On the server, lay the same values under the URL's state in `initialNavState`, so both sides render one state.
+
 ### 2.10 Cartridge metadata vs cartridge state
 
 **Pattern recognised across `Gate.persist`, `DataSource.cacheTtlMs`, `PublicationAdapter.refreshCadence`:** declarative metadata that the *host app* implements behaviourally.
@@ -858,7 +938,7 @@ The order of the three reads matters. **First `fellBack.reason === 'unknown-page
 
 **Key the private slice on the page, never on the session.** `member` is built only when the resolved entry page is `private: true`. A signed-in visitor's public pages are byte-identical to an anonymous visitor's, which is what makes them shared-cacheable at all; a slice keyed on "session present" leaks member data into a `Cache-Control: public` response the moment someone signed in loads the home page. Pin it with a smoke check.
 
-**Member data never enters a snapshot built for a machine route.** Adapters and MCP tools are page-blind: they publish whatever the snapshot holds. `/sitemap.xml`, `/llms.txt`, `/mcp/call` and every feed route build their snapshots without a session, so the private slice is simply never there. A host that co-locates tool dispatch with the page render — one snapshot, one call, every tool answer stamped with the page's id — splits the two on a private request; the tools never see the private slice.
+**Member data never enters a snapshot built for a machine route.** Adapters and MCP tools publish whatever the snapshot holds. An adapter on the render path is told the page (`ctx.page`, §1.9), but only to choose what to describe: none runs for a private entry, and off the render path it is told no page at all, so an adapter checking `page.private` protects nothing. `/sitemap.xml`, `/llms.txt`, `/mcp/call` and every feed route build their snapshots without a session, so the private slice is simply never there. A host that co-locates tool dispatch with the page render — one snapshot, one call, every tool answer stamped with the page's id — splits the two on a private request; the tools never see the private slice.
 
 **Headers are the guard.** `Cache-Control: private, no-store`, `Vary: Cookie`, `X-Robots-Tag: noindex` and a `<meta name="robots" content="noindex">` on every private response; `Disallow` the private prefixes in `robots.txt`. Derive them from the resolved entry page's `private` flag, never from a path prefix.
 
@@ -867,6 +947,22 @@ The order of the three reads matters. **First `fellBack.reason === 'unknown-page
 **What the framework does not do.** No identity side channel into views: the snapshot your handler builds for a verified session is the per-request reference, and it stays byte-identical on hydrate. No gate verdict cache across remounts: a remount exists to get fresh data. No `resolveGate` chunking hook yet: `await import()` inside `mount()` keeps a gate's SDK out of the landing bundle, and `gate:precheck` gives the ratio that would justify a hook. OAuth for an MCP endpoint is host-side and not this section.
 
 ---
+
+### 4.10 Time-dependent data — the clock is an input, and it decides your cache
+
+A price that moves, a countdown, an offer that expires: the value depends on *when* you rendered, and `template(ctx)` may not read a clock (§5.1). So the host picks the instant, once, and hands it in.
+
+**Choose `now` per request, in the host, and put it in the snapshot.** The DataSource takes it as input; the snapshot carries the derived values *and the instant they are for* (`asOf`). Every surface — the page, the JSON-LD, `llms.txt`, an MCP tool — then reads one set of numbers that cannot disagree, and a test can pin an instant. Never compute the time inside a transformer: transformers are pure and shape-preserving, and `now` is an input.
+
+**Print the value the current window opened at, not the value at `now`.** A page that says what the price *became* at the start of the window it belongs to is true for the whole life of that window — including in a shared cache — while a page that says `priceAt(now)` is stale a second after it is served. That is the difference between a cache you can reason about and one you cannot.
+
+**The browser must adopt the server's instant, not its own.** A hydrating mount runs your DataSource again in the browser; if it picks up a fresh clock, the snapshot no longer matches the markup it just adopted. Either embed the snapshot the page was rendered from and pass it as `preloadedData`, or print `asOf` on the mount root and feed it back through `dataSourceInput`. A ticking display belongs in `hydrate()`, which may read the clock — return a cleanup that clears the interval.
+
+**Cache to the end of the window.** `Cache-Control: public, max-age=<seconds until the window ends>` (and the same `s-maxage`), falling back to `no-store` when that is under a second or two. The HTML and its JSON-LD came from one snapshot, so a cached copy is internally consistent; the only risk is that it outlives its window. Machine routes quoting the same values — `llms.txt`, a feed — need the same ceiling, or should leave the moving value out.
+
+**Expiry is data, not validation.** `validate(output)` sees only the adapter's output: no snapshot, no context, no clock. "Sold", "ended", "withdrawn" belong in the snapshot, and each surface decides from there — an `Offer` carrying `availability: SoldOut`, or a `generate()` that omits the price so `validate()` blocks that block while the page still renders (§5.10a's canonical rule, applied to time).
+
+**One caveat outside the framework:** schema.org types `priceValidUntil` as a `Date`, not a `DateTime`. A window that closes in minutes cannot be stated precisely there, and today's date claims the price holds all day. Check it against your own search requirements before emitting it.
 
 ## 5. SSR-safe rendering
 
@@ -998,6 +1094,47 @@ function paint(host: HTMLElement, html: string): void {
 ```
 
 If you need a `Document` without a host element (a pure utility that emits markup), accept the document as a parameter. Never read `globalThis.document` directly from cartridge code — make the environment the caller's concern.
+
+### 5.4a The browser half of a view — listeners without templates (0.11.1)
+
+**On a site whose pages are rendered by the server, the browser never calls `template`.** `PageManager.hydrateEntry` calls `hydrate()`; `render()` is for a fresh client-side paint. Yet `defineSSRSafeRenderer` takes `template` as a plain field and closes over it, so every bundle that builds the view holds the template **and everything the template imports** — markup helpers, UI components, copy, icons.
+
+A consumer serving full-page SSR measured their entry bundle at 44 kB gzip and attributed **67% of it to markup machinery that never runs in a browser**. The framework's own share was 25%.
+
+**Chunking cannot remove it.** Moving the view into a per-page chunk still leaves the template in the bytes that page downloads, because reaching `hydrate()` means resolving the view, which means fetching that chunk — and the split costs the sharing that kept one copy of the UI helpers. The same consumer measured it: bigger on three of five pages. The template must be **absent from the browser's module graph**, not deferred inside it.
+
+So split the view, not the chunk. One `hydrate` handler, imported by both halves:
+
+```ts
+// hydrate.ts — shared by both halves, so listeners cannot drift
+export function hydrateProduct(root: HTMLElement, ctx: Ctx): () => void { … }
+
+// cartridge.server.ts — the full renderer, with the template
+import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct })
+
+// cartridge.browser.ts — nothing in its import graph reaches the template
+import { defineHydrateOnlyRenderer } from '@airo-js/cartridge-kit';
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct })
+capabilities: ['hydrate-only']
+```
+
+This is §2.5's two-envelope pattern applied to a view instead of a cartridge: `runtime.ts` builds its views with `defineHydrateOnlyRenderer`, `full.ts` with `defineSSRSafeRenderer`. Both cartridges declare the same page types, so the page graph is identical on both sides.
+
+**What you give up, and when it bites.** `render` and `renderSSR` on the browser half throw, naming the page. They are reachable only from paths a server-rendered page does not take:
+
+| path | reached when | if you need it |
+|---|---|---|
+| `mode: 'csr'` mount | a shell paints from scratch (a 401 sign-in shell whose gate *allows*) | full renderer for that page in the browser |
+| remount | `update()` / `updatePages()` outside `hotSwapKeys` | full renderer, or accept a server round trip |
+| client-side navigation | a router is enabled and the visitor moves pages | full renderer for every reachable page |
+| same-page context change | `ctx.navigate({ item })` on the page, or Back to such an entry | `applyNavState` on the view (§2.9b), or a full renderer |
+| `csr-only` view | SSR skipped the page by capability | that page was never server-rendered — keep it full |
+| SSR runner | the browser cartridge reached the server by mistake | a bug: pass the server cartridge |
+
+A page that needs one can keep its full renderer, or leave `views[]` and arrive through `resolveView` / the chunk mailbox (§2.5b) — one request on a path that is rare by construction, instead of bytes on every visit. Throwing is deliberate: the alternative is a page that silently paints nothing.
+
+**Do not reach for this on a widget embedded in someone else's page.** There the host may mount CSR, remount on every edit, and navigate — the template belongs in the browser. This is for surfaces that render every page on the server.
 
 ### 5.5 Capability flags — when a view can't SSR
 

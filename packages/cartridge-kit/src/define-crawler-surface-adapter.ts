@@ -88,6 +88,11 @@ export interface SitemapEntry {
   priority?: number;
 }
 
+/**
+ * One `<link rel="alternate" hreflang>` row. `@airo-js/ssr`'s
+ * `headFromPublication` folds these into `DocumentHead.links` from 0.11.2;
+ * before that a host had to map them into its own head itself.
+ */
 export interface HreflangAlternate {
   hreflang: string;
   href: string;

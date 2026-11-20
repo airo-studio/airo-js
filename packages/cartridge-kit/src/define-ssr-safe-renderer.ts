@@ -28,6 +28,12 @@
  *     manual removal on destroy. The factory tracks the cleanup and
  *     calls it on `destroy()`.
  *
+ * Optional `applyNavState(root, next, previous, ctx)`: apply a same-page
+ * navigation in place instead of being rendered again (see
+ * `PageRenderer.applyNavState` in `@airo-js/core`). It is an option, not a
+ * method to add to the factory output afterwards, because it needs the
+ * root and the context the factory holds.
+ *
  * What this factory doesn't cover (use the raw `PageRenderer` interface):
  *   - `activateSubpage` — for modal-/drawer-style subpages
  *   - `applyPageStyles` / `applyComponentStyles` — for live style edits
@@ -37,6 +43,7 @@
  */
 
 import type {
+  NavigationState,
   PageRenderer,
   PageRendererFactory,
   RenderContext,
@@ -75,7 +82,42 @@ export interface SSRSafeRendererOptions<
     root: HTMLElement,
     ctx: RenderContext<TPageType, TAppContext>,
   ) => HydrateCleanup | void;
+
+  /**
+   * Apply a same-page navigation in place: `PageRenderer.applyNavState`
+   * with the root this renderer painted or hydrated, and its live context.
+   * Optional. Without it, the renderer has no `applyNavState` and every
+   * context change renders the page again, as before.
+   *
+   * Return `true` when the DOM shows `next`; anything else renders the page
+   * again from `template`. Called only after `render` or `hydrate`: before
+   * either, or after `destroy`, the factory returns `false` without calling
+   * it. During the call `ctx.navState` is still `previous`.
+   *
+   * Leave the DOM as `template` would paint it for `next`. A reload at the
+   * new URL is rendered from `template`, on the server or the client, so a
+   * view that applies `next` differently shows the shopper two pages for
+   * one URL. Listeners attached by `hydrate` stay; it does not run again.
+   *
+   * On Back/Forward `next` is decoded from the URL: look its keys up in
+   * your data, never write one into `root` as markup. This path skips the
+   * template, and with it the template's escaping.
+   */
+  applyNavState?: ApplyNavStateHandler<TPageType, TAppContext>;
 }
+
+/**
+ * The in-place navigation handler both renderer factories take
+ * (`defineSSRSafeRenderer`, `defineHydrateOnlyRenderer`). Like the
+ * `hydrate` handler, write it once and give the same function to both
+ * halves of a view.
+ */
+export type ApplyNavStateHandler<TPageType extends string, TAppContext> = (
+  root: HTMLElement,
+  next: NavigationState,
+  previous: NavigationState,
+  ctx: RenderContext<TPageType, TAppContext>,
+) => boolean;
 
 /**
  * Build a `PageRendererFactory` that satisfies the SSR + hydrate
@@ -92,13 +134,21 @@ export function defineSSRSafeRenderer<
 ): PageRendererFactory<TPageType, TAppContext> {
   return (): PageRenderer<TPageType, TAppContext> => {
     let cleanup: HydrateCleanup | void;
+    // The root and context of the last client paint or hydrate, for
+    // `applyNavState`. `renderSSR` never sets it: a server render is not
+    // navigated.
+    let mounted:
+      | { root: HTMLElement; ctx: RenderContext<TPageType, TAppContext> }
+      | undefined;
     const wireListeners = (
       root: HTMLElement,
       ctx: RenderContext<TPageType, TAppContext>,
     ): void => {
+      mounted = { root, ctx };
       if (opts.hydrate) cleanup = opts.hydrate(root, ctx);
     };
-    return {
+    const applyNavState = opts.applyNavState;
+    const renderer: PageRenderer<TPageType, TAppContext> = {
       render(targetEl, ctx) {
         targetEl.innerHTML = opts.template(ctx);
         wireListeners(targetEl, ctx);
@@ -117,7 +167,16 @@ export function defineSSRSafeRenderer<
       destroy() {
         if (typeof cleanup === 'function') cleanup();
         cleanup = undefined;
+        mounted = undefined;
       },
     };
+    // Only when the cartridge supplied one: a renderer without the method
+    // is re-rendered on every context change, which is the default.
+    if (applyNavState) {
+      renderer.applyNavState = (next, previous) =>
+        mounted !== undefined &&
+        applyNavState(mounted.root, next, previous, mounted.ctx) === true;
+    }
+    return renderer;
   };
 }

@@ -23,7 +23,9 @@ import {
   describeEntryResolution,
   type AppConfig,
   type EntryFallbackReason,
+  type EntryResolution,
   type NavigationState,
+  type Page,
   type PageRendererFactory,
   type RenderContext,
 } from '@airo-js/core';
@@ -151,6 +153,72 @@ export function renderAppToHTML<
   config: AppConfig<TPageType>,
   deps: RenderToHTMLDeps<TPageType, TAppContext>,
 ): RenderToHTMLResult {
+  return renderResolvedEntry(
+    config,
+    deps,
+    resolveEntry(config.pages, deps.isGatePage ?? (() => false), deps.initialNavState),
+  );
+}
+
+/**
+ * The entry a render starts on, resolved ONCE.
+ *
+ * `page` and `navState` are present together or not at all, and
+ * `navState.page === page.id`. `renderAppWithPublication` hands this one
+ * value to the publication adapters and to the renderer, so the two are
+ * told the same page and the same state because there is only one of each,
+ * rather than because two resolutions happened to agree.
+ *
+ * @internal Not exported from the package barrel.
+ */
+export type ResolvedEntry<TPageType extends string> =
+  | {
+      resolution: EntryResolution<TPageType>;
+      page: Page<TPageType>;
+      navState: Readonly<NavigationState>;
+    }
+  | { resolution: EntryResolution<TPageType>; page: undefined; navState: undefined };
+
+/** @internal Not exported from the package barrel. */
+export function resolveEntry<TPageType extends string>(
+  pages: ReadonlyArray<Page<TPageType>>,
+  isGate: (type: TPageType) => boolean,
+  initialNavState: Partial<NavigationState> | undefined,
+): ResolvedEntry<TPageType> {
+  // Entry resolution via the shared core helper — same gate-aware logic
+  // PageManager uses, so SSR and CSR pick the same page for any given
+  // `initialNavState.page`. Invalid / unknown / disabled / gate /
+  // subpage ids fall back to the default entry — keeps SSR safe against
+  // tampered or stale deeplinks.
+  const resolution = describeEntryResolution(pages, isGate, initialNavState?.page);
+  const page = resolution.page;
+  if (!page) return { resolution, page: undefined, navState: undefined };
+
+  // Spread order: initialNavState first (context fields like productId,
+  // category, query params), then `page` last so the framework-validated
+  // entry id always wins against a tampered or disagreeing
+  // `initialNavState.page`.
+  const navState: NavigationState = { ...(initialNavState ?? {}), page: page.id };
+  // Frozen because more than one party reads it: adapters run before the
+  // renderer, and neither may change what the other is told.
+  return { resolution, page, navState: Object.freeze(navState) };
+}
+
+/**
+ * `renderAppToHTML` for an entry that is already resolved. It takes no
+ * `initialNavState` and no `isGatePage`: those are the inputs of resolution,
+ * and resolution is over by the time this runs.
+ *
+ * @internal Not exported from the package barrel.
+ */
+export function renderResolvedEntry<
+  TPageType extends string = string,
+  TAppContext = unknown,
+>(
+  config: AppConfig<TPageType>,
+  deps: Omit<RenderToHTMLDeps<TPageType, TAppContext>, 'initialNavState' | 'isGatePage'>,
+  resolved: ResolvedEntry<TPageType>,
+): RenderToHTMLResult {
   const doc = deps.document ?? (globalThis as { document?: Document }).document;
   if (!doc) {
     throw new Error(
@@ -158,18 +226,7 @@ export function renderAppToHTML<
     );
   }
 
-  const isGate = deps.isGatePage ?? (() => false);
-  // Entry resolution via the shared core helper — same gate-aware logic
-  // PageManager uses, so SSR and CSR pick the same page for any given
-  // `initialNavState.page`. Invalid / unknown / disabled / gate /
-  // subpage ids fall back to the default entry — keeps SSR safe against
-  // tampered or stale deeplinks.
-  const resolution = describeEntryResolution(
-    config.pages,
-    isGate,
-    deps.initialNavState?.page,
-  );
-  const entry = resolution.page;
+  const { resolution } = resolved;
   const fellBack = resolution.fellBack ? { fellBack: resolution.fellBack } : {};
 
   // Narrate the fallback. This fires ONLY when a host explicitly requested
@@ -196,23 +253,25 @@ export function renderAppToHTML<
       });
       return { html: '', ...fellBack };
     }
-    const detail = { requested, reason, resolved: entry?.id, phase: 'entry-resolution' };
+    const renderedId = resolved.page?.id;
+    const detail = { requested, reason, resolved: renderedId, phase: 'entry-resolution' };
     if (reason === 'unknown-page') {
       log.warn(
-        `entry page "${requested}" is not in the page graph; rendered "${entry?.id ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. Pass \`unknownPage: 'refuse'\` once you do. See best-practices §5.10a.`,
+        `entry page "${requested}" is not in the page graph; rendered "${renderedId ?? '<none>'}" instead. If this surface owns its urls, read \`result.fellBack\` and answer 404 — otherwise this is a soft 404. Pass \`unknownPage: 'refuse'\` once you do. See best-practices §5.10a.`,
         detail,
       );
     } else {
       log.debug(
-        `entry page "${requested}" rejected (${reason}); rendered "${entry?.id ?? '<none>'}" instead.`,
+        `entry page "${requested}" rejected (${reason}); rendered "${renderedId ?? '<none>'}" instead.`,
         detail,
       );
     }
   }
 
-  if (!entry) {
+  if (!resolved.page) {
     return { html: '', ...fellBack };
   }
+  const entry = resolved.page;
 
   // `Page.private` is a promise on the page graph, so both SSR entry points
   // keep it: a private entry renders only when the host asserts it verified
@@ -243,11 +302,11 @@ export function renderAppToHTML<
     pages: config.pages,
     app: deps.appContext,
     events,
-    // Spread order: initialNavState first (context fields like productId,
-    // category, query params), then `page: entry.id` last so the
-    // framework-validated entry id always wins against a tampered or
-    // disagreeing `initialNavState.page`.
-    navState: { ...(deps.initialNavState ?? {}), page: entry.id },
+    // A copy of the resolved state (see `resolveEntry` for how it is
+    // built). A copy, not the frozen object itself: the renderer has always
+    // been handed a plain object here, and one that writes to it must keep
+    // working.
+    navState: { ...resolved.navState },
     navigate: () => undefined, // no-op server-side
   };
 
