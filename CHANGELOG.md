@@ -6,7 +6,13 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
 
-Templates pin the versions that are on npm today — `@airo-js/core` `^0.11.1`, `cartridge-kit`, `runtime` and `ssr` `^0.11.3`, `embed` and `mcp` `^0.11.0`, and `@airo-js/log` `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+Templates pin the versions that are on npm today — `@airo-js/core` `^0.11.2`, `cartridge-kit`, `runtime` and `ssr` `^0.11.3`, `embed` and `mcp` `^0.11.0`, and `@airo-js/log` `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.4 — 2026-11-20
+
+A packed tarball, not published to npm. The only change is the pin: scaffolded projects now start on `@airo-js/core` `^0.11.2`, which fixes chunk recovery running twice in hash mode (see the core 0.11.2 entry). The `site` template routes by path, not hash, so it never hit that edge; the pin moves so `--exact` projects and `"airo".scaffoldedWith` name the current core.
+
+**Upgrading an existing project:** set `@airo-js/core` to `^0.11.2` in `package.json` and run `npm install`. A caret project scaffolded from beta.3 already resolves 0.11.2 on a fresh install.
 
 ## `create-airo` 1.0.0-beta.3 — 2026-11-20
 
