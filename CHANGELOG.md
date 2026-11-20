@@ -2,6 +2,104 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## Why `create-airo` ships as a beta before 1.0
+
+A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
+
+Templates pin the versions that are on npm today — `@airo-js/core` `^0.11.3`, `cartridge-kit`, `runtime` and `ssr` `^0.11.3`, `embed` and `mcp` `^0.11.0`, and `@airo-js/log` `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.5 — 2026-11-20
+
+A packed tarball, not published to npm. The only change is the pin: scaffolded projects now start on `@airo-js/core` `^0.11.3`, whose `PageManager` uses `#private` members (see the core 0.11.3 entry). The `site` template's client builds at `--target=es2022`, so it keeps the fields native and gets the saving.
+
+**Upgrading an existing project:** set `@airo-js/core` to `^0.11.3` in `package.json` and run `npm install`. A caret project from beta.4 already resolves 0.11.3 on a fresh install. If you changed the client build's `--target` below es2022, set it back: at es2020 this core grows by about 270 B gzip instead of shrinking.
+
+## `create-airo` 1.0.0-beta.4 — 2026-11-20
+
+A packed tarball, not published to npm. The only change is the pin: scaffolded projects now start on `@airo-js/core` `^0.11.2`, which fixes chunk recovery running twice in hash mode (see the core 0.11.2 entry). The `site` template routes by path, not hash, so it never hit that edge; the pin moves so `--exact` projects and `"airo".scaffoldedWith` name the current core.
+
+**Upgrading an existing project:** set `@airo-js/core` to `^0.11.2` in `package.json` and run `npm install`. A caret project scaffolded from beta.3 already resolves 0.11.2 on a fresh install.
+
+## `create-airo` 1.0.0-beta.3 — 2026-11-20
+
+A packed tarball, like the betas before it; not published to npm. The templates move onto the 0.11 line as it stands today (core 0.11.1, cartridge-kit, runtime and ssr 0.11.3), and a review of the `site` scaffold turned up one real leak, which is the first item below.
+
+### Fixed
+- **`POST /mcp/call` served an unpublished post.** The page route 404s `/post/unfinished`, and the sitemap and `llms.txt` leave it out, but `/mcp/call` built a snapshot for any `slug` and `get_section` never checks `isPublished`, so an agent could read a draft's text that no search engine or visitor could. One `withheld()` decision, "is this a post that does not exist, or one the `crawler-surface` adapter refused", now serves the page route and `/mcp/call`; a withheld or unknown `slug` answers `404 { ok: false, error: { code: 'not-found', message: 'no such page' } }`. The smoke checks `get_section` and `list_posts` on the draft, `get_section` on an unknown post, and that `list_posts` never names the draft; the first of these failed against beta.2.
+- **The templates named stale versions.** `@airo-js/core` 0.11.0, `cartridge-kit` 0.11.0, `runtime` 0.11.1 and `ssr` 0.11.1 are now 0.11.1, 0.11.3, 0.11.3 and 0.11.3. They move together because the links between @airo-js packages are peer ranges.
+- **A fresh scaffold failed `npm audit --audit-level=high`.** happy-dom up to 21.0.3 now carries advisories (code execution through an import alias, SSRF through an iframe); the template ships `^21.0.4`.
+- **`create-airo` ran on Node 20 and scaffolded a project that needs Node `^22.12.0 || >=24.0.0`** (Vitest 5), so the first failure was an install full of engine warnings. The CLI now checks `process.versions.node` after `--help` and `--version`, refuses with the required range and "Nothing was written", and its own `engines` say the same. A test pins the range to both package.json files.
+- **`@airo-js/log` was declared and never used.** The server logs through a `site` logger (`AIRO_LOG=debug npm start` takes the same grammar as `?airo-log=`), a refused tool call is a `warn` and a tool that threw is an `error`, and `client.ts` calls `initLogControls()` and logs a failed mount through the same logger. `mountCartridge` already applied `?airo-log=`, so this changes no behaviour in the browser and no bytes in `client.js`.
+
+### Changed
+- **The browser's views are hydrate-only.** The site mounts `mode: 'hydrate'` over server markup and never renders a page in the browser, yet `defineSSRSafeRenderer` shipped every `template` in `client.js`. `cartridge.ts` now builds its views with `defineHydrateOnlyRenderer` and `capabilities: ['hydrate-only']`, from the shared handlers in a new `src/hydrate.ts`; `cartridge.server.ts` supplies `defineSSRSafeRenderer({ template, hydrate })` with the templates in a new, server-only `src/markup.server.ts`. A browser path that does need a render (a `mode: 'csr'` mount, a client-side navigation, a `csr-only` view) now throws, naming the page; give that view a full renderer in `cartridge.ts`. `client.js` is 12,276 B gzipped before and 11,826 B after. `test/hydration.test.ts` now proves in-place adoption and that the listener fires, keeps the byte-identical render check on the server cartridge, and asserts the browser cartridge refuses a csr render; the smoke's server-only check covers the template.
+- The smoke's size note says about 11.8 kB, not 11; the budget stays 15 kB.
+- The e2e follows an in-page anchor on a hydrate-only page and checks the console stays clean.
+
+### Upgrading an existing project
+Nothing here is forced by the framework; the first two are worth doing.
+1. **Versions.** In `package.json` set `@airo-js/core` `^0.11.1` and `@airo-js/cartridge-kit`, `@airo-js/runtime` and `@airo-js/ssr` `^0.11.3` together, and `happy-dom` `^21.0.4`; `npm install`.
+2. **Close the MCP leak.** In `src/server.ts`, add beside `snapshotFor`:
+   ```ts
+   function withheld(
+     state: Partial<NavigationState> | undefined,
+     snapshot: SiteData,
+     adapterResults: ReadonlyArray<{ adapterId: string; included: boolean }>,
+   ): boolean {
+     const missingPost = state?.page === 'post' && !snapshot.post;
+     const refused = adapterResults.some((r) => r.adapterId === 'crawler-surface' && !r.included);
+     return missingPost || refused;
+   }
+
+   async function publishableSnapshot(state: Partial<NavigationState> | undefined): Promise<SiteData | undefined> {
+     const snapshot = await snapshotFor(state);
+     const results = await runPublicationAdapters(cartridge, snapshot, publicationCtx, { adapterIds: ['crawler-surface'] });
+     return withheld(state, snapshot, results) ? undefined : snapshot;
+   }
+   ```
+   In the `/mcp/call` handler replace `await snapshotFor(state)` with `const snapshot = await publishableSnapshot(state); if (!snapshot) { res.status(404).json({ ok: false, error: { code: 'not-found', message: 'no such page' } }); return; }`, and have the page route's existing "post missing or refused" test call `withheld(initialNavState, snapshot, result.adapterResults)`. If your own tools return post content, this is the check that keeps a draft out of them.
+3. **Hydrate-only views (optional, about 0.5 kB on the scaffold, more with real templates).** Only if your pages are always server-rendered and hydrated. Move each view's `hydrate` into a browser-safe `src/hydrate.ts`, each `template` into a server-only module, build the views in `cartridge.ts` with `defineHydrateOnlyRenderer({ hydrate })` and `capabilities: ['hydrate-only']`, and build the server views in `cartridge.server.ts` with `defineSSRSafeRenderer({ template, hydrate })` spread over the browser views. Point any test that mounts `mode: 'csr'` at the server cartridge, or hydrate over server markup. Keep a view as it is if you navigate on the client or have a `csr-only` page.
+4. **Logging (optional).** `import { initLogControls, logger } from '@airo-js/log'`; call `initLogControls()` at the top of `client.ts`, and use `logger('site')` in place of `console.error` in the server and the client.
+5. **Node.** Use Node `^22.12.0 || >=24.0.0` for the project and its CI.
+
+## `create-airo` 1.0.0-beta.2 — 2026-09-17
+
+A packed tarball, like the betas before it; not published to npm. Everything here comes from the first outside tester's report. Nothing they ran failed; these are the things that surprised them or that they changed before the result felt like their own.
+
+### Fixed
+- **A fresh `site` scaffold printed "6 vulnerabilities (3 moderate, 1 high, 2 critical)"** on its first `npm install`, all in dev tooling (happy-dom 15, esbuild 0.21, vitest 2 and its vite). The template now ships esbuild `^0.28.2`, happy-dom `^20.14.5`, vitest `^5.0.1` and vite `^8.3.0`, and a fresh install reports none. vitest 4.1.11, the other patched line, was ruled out: every npm 11 up to 11.19.1 crashes installing it (`Cannot read properties of null (reading 'edgesOut')`). vitest 5 needs Node `^22.12 || >=24`, so the template's `engines` now says that; Node 20 reached end of life in April. `vite` is listed explicitly because vitest 5 declares it as a peer, and a project must not rely on a package manager installing peers for it.
+- **The `site` build did not minify.** `build` and `dev` now pass `--minify`: the client bundle is roughly 18 kB gzipped without it and 11 kB with it. The smoke checks the bundle is minified and fails above a 15 kB gzip budget (`CLIENT_JS_GZIP_BUDGET` in `scripts/smoke.mjs`).
+- **A CamelCase directory lost its casing** in the display name (`GreenGrocer` became `Greengrocer`, `iPhoneRepair` became `Iphonerepair`). The display name is now built from the name as typed: words the user capitalised keep their capitals, lowercase words get a capital first letter, and letters outside ASCII survive. Package name, cartridge id and mailbox are unchanged.
+- **Two pieces of copy lived outside `content.ts`.** The 404 page, the sign-in refusal and the post view's back link now read a `COPY` object there, and the listen banner lists the urls the sitemap walks instead of hand-written sample paths.
+
+### Added
+- **`npm run verify`**: typecheck, tests, build and the smoke in one command. The smoke now hosts the built server itself on a free port (`server.ts` already exported `app` and listened only when run directly); `BASE_URL` still points it at a server that is already running.
+- **`--exact`** writes `@airo-js` versions without the `^`, for teams that pin a pre-1.0 framework exactly. Templates now hold the whole spec in one placeholder (`"__V_CORE__"`).
+- **`--force` names what it replaces.** The file list marks each file that already exists with `(overwrites)`, the refusal says how many, and a forced run prints the count before writing. `--dry-run` now previews a non-empty directory instead of refusing it, since it writes nothing.
+- The e2e check resolves every scaffold with the machine's npm and runs `npm audit --audit-level=high`, as well as the strict pnpm install. It runs on Node 22 and 24.
+
+### Changed
+- The generated README no longer says the `^` ranges mean nothing upgrades on its own. They take patch releases on the same line when you install; neither they nor an exact pin move to a new line.
+
+## `create-airo` 1.0.0-beta.1 — 2026-09-17
+
+A packed tarball, like beta.0; not published to npm.
+
+### Changed
+- **The `site` template passes `unknownPage: 'refuse'`** (`@airo-js/ssr` 0.11.1) and depends on `@airo-js/ssr` `^0.11.1`. An unknown url now renders nothing before its 404, and the server log no longer carries a framework warning per stray request. A project scaffolded with beta.0 gets the same result with `npm update @airo-js/ssr` and that one line in `src/server.ts`.
+
+## `create-airo` 1.0.0-beta.0 — 2026-09-16
+
+**Given to the first testers as a packed tarball; not published to npm.** When the CLI is published it goes to the `beta` dist-tag: `npm create airo@beta my-app`.
+
+### Added
+- **The `create-airo` command.** `npm create airo@beta [name] -- [--template <name>] [--yes] [--dry-run] [--force]`. Zero runtime dependencies — `node:util` `parseArgs`, `node:readline/promises`, a few lines of ANSI — because this is the one package in the org that strangers run through npx with no lockfile. It never installs dependencies itself; it prints the next commands, phrased for the package manager that ran it.
+- **It writes by default, unlike the rest of this repo's tooling.** `publish.sh` and `rename-scope.sh` preview by default because they change a tree nobody asked them to touch; `create` is a verb that means "make me a thing". The safety property is kept instead: every file is listed before anything is written, a directory that is not empty is refused without `--force`, and every file is rendered before any is written, so a bad template stops with nothing on disk.
+- **Correct-by-default templates**, stored as real files under `templates/` with `__UPPER_SNAKE__` placeholders. An unknown placeholder throws rather than shipping verbatim into someone's project. `_gitignore` is renamed on write, because npm strips a literal `.gitignore` from tarballs.
+- **Names derived per identifier.** One project name becomes a package name, a cartridge id, a `__AIRO_<ID>_PAGES__` mailbox name and a custom-element name that `customElements.define` will accept — a hyphen is added when missing, and a leading digit or a spec-reserved name is handled, because that failure otherwise surfaces at runtime on the page, long after scaffolding succeeded.
+- **One template, `site`.** An Express server that renders every page, a browser bundle that hydrates it without redrawing, and a sitemap, `llms.txt`, JSON-LD and two agent tools that read the same snapshot the pages render. The mistakes that fail without an error are decided in the template, each with its reason at the spot: the data source calls `schema.parse()`; views and pages share one `PageType` union; status codes come from `fellBack.reason` before `skipped.reason`; page metadata uses `defineCrawlerSurfaceAdapter`; only fields an adapter cannot do without are `required: 'always'`; adapters and tools live in a server-only file; transformers get the navigation state the runtime computes; a failed tool call's `cause` is logged, never returned. `widget` and `cartridge` templates follow in later betas.
+- **Gates that keep the templates honest.** The per-package version map must equal this repo's package versions, every template must name `@airo-js` versions only through the map, and `npm pack --dry-run` must list every template file — the one failure that breaks every user of a template while looking fine on disk. `pnpm e2e:create-airo`, in CI on Node 20 and 24, scaffolds each template outside the repo, installs it from packed tarballs with strict peers and no auto-installed peers, then typechecks, builds, tests, serves and smoke-tests it, and in Chromium checks that hydration adopts the server's DOM and attaches its listeners. Template sources and `scripts/*.mjs` are now linted.
+
 ## `@airo-js/core` 0.11.3 — 2026-11-20
 
 A size patch. Core alone; cartridge-kit 0.11.3 and runtime 0.11.3 already accept it (`^0.11.1`). No behaviour or API changes.

@@ -72,7 +72,17 @@ done
 #   - ssr depends on core + cartridge-kit + log.
 # Each entry: "<filter> [extra-flags]"
 # Dependency order: a package's peers appear above it. `@airo-js/mcp` peers on
-# cartridge-kit only, so it sits at the end.
+# cartridge-kit only, so it sits after the framework line.
+#
+# `create-airo` is last, and it has no build-time dependency on any of these.
+# Its templates NAME framework versions, so publishing it last guarantees
+# every version it names is already on the registry when it lands. Its
+# directory is `packages/create-airo` exactly: the VERSION-const gate derives
+# the path with `${pkg#@airo-js/}`, which is a no-op for an unscoped name.
+#
+# `--tag beta` is there because it is a prerelease. REMOVE IT in the commit
+# that sets create-airo to 1.0.0, or 1.0.0 is published to `beta` and
+# `latest` keeps pointing at a prerelease.
 PACKAGES=(
   "@airo-js/log"
   "@airo-js/core"
@@ -81,6 +91,7 @@ PACKAGES=(
   "@airo-js/embed"
   "@airo-js/ssr"
   "@airo-js/mcp"
+  "create-airo --tag beta"
 )
 
 # Flags applied to every `pnpm publish`. Drop --no-git-checks once the repo

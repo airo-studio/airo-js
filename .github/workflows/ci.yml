@@ -136,6 +136,42 @@ jobs:
       - name: Publish preflight (dry run)
         run: ./scripts/publish.sh
 
+  # ── create-airo, the way a stranger meets it ──────────────────────────────
+  #
+  # Every template is scaffolded outside the repo, installed from packed
+  # tarballs with strict peers and no auto-installed peers, then typechecked,
+  # built, tested, served, smoked and — on 24 — hydrated in a real browser.
+  # See the header of `scripts/e2e-create-airo.mjs` for why tarballs and not
+  # the registry. The scaffolded project claims `node ^22.12 || >=24` (its
+  # test runner needs it), so both ends of that run. The CLI itself still
+  # runs on 20; the verify job covers that.
+  create-airo:
+    name: create-airo e2e (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The browser half exercises the bundle, not Node, so one run of it is
+      # enough.
+      - name: Install Playwright Chromium
+        if: matrix.node == '24'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Scaffold, install, verify
+        run: pnpm e2e:create-airo ${{ matrix.node != '24' && '--skip-browser' || '' }}
+
   # ── The examples, which are the only end-to-end coverage we have ──────────
   examples:
     name: example smokes
