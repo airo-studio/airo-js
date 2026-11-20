@@ -59,6 +59,10 @@ beforeAll(async () => {
   server = app.listen(port);
   await new Promise<void>((resolve) => server.once('listening', resolve));
   BASE = `http://localhost:${port}`;
+  // The first page request builds the server's published-doc inventory,
+  // once per process (`publishedSlugs`), running each document's pipeline.
+  // Build it here, so each test below sees only its own route's transform.
+  await fetch(`${BASE}/`);
 });
 
 afterAll(async () => {

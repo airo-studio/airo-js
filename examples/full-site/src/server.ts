@@ -218,11 +218,43 @@ async function publishable(initialNavState?: Partial<NavigationState>): Promise<
   };
   const snapshot = await verdict(initialNavState);
   if (!snapshot || slugOf(initialNavState)) return snapshot;
-  const kept = new Set(
-    (await Promise.all(DOCS.map(async (d) => ((await verdict(docState(d.slug))) ? d.slug : undefined)))).filter(
-      (slug): slug is string => slug !== undefined,
-    ),
+  return withPublishedIndex(snapshot);
+}
+
+/**
+ * The slugs the `crawler-surface` adapter publishes: the same verdict
+ * `publishable` gives, asked once per document. Built once per process,
+ * because this demo's content is fixed when it starts; asking per request
+ * would run every document's pipeline on every page view. A site whose
+ * content changes rebuilds this when it publishes. A failed build is not
+ * kept, so the next request tries again.
+ */
+let inventory: Promise<Set<string>> | undefined;
+function publishedSlugs(): Promise<Set<string>> {
+  inventory ??= Promise.all(
+    DOCS.map(async (d) => {
+      const [result] = await runPublicationAdapters(docSiteServerCartridge, await snapshotFor(docState(d.slug)), publicationCtx, {
+        adapterIds: ['crawler-surface'],
+      });
+      return result?.included ? d.slug : undefined;
+    }),
+  ).then(
+    (slugs) => new Set(slugs.filter((slug): slug is string => slug !== undefined)),
+    (err: unknown) => {
+      inventory = undefined;
+      throw err;
+    },
   );
+  return inventory;
+}
+
+/**
+ * `snapshot` with its `index` narrowed to the published documents. Used by
+ * the listing tool and by the page route, so neither the home page nor an
+ * agent advertises a url that answers 404.
+ */
+async function withPublishedIndex(snapshot: DocSiteData): Promise<DocSiteData> {
+  const kept = await publishedSlugs();
   return { ...snapshot, index: snapshot.index.filter((d) => kept.has(d.slug)) };
 }
 
@@ -470,7 +502,9 @@ app.post('/mcp/call', async (req, res) => {
 // site most needs to serve. Caught by curling `/` rather than by any test.
 const renderPage: express.RequestHandler = async (req, res) => {
   const initialNavState = navStateFor(req.path);
-  const publicSnapshot = await snapshotFor(initialNavState);
+  // The index lists only what is published (`withPublishedIndex`): the home
+  // page used to link the unfinished draft, a url that answers 404.
+  const publicSnapshot = await withPublishedIndex(await snapshotFor(initialNavState));
   // The Document is built inside the closure: the refusal call never
   // touches one, so it never parses one.
   const render = (snapshot: DocSiteData, renderPrivate: boolean) =>

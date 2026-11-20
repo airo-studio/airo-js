@@ -71,6 +71,12 @@ describe('/mcp/call and the publish decision', () => {
     expect(urls.some((u) => u.includes('unfinished-draft'))).toBe(false);
   });
 
+  test('the home page links every published doc and not the draft, a url that 404s', async () => {
+    const html = await (await fetch(`${BASE}/`)).text();
+    expect(html).toContain('/doc/why-snapshots');
+    expect(html).not.toContain('unfinished-draft');
+  });
+
   test('a published slug still answers', async () => {
     const res = await call({ name: 'get_section', arguments: { id: 'the-drift-problem' }, slug: 'why-snapshots' });
     expect(res.status).toBe(200);
