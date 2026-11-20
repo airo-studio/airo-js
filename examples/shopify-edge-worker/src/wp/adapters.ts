@@ -7,7 +7,7 @@
  * card all read this.
  */
 
-import type { PublicationAdapter, SchemaFieldRef } from '@airo-js/cartridge-kit';
+import { defineCrawlerSurfaceAdapter, type PublicationAdapter, type SchemaFieldRef } from '@airo-js/cartridge-kit';
 
 import type { PostJsonLd, PostSnapshot, WpConfig } from './types.js';
 import { toArticleJsonLd } from './jsonld.js';
@@ -95,3 +95,26 @@ export const postJsonLdAdapter: PublicationAdapter<PostSnapshot, PostJsonLd, WpC
     return validate(output);
   },
 };
+
+/**
+ * Canonical, OpenGraph and Twitter Card for the page `<head>`, folded in by
+ * the worker with `headFromPublication(adapterResults)`. Same snapshot as the
+ * BlogPosting JSON-LD, so the canonical and the JSON-LD `url` are one `link`.
+ */
+export const postCrawlerSurfaceAdapter = defineCrawlerSurfaceAdapter<PostSnapshot, WpConfig>({
+  requires: [
+    { path: 'title', required: 'always' },
+    { path: 'link', required: 'always' },
+    { path: 'excerpt', required: 'preferred' },
+    { path: 'featuredImageUrl', required: 'preferred' },
+  ],
+  select: {
+    canonical: (p) => p.link,
+    title: (p) => p.title,
+    description: (p) => p.excerpt,
+    siteName: (p) => p.siteName,
+    image: (p) => p.featuredImageUrl ?? undefined,
+    lastModified: (p) => p.modifiedAt,
+    ogType: () => 'article',
+  },
+});

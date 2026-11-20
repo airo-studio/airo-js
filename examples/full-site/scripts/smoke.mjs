@@ -91,6 +91,18 @@ check('robots points at the sitemap', robots.body.includes('Sitemap: https://fie
 const mcp = await get('/mcp/tools');
 check('mcp exposes both tools', mcp.body.includes('list_pages') && mcp.body.includes('get_section'));
 
+// The agent surface honours the publish decision like every other surface:
+// the draft 404s as a page, so it 404s here and is absent from the listing.
+const mcpCall = (body) => fetch(`${BASE}/mcp/call`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+});
+const draftCall = await mcpCall({ name: 'get_section', arguments: { id: 'todo' }, slug: 'unfinished-draft' });
+check('/mcp/call get_section on the unpublished draft → 404', draftCall.status === 404, `got ${draftCall.status}`);
+check('/mcp/call 404 carries nothing of the draft', !(await draftCall.text()).includes('Nothing here yet'));
+const pagesCall = await (await mcpCall({ name: 'list_pages', arguments: {} })).text();
+check('list_pages omits the unpublished draft', pagesCall.includes('why-snapshots') && !pagesCall.includes('unfinished-draft'));
+check('/mcp/call on a published slug still answers', (await mcpCall({ name: 'get_section', arguments: { id: 'the-drift-problem' }, slug: 'why-snapshots' })).status === 200);
+
 // ── microdata: same facts, different encoding ───────────────────────
 const micro = await get('/microdata/why-snapshots');
 check('microdata fragment served', micro.status === 200 && micro.body.includes('itemtype="https://schema.org/TechArticle"'));
