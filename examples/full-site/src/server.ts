@@ -195,6 +195,38 @@ async function snapshotFor(initialNavState?: Partial<NavigationState>): Promise<
 }
 
 /**
+ * The publication decision, made once: the `crawler-surface` adapter's
+ * verdict on a url's snapshot. Every machine surface that takes a slug goes
+ * through here, so an unpublished or unknown document is absent from all of
+ * them for the same reason it 404s as a page — no `updatedAt`, so no
+ * canonical, so `validate()` blocks it.
+ *
+ * Returns the snapshot only when the adapter's result is `included`; for the
+ * index (no slug) the snapshot's `index` is narrowed to the published
+ * entries, so a listing tool cannot advertise a url the site 404s. The
+ * framework hands out per-adapter verdicts and never a site-wide policy;
+ * applying one verdict everywhere is host work.
+ */
+async function publishable(initialNavState?: Partial<NavigationState>): Promise<DocSiteData | undefined> {
+  const verdict = async (state?: Partial<NavigationState>) => {
+    const snapshot = await snapshotFor(state);
+    if (state && !snapshot.doc) return undefined; // a slug that names no document
+    const [result] = await runPublicationAdapters(docSiteServerCartridge, snapshot, publicationCtx, {
+      adapterIds: ['crawler-surface'],
+    });
+    return result?.included ? snapshot : undefined;
+  };
+  const snapshot = await verdict(initialNavState);
+  if (!snapshot || slugOf(initialNavState)) return snapshot;
+  const kept = new Set(
+    (await Promise.all(DOCS.map(async (d) => ((await verdict(docState(d.slug))) ? d.slug : undefined)))).filter(
+      (slug): slug is string => slug !== undefined,
+    ),
+  );
+  return { ...snapshot, index: snapshot.index.filter((d) => kept.has(d.slug)) };
+}
+
+/**
  * The private snapshot for a verified session, transformed once, for the
  * wildcard's private render. Built from the same raw data the API returns,
  * so SSR and the client's refetch cannot disagree about its shape.
@@ -264,7 +296,6 @@ const NOINDEX: HeadPatch = { meta: [{ name: 'robots', content: 'noindex, nofollo
 // The Playwright checks in `e2e/` exist so that cannot happen silently
 // again.
 app.use(express.static(join(dirname(fileURLToPath(import.meta.url)), 'public'), { index: false }));
-app.use('/assets', express.static('public'));
 // JSON for POST /mcp/call; urlencoded for the sign-in form and the token endpoint.
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -375,18 +406,16 @@ app.get('/llms.txt', async (_req, res) => {
  * markup rather than a script block, not a different set of facts.
  */
 app.get('/microdata/:slug', async (req, res) => {
-  const snapshot = await snapshotFor(docState(req.params.slug));
-  if (!snapshot.doc) { res.status(404).type('text/plain').send('not found\n'); return; }
   // Same coordination as /llms.txt, and for the same reason. The microdata
   // adapter validates only its OWN output — a non-empty fragment — so it
   // happily publishes a page the crawler adapter blocked. One publication
-  // decision, honoured by every surface, is host work.
-  const results = await runPublicationAdapters(docSiteServerCartridge, snapshot, publicationCtx, {
-    adapterIds: ['crawler-surface', 'schema-org-microdata'],
+  // decision (`publishable`), honoured by every surface, is host work.
+  const snapshot = await publishable(docState(req.params.slug));
+  if (!snapshot) { res.status(404).type('text/plain').send('not found\n'); return; }
+  const [micro] = await runPublicationAdapters(docSiteServerCartridge, snapshot, publicationCtx, {
+    adapterIds: ['schema-org-microdata'],
   });
-  const publishable = results.find((r) => r.adapterId === 'crawler-surface')?.included;
-  const micro = results.find((r) => r.adapterId === 'schema-org-microdata');
-  if (!publishable || !micro?.included) { res.status(404).type('text/plain').send('not published\n'); return; }
+  if (!micro?.included) { res.status(404).type('text/plain').send('not published\n'); return; }
   res.type('text/html').send((micro.output as { fragment: string }).fragment);
 });
 
@@ -396,7 +425,7 @@ app.get('/microdata/:slug', async (req, res) => {
  * This used to map `mcpTools` by hand, with a cast per field because no
  * typed helper existed. `buildToolManifest` emits MCP's `tools/list` shape
  * from the cartridge directly, and `dispatchTool` answers a call against the
- * same `snapshotFor(docState(slug))` the HTML route renders — which is the whole
+ * same `publishable(docState(slug))` snapshot the HTML route renders — which is the whole
  * snapshot-fidelity claim, made checkable on one page. It never reads a
  * cookie, so an agent can never be handed a member's notes.
  */
@@ -408,7 +437,13 @@ app.post('/mcp/call', async (req, res) => {
   const { name, arguments: args, slug } = req.body ?? {};
   if (typeof name !== 'string') { res.status(400).json({ error: 'missing tool name' }); return; }
 
-  const snapshot = await snapshotFor(typeof slug === 'string' ? docState(slug) : undefined);
+  // The publish decision (see `publishable`): an unpublished or unknown slug
+  // is the same 404 every other surface gives, with nothing of the page in it.
+  const snapshot = await publishable(typeof slug === 'string' ? docState(slug) : undefined);
+  if (!snapshot) {
+    res.status(404).json({ ok: false, error: { code: 'not-found', message: 'no such page' } });
+    return;
+  }
   const out = await dispatchTool(docSiteServerCartridge, name, args ?? {}, snapshot, {
     config: docSiteServerCartridge.defaultConfig,
   });
