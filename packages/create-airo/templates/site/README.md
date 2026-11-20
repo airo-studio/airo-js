@@ -106,6 +106,10 @@ spot say why.
 - Every visible string, including the 404 page, is in `content.ts`.
 - A failed agent call is logged on the server, and its underlying error is
   never sent back to the caller.
+- Logging uses `@airo-js/log`, one sink for the framework and this site (the
+  `site` channel). In the browser, add `?airo-log=debug` to a url; on the
+  server, start with `AIRO_LOG=debug npm start`. Both take the same grammar
+  (`ssr:debug,site:info`).
 
 ## Going further
 

@@ -10,9 +10,17 @@
  * gives the index one url, `/`, instead of answering on `/home` as well.
  */
 
+import { initLogControls, logger } from '@airo-js/log';
 import { mountCartridge } from '@airo-js/runtime';
 
 import { ROOT_ATTRS, siteCartridge, siteTemplate, type SiteConfig, type SiteData } from './cartridge.js';
+
+// `?airo-log=debug` in the url (remembered across reloads) turns the framework's
+// logging up in the browser console. `mountCartridge` applies it too; doing it
+// here first, once, puts it in force before anything is logged, and the call
+// is idempotent. `site` is this page's own channel, as on the server.
+initLogControls();
+const log = logger('site');
 
 const host = document.getElementById('app');
 
@@ -40,6 +48,6 @@ if (host) {
     document.documentElement.setAttribute('data-airo-mounted', mode);
   } catch (err) {
     document.documentElement.setAttribute('data-airo-mounted', 'error');
-    console.error('[__CARTRIDGE_ID__] mount failed', err);
+    log.error('mount failed', err);
   }
 }

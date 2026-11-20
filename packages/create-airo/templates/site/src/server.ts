@@ -46,6 +46,7 @@ import {
   resolveMountEntry,
   type NavigationState,
 } from '@airo-js/core';
+import { applyLogDirective, logger } from '@airo-js/log';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 import { headFromPublication, renderAppWithPublication, renderDocument, runPublicationAdapters } from '@airo-js/ssr';
 import express from 'express';
@@ -58,6 +59,15 @@ import { COPY, POSTS, SITE, findPost } from './content.js';
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_PATH = '/';
 const PATH_CONTEXT_KEY = 'slug';
+
+// Logging goes through `@airo-js/log`, the same sink the framework writes to,
+// so one setting controls both. The default threshold is `warn`: debug and
+// info narration are off, and a misconfiguration or a failure is not. To see
+// more, start the server with the `?airo-log=` grammar in the environment
+// (`AIRO_LOG=debug`, `AIRO_LOG=ssr:debug,site:info`); to hear less, call
+// `setLogLevel('error')`. `site` is this server's own channel.
+const log = logger('site');
+if (process.env.AIRO_LOG) applyLogDirective(process.env.AIRO_LOG);
 
 const config: SiteConfig = cartridge.defaultConfig;
 const appConfig = templateToAppConfig(siteTemplate, cartridge.id);
@@ -263,7 +273,10 @@ app.post('/mcp/call', async (req, res) => {
     // A bad call from an agent is a 400, not a 500 — `dispatchTool` returns
     // a verdict instead of throwing. `error.cause` is whatever the tool threw,
     // and tools can close over secrets: log it here, never send it back.
-    console.error(`[mcp] ${name} failed: ${out.error.code}`, ...(out.error.cause === undefined ? [] : [out.error.cause]));
+    // A refused call (unknown tool, bad input) is the caller's mistake, so it
+    // is a `warn`; a tool that threw is ours, so it is an `error`.
+    if (out.error.cause === undefined) log.warn(`mcp ${name} refused: ${out.error.code}`);
+    else log.error(`mcp ${name} failed: ${out.error.code}`, out.error.cause);
     res.status(400).json({ ok: false, toolName: out.toolName, error: { code: out.error.code, message: out.error.message } });
     return;
   }
