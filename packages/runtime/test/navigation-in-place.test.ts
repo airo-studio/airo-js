@@ -124,6 +124,8 @@ function setup(
     navDefaults?: Record<string, string>;
     postRender?: PageManagerOptions<PageType>['postRender'];
     pages?: Page<PageType>[];
+    /** Page types whose chunk has not loaded: the resolver returns nothing for them. */
+    missing?: Set<PageType>;
   } = {},
 ) {
   const journal: Journal = { calls: [], changes: [], ctxs: [] };
@@ -137,7 +139,8 @@ function setup(
     pages: opts.pages ?? PAGES,
     events,
     appContext: {},
-    resolveRenderer: (type) => () => rendererFor(journal, type, opts.behaviour?.[type]),
+    resolveRenderer: (type) =>
+      opts.missing?.has(type) ? undefined : () => rendererFor(journal, type, opts.behaviour?.[type]),
     enableRouter: opts.router ?? false,
     initialNavState: opts.initialNavState,
     navDefaults: opts.navDefaults,
@@ -1111,6 +1114,71 @@ describe('queued navigations: copied, ordered, and dropped on failure', () => {
     popTo('/shop?w_nav=product');
 
     expect(journal.calls).toEqual(['render:product:-']);
+  });
+});
+
+describe("a page waiting for its chunk: the router's echo is not a second attempt", () => {
+  test('hash mode: one navigate to an unloaded page misses once and fires navigation:changed once', () => {
+    window.location.hash = '';
+    const missing = new Set<PageType>(['product']);
+    const { pm, journal, events } = setup({ router: { mode: 'hash' }, missing });
+    let misses = 0;
+    events.on('renderer:missing', () => {
+      misses++;
+    });
+    pm.mountInitial({ hydrate: false });
+    journal.changes.length = 0;
+
+    pm.navigate({ page: 'product', item: 'b' });
+    expect(window.location.hash).toBe('#product?item=b');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    expect(misses).toBe(1);
+    expect(journal.changes).toEqual([{ page: 'product', item: 'b' }]);
+  });
+
+  test('once the chunk registers, the recovery navigate paints the page', () => {
+    window.location.hash = '';
+    const missing = new Set<PageType>(['product']);
+    const { pm, journal } = setup({ router: { mode: 'hash' }, missing });
+    pm.mountInitial({ hydrate: false });
+    pm.navigate({ page: 'product', item: 'b' });
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    journal.calls.length = 0;
+
+    missing.delete('product');
+    pm.navigate({ page: 'product' });
+
+    expect(journal.calls).toEqual(['render:product:b']);
+  });
+
+  test('while waiting, a router event to a different state still navigates', () => {
+    window.location.hash = '';
+    const missing = new Set<PageType>(['product']);
+    const { pm, journal } = setup({ router: { mode: 'hash' }, missing });
+    pm.mountInitial({ hydrate: false });
+    pm.navigate({ page: 'product' });
+    journal.calls.length = 0;
+
+    window.location.hash = '#list';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    expect(pm.getNavigationState().page).toBe('list');
+    expect(journal.calls).toEqual(['render:list:-']);
+  });
+
+  test('query mode: a router event naming the state of a page still waiting for its chunk does not miss again', () => {
+    const missing = new Set<PageType>(['product']);
+    const { pm, events } = setup({ router: { mode: 'query', paramPrefix: 'w_' }, missing });
+    let misses = 0;
+    events.on('renderer:missing', () => {
+      misses++;
+    });
+    pm.navigate({ page: 'product' });
+
+    window.dispatchEvent(new PopStateEvent('popstate'));
+
+    expect(misses).toBe(1);
   });
 });
 
