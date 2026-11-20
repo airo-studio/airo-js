@@ -659,6 +659,16 @@ Leave the markup as `template` would paint it for `next`, since a reload at the 
 
 A `ctx.navigate` called from inside `render`, `hydrate` or `applyNavState` is a redirect. It is applied after that call returns, and it replaces the history entry the render was for rather than pushing a new one, so Back does not land on a page that redirects again. It still costs a second pass, so resolve a fallback (empty data, an unknown id) in the template rather than by navigating from `render`.
 
+**Count views from what the view announces, not from `navigation:changed` alone.** An in-place step produces two signals in this order. First the view's own selection event fires from its handler, for the shopper's move. Then `navigation:changed` fires with no render behind it. A tracker that reads every `navigation:changed` without a fresh announcement as a new page view counts the step twice, and the second time the product is unknown. Treat a navigation whose only change is the key the view just announced as part of that announcement.
+
+**Keep values you derive out of the URL with `navDefaults`.** Everything in navigation state reaches the URL on the next write. That is right for what the shopper chose and wrong for what the host worked out, such as a region from the visitor's location or a locale from the request. A shared link then carries the sharer's region, and because the URL outranks every other source, it overrides the recipient's. Pass such a key in `navDefaults` (on `mountCartridge` or `createApp`) instead of `initialNavState`:
+
+```ts
+await mountCartridge({ ...opts, navDefaults: { region: regionFromGeo } });
+```
+
+The key holds that value whenever nothing names it, and the router leaves it out of the URL until the shopper changes it. A link with an explicit region still opens on that region, and Back to an entry that does not name it restores the default. On the server, lay the same values under the URL's state in `initialNavState`, so both sides render one state.
+
 ### 2.10 Cartridge metadata vs cartridge state
 
 **Pattern recognised across `Gate.persist`, `DataSource.cacheTtlMs`, `PublicationAdapter.refreshCadence`:** declarative metadata that the *host app* implements behaviourally.

@@ -121,6 +121,7 @@ function setup(
     router?: RouterOption;
     behaviour?: Partial<Record<PageType, RendererBehaviour>>;
     initialNavState?: Partial<NavigationState>;
+    navDefaults?: Record<string, string>;
     postRender?: PageManagerOptions<PageType>['postRender'];
     pages?: Page<PageType>[];
   } = {},
@@ -139,6 +140,7 @@ function setup(
     resolveRenderer: (type) => () => rendererFor(journal, type, opts.behaviour?.[type]),
     enableRouter: opts.router ?? false,
     initialNavState: opts.initialNavState,
+    navDefaults: opts.navDefaults,
     postRender: opts.postRender,
   });
   live.push(pm);
@@ -547,6 +549,173 @@ describe('the router path — a history entry replaces the state', () => {
   });
 });
 
+describe('navDefaults — a derived value stays out of the URL until the visitor changes it', () => {
+  const query: RouterOption = { mode: 'query', paramPrefix: 'w_' };
+  const param = (k: string) => new URLSearchParams(window.location.search).get(k);
+
+  test('at mount the key holds its default and the URL does not carry it', () => {
+    const { pm } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    pm.mountInitial({ hydrate: false });
+
+    expect(pm.getNavigationState().region).toBe('US-NY');
+    expect(param('w_nav')).toBe('home');
+    expect(param('w_region')).toBeNull();
+  });
+
+  test('a navigation that keeps the default does not write it; one that changes it does', () => {
+    const { pm } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    pm.navigate({ page: 'product', item: 'a' });
+    expect(window.location.search).toBe('?w_nav=product&w_item=a');
+
+    pm.navigate({ region: 'US-CA' });
+    expect(param('w_region')).toBe('US-CA');
+
+    pm.navigate({ region: 'US-NY' });
+    expect(param('w_region')).toBeNull();
+  });
+
+  test('the URL outranks the default: a shared link with a region opens on it', () => {
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_region=US-CA');
+    const { pm } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+
+    expect(pm.getNavigationState()).toEqual({ page: 'product', region: 'US-CA' });
+    expect(param('w_region')).toBe('US-CA');
+  });
+
+  test('initialNavState outranks the default and, like any value off the default, is written', () => {
+    const { pm } = setup({
+      router: query,
+      initialNavState: { region: 'US-CA' },
+      navDefaults: { region: 'US-NY' },
+    });
+    pm.mountInitial({ hydrate: false });
+
+    expect(pm.getNavigationState().region).toBe('US-CA');
+    expect(param('w_region')).toBe('US-CA');
+  });
+
+  test('a URL that carries the default value is rewritten without it at mount, and stays without it', () => {
+    window.history.replaceState(null, '', '/shop?w_nav=product&w_region=US-NY');
+    const { pm } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    expect(pm.getNavigationState().region).toBe('US-NY');
+    expect(param('w_region')).toBeNull();
+
+    pm.navigate({ item: 'a' });
+    expect(param('w_region')).toBeNull();
+  });
+
+  test('Back to an entry that does not name the key restores the default', () => {
+    const { pm, journal } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    pm.navigate({ page: 'product' });
+    const atDefault = window.location.pathname + window.location.search;
+    pm.navigate({ region: 'US-CA' });
+    journal.changes.length = 0;
+
+    popTo(atDefault);
+
+    expect(pm.getNavigationState()).toEqual({ page: 'product', region: 'US-NY' });
+    expect(journal.changes).toEqual([{ page: 'product', region: 'US-NY' }]);
+  });
+
+  test("navigating the key to '' or undefined restores the default: a defaulted key always has a value", () => {
+    const { pm } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    pm.navigate({ page: 'product', region: 'US-CA' });
+
+    pm.navigate({ region: '' });
+    expect(pm.getNavigationState().region).toBe('US-NY');
+    pm.navigate({ region: 'US-CA' });
+    pm.navigate({ region: undefined });
+    expect(pm.getNavigationState().region).toBe('US-NY');
+    expect(param('w_region')).toBeNull();
+  });
+
+  test('the router event for a URL that leaves the default out is recognised as the state showing', () => {
+    const { pm, journal } = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    pm.navigate({ page: 'product', item: 'a' });
+    journal.calls.length = 0;
+    journal.changes.length = 0;
+
+    window.dispatchEvent(new PopStateEvent('popstate'));
+
+    expect(journal.calls).toEqual([]);
+    expect(journal.changes).toEqual([]);
+  });
+
+  test("hash mode: the write leaves the default out, and its own echo changes nothing", () => {
+    window.location.hash = '';
+    const { pm, journal } = setup({ router: { mode: 'hash' }, navDefaults: { region: 'US-NY' } });
+    pm.mountInitial({ hydrate: false });
+    journal.calls.length = 0;
+    journal.changes.length = 0;
+
+    pm.navigate({ page: 'product', item: 'b' });
+    expect(window.location.hash).toBe('#product?item=b');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    expect(journal.changes).toEqual([{ page: 'product', item: 'b', region: 'US-NY' }]);
+    expect(journal.calls).toEqual(['destroy:home', 'render:product:b']);
+  });
+
+  test('a runtime remount, which hands the live state back as initialNavState, keeps the default out of the URL', () => {
+    const first = setup({ router: query, navDefaults: { region: 'US-NY' } });
+    first.pm.navigate({ page: 'product', item: 'a' });
+    const snapshot = first.pm.getNavigationState();
+    first.pm.destroy();
+
+    const { pm } = setup({ router: query, initialNavState: snapshot, navDefaults: { region: 'US-NY' } });
+
+    expect(pm.getNavigationState()).toEqual({ page: 'product', item: 'a', region: 'US-NY' });
+    expect(param('w_region')).toBeNull();
+  });
+
+  test('page in navDefaults is ignored: the entry page is the default page', () => {
+    const { pm } = setup({ router: query, navDefaults: { page: 'list', region: 'US-NY' } });
+    pm.mountInitial({ hydrate: false });
+    expect(pm.getNavigationState().page).toBe('home');
+    pm.navigate({ page: 'list' });
+    expect(param('w_nav')).toBe('list');
+  });
+
+  test('ctx.navState and applyNavState see the default', () => {
+    let seen: NavigationState | undefined;
+    const { pm, journal } = setup({
+      navDefaults: { region: 'US-NY' },
+      behaviour: {
+        product: {
+          apply: (next) => {
+            seen = next;
+            return true;
+          },
+        },
+      },
+    });
+    pm.navigate({ page: 'product', item: 'a' });
+    pm.navigate({ item: 'b' });
+
+    expect(journal.ctxs[0]?.navState.region).toBe('US-NY');
+    expect(seen).toEqual({ page: 'product', item: 'b', region: 'US-NY' });
+  });
+
+  test('createApp forwards navDefaults', () => {
+    const app = createApp<PageType>(
+      { appId: 'w', pages: PAGES },
+      {
+        host: document.createElement('div'),
+        appContext: {},
+        resolveRenderer: () => () => ({ render() {}, destroy() {} }),
+        enableRouter: query,
+        navDefaults: { region: 'US-NY' },
+      },
+    );
+    try {
+      expect(app.getNavigationState().region).toBe('US-NY');
+      expect(param('w_region')).toBeNull();
+    } finally {
+      app.destroy();
+    }
+  });
+});
+
 describe('navigate during render — applied after the render returns', () => {
   test('a renderer that navigates to an unknown page renders once and is told why', () => {
     const { pm, journal } = setup({
@@ -560,7 +729,7 @@ describe('navigate during render — applied after the render returns', () => {
     expect(journal.calls).toEqual(['render:home:-']);
     expect(pm.getNavigationState().page).toBe('home');
     expect(
-      logs.some((e) => e.level === 'warn' && e.msg.includes('no page "does-not-exist"')),
+      logs.some((e) => e.level === 'warn' && e.msg.includes('unknown page "does-not-exist"')),
     ).toBe(true);
   });
 
@@ -606,7 +775,7 @@ describe('navigate during render — applied after the render returns', () => {
 
     const renders = journal.calls.filter((c) => c.startsWith('render:'));
     expect(renders.length).toBe(17); // the first render, then 16 applied navigations
-    expect(logs.some((e) => e.level === 'error' && e.msg.includes('never settles'))).toBe(true);
+    expect(logs.some((e) => e.level === 'error' && e.msg.includes('16 queued in a row'))).toBe(true);
   });
 
   test('during hydrate too', () => {

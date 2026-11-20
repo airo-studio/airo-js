@@ -81,6 +81,13 @@ export interface AppDeps<
    */
   initialNavState?: Partial<NavigationState>;
   /**
+   * The value each listed context key holds whenever nothing names it,
+   * kept out of the URL while it holds that value: for state the host
+   * derives (a region from location) rather than the visitor chooses.
+   * Forwarded to `PageManagerOptions.navDefaults`; see there.
+   */
+  navDefaults?: Readonly<Record<string, string>>;
+  /**
    * Host-supplied live config-delta dispatcher. When provided,
    * `PageManager` threads it into every `RenderContext` as
    * `ctx.update`, letting renderers fire delta updates from inside
@@ -174,6 +181,7 @@ export function createApp<
     isGatePage: deps.isGatePage,
     enableRouter: deps.enableRouter,
     initialNavState: deps.initialNavState,
+    navDefaults: deps.navDefaults,
     hostUpdate: deps.hostUpdate,
     postRender: deps.postRender,
   });

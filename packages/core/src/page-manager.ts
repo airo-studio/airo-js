@@ -44,7 +44,8 @@ import type {
 import type { IEventBus } from './events.js';
 import type { IRouter, RouteState, RouterOption } from './router.js';
 import { findEntryPage, resolveEntryPage } from './entry-resolution.js';
-import { createRouter, resolveMountEntry, validPagesFor } from './mount-entry.js';
+import type { NavDefaults } from './mount-entry.js';
+import { createRouter, resolveMountEntry, validPagesFor, withNavDefaults } from './mount-entry.js';
 
 const log = logger('core');
 
@@ -127,6 +128,25 @@ export interface PageManagerOptions<
    */
   initialNavState?: Partial<NavigationState>;
   /**
+   * The value each listed context key holds whenever nothing names it,
+   * kept out of the URL while the key holds that value. For state the host
+   * derives rather than the visitor chooses, such as a region from the
+   * visitor's location: seeded through `initialNavState` it is written
+   * into every URL, so a shared link carries the sharer's region and
+   * overrides the recipient's. Listed here, the URL carries it only once
+   * the visitor changes it.
+   *
+   * - Mount: fills keys the URL and `initialNavState` leave empty.
+   * - Back/Forward: an entry that does not name the key restores its
+   *   default.
+   * - `navigate({ key: '' })` restores the default too: a key listed here
+   *   always has a value.
+   *
+   * `page` is ignored; the entry page is the default page. A server render
+   * gets the same state by laying these under `initialNavState`.
+   */
+  navDefaults?: NavDefaults;
+  /**
    * Host-supplied live config-delta dispatcher (forwarded from
    * `AppDeps.hostUpdate`). When set, every `RenderContext` built by
    * `swapRenderer` / `hydrateEntry` includes `ctx.update` wired to
@@ -204,16 +224,12 @@ export class PageManager<
    */
   private navigationDepth = 0;
   /**
-   * Queued navigations. `state` and `history` are copied when queued, so a
-   * caller that reuses or mutates its objects does not change what runs.
-   * `whole` marks a router-driven entry, which replaces the state instead
+   * Queued navigations. `state` is copied when queued, so a caller that
+   * reuses or mutates its object does not change what runs. `history:
+   * 'none'` marks a router-driven entry, which replaces the state instead
    * of merging into it.
    */
-  private deferred: Array<{
-    state: Partial<NavigationState>;
-    history: RouterWrite;
-    whole: boolean;
-  }> = [];
+  private deferred: Array<{ state: Partial<NavigationState>; history: RouterWrite }> = [];
   private draining = false;
   private destroyed = false;
   /** Teardown returned by the most recent `postRender` invocation, if any. */
@@ -234,6 +250,7 @@ export class PageManager<
       isGatePage: this.isGatePage,
       enableRouter: opts.enableRouter,
       initialNavState: opts.initialNavState,
+      navDefaults: opts.navDefaults,
     }).navState;
 
     if (opts.enableRouter) {
@@ -321,11 +338,8 @@ export class PageManager<
       this.deferred.push({
         state: { ...state },
         history: opts?.history ?? (this.rendererCallDepth > 0 ? 'replace' : 'push'),
-        whole: false,
       });
-      log.debug('navigation requested during another; applied once it completes', {
-        phase: 'navigate',
-      });
+      log.debug('navigate: queued', { phase: 'navigate' });
       return;
     }
     const history = opts?.history ?? 'push';
@@ -333,21 +347,52 @@ export class PageManager<
   }
 
   /**
-   * Run one top-level navigation, then apply what was queued during it.
-   * If it throws, what was queued is dropped: a navigation requested by a
-   * step that failed must not be applied after an unrelated later one.
+   * One navigation step. If it throws, what was queued is dropped: a
+   * navigation requested by a step that failed must not be applied after
+   * an unrelated later one.
    */
-  private runNavigation(run: () => void): void {
+  private step(run: () => void): void {
     this.navigationDepth++;
     try {
       run();
     } catch (err) {
-      this.dropDeferred();
+      this.deferred.length = 0;
       throw err;
     } finally {
       this.navigationDepth--;
     }
-    this.drainDeferred();
+  }
+
+  /**
+   * Run one top-level navigation, then apply what was queued during it, in
+   * order. Each queued navigation is a step of its own, so what it queues
+   * runs after it. Bounded: see `MAX_DEFERRED_NAVIGATIONS`.
+   */
+  private runNavigation(run: () => void): void {
+    this.step(run);
+    if (this.draining || this.navigationDepth > 0) return;
+    this.draining = true;
+    try {
+      for (let n = 0; this.deferred.length > 0 && !this.destroyed; n++) {
+        if (n === MAX_DEFERRED_NAVIGATIONS) {
+          // A renderer that navigates to a new state on every render.
+          log.error(`navigate: ${n} queued in a row; dropping the rest`, undefined, {
+            phase: 'navigate',
+          });
+          this.deferred.length = 0;
+          break;
+        }
+        const { state, history } = this.deferred.shift()!;
+        this.step(() =>
+          this.applyNavigation(
+            (history === 'none' ? state : { ...this.navState, ...state }) as NavigationState,
+            history,
+          ),
+        );
+      }
+    } finally {
+      this.draining = false;
+    }
   }
 
   /**
@@ -356,12 +401,13 @@ export class PageManager<
    * says whether and how to write the URL.
    */
   private applyNavigation(next: NavigationState, history: RouterWrite): void {
+    next = withNavDefaults(next, this.opts.navDefaults);
     let targetPage = next.page
       ? this.pages.find((p) => p.id === next.page)
       : undefined;
 
     if (next.page && !targetPage) {
-      log.warn(`navigate: no page "${next.page}" in the page graph; showing the entry page.`, {
+      log.warn(`navigate: unknown page "${next.page}"; showing the entry page`, {
         pageId: next.page,
         phase: 'navigate',
       });
@@ -418,8 +464,7 @@ export class PageManager<
 
     if (this.router && history !== 'none') {
       try {
-        if (history === 'replace') this.router.replace(this.navState as RouteState);
-        else this.router.push(this.navState as RouteState);
+        this.router[history](this.urlState());
       } catch (err) {
         log.warn(`PageManager router.${history} failed`, { err, phase: 'router' });
       }
@@ -522,8 +567,7 @@ export class PageManager<
       update: this.opts.hostUpdate,
     };
 
-    this.rendererCallDepth++;
-    try {
+    this.inRenderer(() => {
       if (typeof renderer.hydrate === 'function') {
         renderer.hydrate(this.opts.container, ctx);
       } else {
@@ -533,9 +577,7 @@ export class PageManager<
         );
         renderer.render(this.opts.container, ctx);
       }
-    } finally {
-      this.rendererCallDepth--;
-    }
+    });
 
     this.activeRenderer = renderer;
     this.activeCtx = ctx;
@@ -614,21 +656,25 @@ export class PageManager<
       // second time for one navigation. "Showing" needs a mounted renderer:
       // after a render threw, the state names a page that is not on
       // screen, and a router event to that URL is how it gets another try.
-      if (this.activeRenderer && sameRouteState(state as NavigationState, this.navState)) return;
+      // A key the URL leaves out because it holds its default is compared,
+      // and restored, as that default (`navDefaults`).
+      const entry = withNavDefaults({ ...state } as NavigationState, this.opts.navDefaults);
+      if (this.activeRenderer && sameRouteState(entry, this.navState)) return;
       // A history entry is the whole state at that point, so restoring it
       // REPLACES the current state with the entry's, never merging into it
       // and never laying it over `initialNavState`: a key the entry does not
       // name must not survive from the state being left. That holds because
-      // every entry is complete: each write is the whole state, and the
-      // mount rewrites its own entry to include what `initialNavState`
-      // added (`initRouter`). A base here would also replay a runtime
-      // remount's snapshot, which arrives as `initialNavState`, on every
-      // later Back.
+      // every entry is complete: each write is the whole state less its
+      // `navDefaults` values, and the mount rewrites its own entry to
+      // include what `initialNavState` added (`initRouter`). A base of
+      // `initialNavState` here would also replay a runtime remount's
+      // snapshot, which arrives as `initialNavState`, on every later Back;
+      // `navDefaults` is the base that is meant to hold on every entry.
       if (this.navigationDepth > 0) {
-        this.deferred.push({ state: { ...state }, history: 'none', whole: true });
+        this.deferred.push({ state: entry, history: 'none' });
         return;
       }
-      this.runNavigation(() => this.applyNavigation({ ...state } as NavigationState, 'none'));
+      this.runNavigation(() => this.applyNavigation(entry, 'none'));
     };
 
     try {
@@ -643,10 +689,12 @@ export class PageManager<
       // bar reflects the entry page; and when `initialNavState` added keys
       // the URL lacks, so this entry carries them. Every history entry then
       // holds the whole state, which is what lets Back/Forward restore an
-      // entry exactly (see `onRouterNavigate`).
+      // entry exactly (see `onRouterNavigate`). Keys at their `navDefaults`
+      // value are left out of it.
       const fromUrl = this.router.parseCurrent();
-      if (!fromUrl || !sameRouteState(fromUrl as NavigationState, this.navState)) {
-        this.router.replace(this.navState as RouteState);
+      const own = this.urlState();
+      if (!fromUrl || !sameRouteState(fromUrl as NavigationState, own as NavigationState)) {
+        this.router.replace(own);
       }
     } catch (err) {
       log.warn(`Router (${mode}) init failed; URL routing disabled.`, { err, phase: 'router' });
@@ -687,12 +735,7 @@ export class PageManager<
       navigate: (s, o) => this.navigate(s, o),
       update: this.opts.hostUpdate,
     };
-    this.rendererCallDepth++;
-    try {
-      renderer.render(this.opts.container, ctx);
-    } finally {
-      this.rendererCallDepth--;
-    }
+    this.inRenderer(() => renderer.render(this.opts.container, ctx));
 
     this.activeRenderer = renderer;
     this.activeCtx = ctx;
@@ -701,12 +744,24 @@ export class PageManager<
   }
 
   /**
-   * A navigation step threw: drop what was queued. A navigation a failed
-   * step asked for must not be applied later, after an unrelated
-   * navigation the visitor made.
+   * Run a renderer call (`render`, `hydrate`, `applyNavState`). A
+   * `navigate` from inside one is a redirect (see `navigate`).
    */
-  private dropDeferred(): void {
-    this.deferred.length = 0;
+  private inRenderer<T>(call: () => T): T {
+    this.rendererCallDepth++;
+    try {
+      return call();
+    } finally {
+      this.rendererCallDepth--;
+    }
+  }
+
+  /** The state as the URL carries it: keys at their `navDefaults` value left out. */
+  private urlState(): RouteState {
+    const out: RouteState = { ...this.navState };
+    const defaults = this.opts.navDefaults;
+    for (const k in defaults) if (k !== 'page' && out[k] === defaults[k]) delete out[k];
+    return out;
   }
 
   /**
@@ -719,61 +774,20 @@ export class PageManager<
     renderer: PageRenderer<TPageType, TAppContext>,
     previous: NavigationState,
   ): boolean {
-    if (typeof renderer.applyNavState !== 'function') return false;
+    const apply = renderer.applyNavState;
+    if (typeof apply !== 'function') return false;
     let applied = false;
-    this.rendererCallDepth++;
     try {
-      applied = renderer.applyNavState({ ...this.navState }, { ...previous }) === true;
+      applied =
+        this.inRenderer(() => apply.call(renderer, { ...this.navState }, { ...previous })) === true;
     } catch (err) {
       // The page is rendered again, so the throw goes no further, but what
       // the failed call queued is dropped all the same.
-      this.dropDeferred();
-      log.error('applyNavState threw; rendering the page again.', err, { phase: 'navigate' });
-    } finally {
-      this.rendererCallDepth--;
+      this.deferred.length = 0;
+      log.error('applyNavState threw; rendering again', err, { phase: 'navigate' });
     }
     if (applied && this.activeCtx) this.activeCtx.navState = this.navState;
     return applied;
-  }
-
-  /**
-   * Apply the navigations queued while another was in progress, in order.
-   * Each runs as a navigation of its own, so what it queues is applied
-   * after it. Runs once the outermost navigation completes. Bounded: see
-   * `MAX_DEFERRED_NAVIGATIONS`.
-   */
-  private drainDeferred(): void {
-    if (this.draining || this.navigationDepth > 0) return;
-    this.draining = true;
-    try {
-      let applied = 0;
-      while (this.deferred.length > 0 && !this.destroyed) {
-        if (applied === MAX_DEFERRED_NAVIGATIONS) {
-          log.error(
-            `navigate: a renderer requested ${MAX_DEFERRED_NAVIGATIONS} navigations in a row from inside render; dropping the rest. A renderer that navigates on every render never settles.`,
-            undefined,
-            { phase: 'navigate' },
-          );
-          this.deferred.length = 0;
-          break;
-        }
-        const item = this.deferred.shift();
-        if (!item) break;
-        applied++;
-        const next = (item.whole ? { ...item.state } : { ...this.navState, ...item.state }) as NavigationState;
-        this.navigationDepth++;
-        try {
-          this.applyNavigation(next, item.history);
-        } catch (err) {
-          this.dropDeferred();
-          throw err;
-        } finally {
-          this.navigationDepth--;
-        }
-      }
-    } finally {
-      this.draining = false;
-    }
   }
 
   /**

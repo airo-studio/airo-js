@@ -101,6 +101,26 @@ export interface ResolveMountEntryOptions<TPageType extends string> {
   enableRouter?: RouterOption;
   /** Host-supplied mount-time state; outranks the default entry, outranked by the URL. */
   initialNavState?: Partial<NavigationState>;
+  /** Values for context keys nothing else named (see `PageManagerOptions.navDefaults`). */
+  navDefaults?: NavDefaults;
+}
+
+/**
+ * The value a context key holds whenever nothing names it, and leaves out
+ * of the URL while it holds that value (`PageManagerOptions.navDefaults`).
+ */
+export type NavDefaults = Readonly<Record<string, string>>;
+
+/**
+ * Fill every key of `defaults` that `state` leaves empty (absent or `''`).
+ * `page` is never defaulted. Returns `state` itself when there are no
+ * defaults, a copy otherwise.
+ */
+export function withNavDefaults(state: NavigationState, defaults?: NavDefaults): NavigationState {
+  if (!defaults) return state;
+  const out = { ...state };
+  for (const k in defaults) if (k !== 'page' && !out[k]) out[k] = defaults[k];
+  return out;
 }
 
 export interface MountEntry<TPageType extends string> {
@@ -127,13 +147,15 @@ export function resolveMountEntry<TPageType extends string>(
   const isGate = opts.isGatePage ?? (() => false);
   const entry = findEntryPage(opts.pages, isGate);
   // Seed precedence: default entry → host-supplied initialNavState → URL
-  // state. Last write wins, so URL beats host config beats default.
+  // state. Last write wins, so URL beats host config beats default. Then
+  // `navDefaults` fills the context keys none of them named.
   let navState: NavigationState = {
     page: entry?.id ?? '',
     ...(opts.initialNavState ?? {}),
   };
   const parsed = parseRouterUrl(opts.enableRouter, validPagesFor(opts.pages, isGate));
   if (parsed) navState = { ...navState, ...parsed };
+  navState = withNavDefaults(navState, opts.navDefaults);
   const resolution = describeEntryResolution(opts.pages, isGate, navState.page);
   return { navState, resolution, page: resolution.page };
 }

@@ -20,11 +20,12 @@
  * is allowed and is a changelog line — the gate exists so growth is a
  * decision, not a discovery.
  *
- * Raised for core 0.11.1 to 32 KB / 10 KB: the line measures 31,057 B /
- * 10,110 B, from 28,585 B / 9,398 B on 0.11.0 (+2,472 B / +712 B). That is
+ * Raised for core 0.11.1 to 32 KB / 10 KB: the line measures 31,055 B /
+ * 10,115 B, from 28,585 B / 9,398 B on 0.11.0 (+2,470 B / +717 B). That is
  * in-place navigation (`PageRenderer.applyNavState`), the ordered queue for
- * navigations requested during another, the exact Back/Forward restore and
- * the router echo check, all of it on the navigation path every mount runs.
+ * navigations requested during another, the exact Back/Forward restore,
+ * the router echo check and `navDefaults`, all of it on the navigation path
+ * every mount runs.
  *
  * Needs sibling packages built (`pnpm build` at the root) because the
  * peers resolve to their `dist` through the workspace links.
