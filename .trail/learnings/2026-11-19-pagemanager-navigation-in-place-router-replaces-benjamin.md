@@ -32,4 +32,4 @@ touches:
 ## Watch out
 - A hash-mode `push` assigns `location.hash`, and its `hashchange` echoes back through the router. `sameRouteState` drops the echo, treating `''` as absent because routers drop empty values. Remove that check and hash mode fires `navigation:changed` twice again.
 - happy-dom does not bump `history.length` on a hash assignment. Assert a hash `replace` through a `history.replaceState` spy.
-- Tests that assert warn-level logs need `setLogLevel('warn')`; the default threshold is `'error'`.
+- `@airo-js/log`'s default threshold is `'warn'` (packages/log/src/index.ts `DEFAULT_LEVEL`, since 749e72b), so a test sink sees warn and error with no `setLogLevel`; asserting an info or debug line needs `setLogLevel('debug')`. (Corrected 2026-11-20: this line said the default was `'error'`.)

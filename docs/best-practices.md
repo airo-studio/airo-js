@@ -669,6 +669,8 @@ await mountCartridge({ ...opts, navDefaults: { region: regionFromGeo } });
 
 The key holds that value whenever nothing names it, and the router leaves it out of the URL until the shopper changes it. A link with an explicit region still opens on that region, and Back to an entry that does not name it restores the default. On the server, lay the same values under the URL's state in `initialNavState`, so both sides render one state.
 
+Pass no default for a key the URL already names. The framework cannot tell a value a link chose from a default that happens to match it, so a shared `region=US-NY` opened by a visitor whose derived region is also US-NY would be dropped from the address bar. A reload somewhere else would then show a different state. When the request's URL names the key, the URL's value is the seed: leave that key out of `navDefaults`.
+
 ### 2.10 Cartridge metadata vs cartridge state
 
 **Pattern recognised across `Gate.persist`, `DataSource.cacheTtlMs`, `PublicationAdapter.refreshCadence`:** declarative metadata that the *host app* implements behaviourally.

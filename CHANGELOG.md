@@ -2,6 +2,15 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com); each package versions independently per [SemVer](https://semver.org).
 
+## `@airo-js/core` 0.11.2 — 2026-11-20
+
+The follow-up 0.11.1 named as a known edge. Core alone; cartridge-kit 0.11.3 and runtime 0.11.3 already accept it (`^0.11.1`). The runtime closure grows by 28 B gzip (10,115 → 10,143 B), inside its budget.
+
+### Fixed
+- **In hash mode, a navigation to a page whose chunk had not loaded ran chunk recovery twice.** The navigation found no renderer and announced `renderer:missing`. Its URL write then came back as `hashchange`, and with nothing mounted, the router's echo check took it for a new navigation. That produced a second miss, a second recovery dispatch, a duplicate "chunk loaded" log line and an extra `navigation:changed`. 0.11.1 introduced it: before then, every router event was merged and applied, and the check that drops a hash write's echo was new. A page waiting for its chunk now counts as showing for that check, so the echo is dropped and the recovery paints the page once. A router event to any other state still navigates. A render that threw still gets another try from a router event to its URL, because a throw is not a wait. Query and path mode had the same gap for a router event naming the waiting state, without the automatic echo.
+
+**Upgrading:** nothing to do. If you counted `renderer:missing` or `navigation:changed` in hash mode with lazy-loaded chunks, expect one of each per navigation again, plus the recovery's `navigation:changed` once the chunk paints.
+
 ## Why navigation in place is a patch, on three packages
 
 A consumer asked for a way to put a view's in-place state into the URL without the view being rendered again (`msg_mwnsg67c_311d6c`). Four open reports against the same sixty lines of `PageManager.navigate` and its router path came with it, and one of them decides whether the feature works at all: Back to an entry that does not name a key kept the key from the state being left (`msg_mv7u2ivj_e1e2ad`), which would have left an in-place view on the wrong item after Back. So they ship together in `@airo-js/core` 0.11.1.

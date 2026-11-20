@@ -360,4 +360,79 @@ describe('mountCartridge resolveView recovery (0.8.7)', () => {
     await vi.waitFor(() => expect(sink).toContain('render'));
     expect(resolveView).toHaveBeenCalledTimes(2);
   });
+
+  test("hash mode: navigating to an unloaded page recovers once — its own hashchange is not a second miss", async () => {
+    // The URL write of a hash-mode navigation comes back as `hashchange`.
+    // With the page waiting for its chunk nothing is mounted, and the echo
+    // used to be taken for a new navigation: a second miss, a second
+    // recovery dispatch, a duplicate success log and navigation:changed.
+    const captured: AiroEvent[] = [];
+    setSink({ emit: (e) => captured.push(e) });
+    setLogLevel('debug');
+    const original = window.location.href;
+    window.history.replaceState(null, '', '/shop');
+    try {
+      const productSink: string[] = [];
+      const cartridge = fakeCartridge({
+        id: 'rt-rv-hash-echo',
+        mailboxName: '__AIRO_RT_RV_HASH_ECHO_PAGES__',
+        templates: [],
+      });
+      const template = {
+        ...fakeTemplate(),
+        pages: [
+          { id: 'home', type: 'home', enabled: true },
+          { id: 'product', type: 'product', enabled: true },
+        ],
+      };
+      let release: () => void = () => {};
+      const gate = new Promise<void>((res) => {
+        release = res;
+      });
+      const resolveView = vi.fn(async (_cid: string, pageType: string) => {
+        await gate;
+        pushToMailbox(cartridge.mailboxName, {
+          key: pageType,
+          factory: () => recordingRenderer(productSink),
+        });
+      });
+
+      const result = await mountCartridge<TestData, TestConfig>({
+        cartridge,
+        config: {},
+        template,
+        host,
+        preloadedData: { items: [] },
+        enableRouter: { mode: 'hash' },
+        resolveView,
+      });
+      if (result.blocked) throw new Error('expected unblocked');
+      let misses = 0;
+      let changes = 0;
+      result.app.events.on('renderer:missing', () => {
+        misses++;
+      });
+      result.app.events.on('navigation:changed', () => {
+        changes++;
+      });
+
+      result.app.navigate({ page: 'product' });
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      release();
+      await vi.waitFor(() => expect(productSink).toContain('render'));
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(misses).toBe(1);
+      expect(resolveView).toHaveBeenCalledTimes(1);
+      expect(productSink.filter((c) => c === 'render')).toHaveLength(1);
+      // The navigation, then the recovery's repaint.
+      expect(changes).toBe(2);
+      expect(
+        captured.filter((e) => e.channel === 'runtime' && e.msg.startsWith('chunk loaded')),
+      ).toHaveLength(1);
+      result.destroy();
+    } finally {
+      window.history.replaceState(null, '', original);
+    }
+  });
 });
