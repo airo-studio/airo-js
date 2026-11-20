@@ -157,6 +157,17 @@ async function browserCheck(base) {
         });
         if (clicked !== expectClick) failures.push(`${path}: hydrate() listener did not fire (got ${clicked})`);
       }
+      if (path === '/post/hello') {
+        // An in-page anchor is the one link here the router can see: the
+        // path router listens for `popstate`, which a fragment navigation
+        // fires. A hydrate-only view must absorb it without being rendered.
+        await page.click('.site-toc a');
+        await page.waitForTimeout(300);
+        const hash = await page.evaluate(() => window.location.hash);
+        if (!hash) failures.push(`${path}: the table-of-contents link did not move to its anchor`);
+        const stillThere = await page.evaluate(() => !!document.querySelector('#app .site-title'));
+        if (!stillThere) failures.push(`${path}: following an in-page anchor emptied the page`);
+      }
       for (const p of problems) failures.push(`${path}: ${p}`);
       await page.close();
     }
