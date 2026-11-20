@@ -6,7 +6,49 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
 
 A scaffold emits code against an API, and that API freezes at 1.0 — so the finished CLI belongs with 1.0. It ships early, as `1.0.0-beta.N` on the `beta` dist-tag, because a new consumer is starting now, and one outside team scaffolding a project before the freeze is the best test the templates will get. The beta is labelled wherever it shows up: the CLI banner, the generated README, and `"airo".scaffoldedWith` in every generated `package.json`, so 1.0's migration notes can say exactly which projects they apply to.
 
-Templates pin the line that is on npm today — `^0.11.0`, with `@airo-js/runtime` and `@airo-js/ssr` at `^0.11.1` and `@airo-js/log` at `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+Templates pin the versions that are on npm today — `@airo-js/core` `^0.11.1`, `cartridge-kit`, `runtime` and `ssr` `^0.11.3`, `embed` and `mcp` `^0.11.0`, and `@airo-js/log` `^0.3.1` (exact versions with `--exact`). Under 0.x a caret takes patches on the line and stops at the next minor, so a beta-scaffolded project stays on 0.11 when 1.0 ships. It needs migrating then; it does not break.
+
+## `create-airo` 1.0.0-beta.3 — 2026-11-20
+
+A packed tarball, like the betas before it; not published to npm. The templates move onto the 0.11 line as it stands today (core 0.11.1, cartridge-kit, runtime and ssr 0.11.3), and a review of the `site` scaffold turned up one real leak, which is the first item below.
+
+### Fixed
+- **`POST /mcp/call` served an unpublished post.** The page route 404s `/post/unfinished`, and the sitemap and `llms.txt` leave it out, but `/mcp/call` built a snapshot for any `slug` and `get_section` never checks `isPublished`, so an agent could read a draft's text that no search engine or visitor could. One `withheld()` decision, "is this a post that does not exist, or one the `crawler-surface` adapter refused", now serves the page route and `/mcp/call`; a withheld or unknown `slug` answers `404 { ok: false, error: { code: 'not-found', message: 'no such page' } }`. The smoke checks `get_section` and `list_posts` on the draft, `get_section` on an unknown post, and that `list_posts` never names the draft; the first of these failed against beta.2.
+- **The templates named stale versions.** `@airo-js/core` 0.11.0, `cartridge-kit` 0.11.0, `runtime` 0.11.1 and `ssr` 0.11.1 are now 0.11.1, 0.11.3, 0.11.3 and 0.11.3. They move together because the links between @airo-js packages are peer ranges.
+- **A fresh scaffold failed `npm audit --audit-level=high`.** happy-dom up to 21.0.3 now carries advisories (code execution through an import alias, SSRF through an iframe); the template ships `^21.0.4`.
+- **`create-airo` ran on Node 20 and scaffolded a project that needs Node `^22.12.0 || >=24.0.0`** (Vitest 5), so the first failure was an install full of engine warnings. The CLI now checks `process.versions.node` after `--help` and `--version`, refuses with the required range and "Nothing was written", and its own `engines` say the same. A test pins the range to both package.json files.
+- **`@airo-js/log` was declared and never used.** The server logs through a `site` logger (`AIRO_LOG=debug npm start` takes the same grammar as `?airo-log=`), a refused tool call is a `warn` and a tool that threw is an `error`, and `client.ts` calls `initLogControls()` and logs a failed mount through the same logger. `mountCartridge` already applied `?airo-log=`, so this changes no behaviour in the browser and no bytes in `client.js`.
+
+### Changed
+- **The browser's views are hydrate-only.** The site mounts `mode: 'hydrate'` over server markup and never renders a page in the browser, yet `defineSSRSafeRenderer` shipped every `template` in `client.js`. `cartridge.ts` now builds its views with `defineHydrateOnlyRenderer` and `capabilities: ['hydrate-only']`, from the shared handlers in a new `src/hydrate.ts`; `cartridge.server.ts` supplies `defineSSRSafeRenderer({ template, hydrate })` with the templates in a new, server-only `src/markup.server.ts`. A browser path that does need a render (a `mode: 'csr'` mount, a client-side navigation, a `csr-only` view) now throws, naming the page; give that view a full renderer in `cartridge.ts`. `client.js` is 12,276 B gzipped before and 11,826 B after. `test/hydration.test.ts` now proves in-place adoption and that the listener fires, keeps the byte-identical render check on the server cartridge, and asserts the browser cartridge refuses a csr render; the smoke's server-only check covers the template.
+- The smoke's size note says about 11.8 kB, not 11; the budget stays 15 kB.
+- The e2e follows an in-page anchor on a hydrate-only page and checks the console stays clean.
+
+### Upgrading an existing project
+Nothing here is forced by the framework; the first two are worth doing.
+1. **Versions.** In `package.json` set `@airo-js/core` `^0.11.1` and `@airo-js/cartridge-kit`, `@airo-js/runtime` and `@airo-js/ssr` `^0.11.3` together, and `happy-dom` `^21.0.4`; `npm install`.
+2. **Close the MCP leak.** In `src/server.ts`, add beside `snapshotFor`:
+   ```ts
+   function withheld(
+     state: Partial<NavigationState> | undefined,
+     snapshot: SiteData,
+     adapterResults: ReadonlyArray<{ adapterId: string; included: boolean }>,
+   ): boolean {
+     const missingPost = state?.page === 'post' && !snapshot.post;
+     const refused = adapterResults.some((r) => r.adapterId === 'crawler-surface' && !r.included);
+     return missingPost || refused;
+   }
+
+   async function publishableSnapshot(state: Partial<NavigationState> | undefined): Promise<SiteData | undefined> {
+     const snapshot = await snapshotFor(state);
+     const results = await runPublicationAdapters(cartridge, snapshot, publicationCtx, { adapterIds: ['crawler-surface'] });
+     return withheld(state, snapshot, results) ? undefined : snapshot;
+   }
+   ```
+   In the `/mcp/call` handler replace `await snapshotFor(state)` with `const snapshot = await publishableSnapshot(state); if (!snapshot) { res.status(404).json({ ok: false, error: { code: 'not-found', message: 'no such page' } }); return; }`, and have the page route's existing "post missing or refused" test call `withheld(initialNavState, snapshot, result.adapterResults)`. If your own tools return post content, this is the check that keeps a draft out of them.
+3. **Hydrate-only views (optional, about 0.5 kB on the scaffold, more with real templates).** Only if your pages are always server-rendered and hydrated. Move each view's `hydrate` into a browser-safe `src/hydrate.ts`, each `template` into a server-only module, build the views in `cartridge.ts` with `defineHydrateOnlyRenderer({ hydrate })` and `capabilities: ['hydrate-only']`, and build the server views in `cartridge.server.ts` with `defineSSRSafeRenderer({ template, hydrate })` spread over the browser views. Point any test that mounts `mode: 'csr'` at the server cartridge, or hydrate over server markup. Keep a view as it is if you navigate on the client or have a `csr-only` page.
+4. **Logging (optional).** `import { initLogControls, logger } from '@airo-js/log'`; call `initLogControls()` at the top of `client.ts`, and use `logger('site')` in place of `console.error` in the server and the client.
+5. **Node.** Use Node `^22.12.0 || >=24.0.0` for the project and its CI.
 
 ## `create-airo` 1.0.0-beta.2 — 2026-09-17
 

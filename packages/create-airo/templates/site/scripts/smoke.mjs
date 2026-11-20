@@ -16,7 +16,7 @@ import { gzipSync } from 'node:zlib';
 
 /**
  * The most `/client.js` may weigh gzipped, in bytes. As scaffolded it is
- * about 11 kB, nearly all of it the framework runtime. Raise this on
+ * about 11.8 kB, nearly all of it the framework runtime. Raise this on
  * purpose when your site needs more, never by accident. (Express serves the
  * file uncompressed; put a CDN or `compression` in front of it in production.)
  */

@@ -102,7 +102,7 @@ spot say why.
 - `POST /mcp/call` answers 404 for a post the site withholds, the same as its
   url, so an agent cannot read a draft.
 - The browser bundle is minified, and the smoke fails if it grows past
-  `CLIENT_JS_GZIP_BUDGET` (15 kB gzipped; about 11 kB as scaffolded).
+  `CLIENT_JS_GZIP_BUDGET` (15 kB gzipped; about 11.8 kB as scaffolded).
 - Every visible string, including the 404 page, is in `content.ts`.
 - A failed agent call is logged on the server, and its underlying error is
   never sent back to the caller.
