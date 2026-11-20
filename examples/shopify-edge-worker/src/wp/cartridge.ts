@@ -17,7 +17,7 @@ import type {
 import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
 import { escapeAttr, escapeHtml } from '@airo-js/core';
 
-import { postJsonLdAdapter } from './adapters.js';
+import { postJsonLdAdapter, postCrawlerSurfaceAdapter } from './adapters.js';
 import { POST_TOOLS } from './mcp.js';
 import { fetchWpPost } from './client.js';
 import { hashSnapshot } from '../snapshot-id.js';
@@ -164,7 +164,7 @@ export const wpPostCartridge: Cartridge<PostSnapshot, WpConfig> = {
   dataSources: [wpPostDataSource],
   views: [postView],
   templates: [defaultTemplate],
-  publicationAdapters: [postJsonLdAdapter],
+  publicationAdapters: [postJsonLdAdapter, postCrawlerSurfaceAdapter],
   mcpTools: POST_TOOLS,
 
   defaultConfig,

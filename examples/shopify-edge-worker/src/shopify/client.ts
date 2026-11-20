@@ -128,7 +128,9 @@ export async function fetchShopifyProduct(
   // Debug log — comment out for production. Surfaces what URL the worker
   // is actually hitting plus the upstream response shape. Wrangler dev
   // prints these to the terminal running it.
-  console.log('[shopify] POST', url, 'handle=', opts.handle, 'token=', opts.token?.slice(0, 6) + '…');
+  // Never any part of the token: a prefix narrows a leaked key, and worker
+  // logs are kept and shared. Whether one is set is all this line needs.
+  console.log('[shopify] POST', url, 'handle=', opts.handle, 'token set=', Boolean(opts.token));
 
   const res = await fetch(url, {
     method: 'POST',

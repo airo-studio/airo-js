@@ -32,7 +32,7 @@ import type {
 import { defineSSRSafeRenderer } from '@airo-js/cartridge-kit';
 import { escapeAttr, escapeHtml } from '@airo-js/core';
 
-import { productJsonLdAdapter, merchantCenterXmlAdapter } from './adapters.js';
+import { productJsonLdAdapter, productCrawlerSurfaceAdapter, merchantCenterXmlAdapter } from './adapters.js';
 import { PRODUCT_TOOLS } from './mcp.js';
 import { fetchShopifyProduct } from './client.js';
 import { hashSnapshot } from '../snapshot-id.js';
@@ -227,7 +227,7 @@ export const shopifyProductCartridge: Cartridge<ProductSnapshot, ShopifyConfig> 
   dataSources: [shopifyProductDataSource],
   views: [productView],
   templates: [defaultTemplate],
-  publicationAdapters: [productJsonLdAdapter, merchantCenterXmlAdapter],
+  publicationAdapters: [productJsonLdAdapter, productCrawlerSurfaceAdapter, merchantCenterXmlAdapter],
   mcpTools: PRODUCT_TOOLS,
 
   defaultConfig,

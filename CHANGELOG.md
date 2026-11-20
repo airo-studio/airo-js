@@ -94,6 +94,24 @@ A packed tarball, like beta.0; not published to npm.
 - **One template, `site`.** An Express server that renders every page, a browser bundle that hydrates it without redrawing, and a sitemap, `llms.txt`, JSON-LD and two agent tools that read the same snapshot the pages render. The mistakes that fail without an error are decided in the template, each with its reason at the spot: the data source calls `schema.parse()`; views and pages share one `PageType` union; status codes come from `fellBack.reason` before `skipped.reason`; page metadata uses `defineCrawlerSurfaceAdapter`; only fields an adapter cannot do without are `required: 'always'`; adapters and tools live in a server-only file; transformers get the navigation state the runtime computes; a failed tool call's `cause` is logged, never returned. `widget` and `cartridge` templates follow in later betas.
 - **Gates that keep the templates honest.** The per-package version map must equal this repo's package versions, every template must name `@airo-js` versions only through the map, and `npm pack --dry-run` must list every template file — the one failure that breaks every user of a template while looking fine on disk. `pnpm e2e:create-airo`, in CI on Node 20 and 24, scaffolds each template outside the repo, installs it from packed tarballs with strict peers and no auto-installed peers, then typechecks, builds, tests, serves and smoke-tests it, and in Chromium checks that hydration adopts the server's DOM and attaches its listeners. Template sources and `scripts/*.mjs` are now linted.
 
+## `@airo-js/core` 0.11.3 — 2026-11-20
+
+A size patch. Core alone; cartridge-kit 0.11.3 and runtime 0.11.3 already accept it (`^0.11.1`). No behaviour or API changes.
+
+### Changed
+- **`PageManager`'s internals are `#private` fields and methods, not TypeScript `private`.** A minifier may shorten a `#name` but has to keep a property name whole, and `PageManager` is on the path every mount pays for. Measured with esbuild, minified, gzip -9:
+
+  | build target | core 0.11.2 | core 0.11.3 | change |
+  |---|---|---|---|
+  | es2022 | 7,343 B | 7,178 B | −165 B |
+  | `chrome111`, `edge111`, `safari16.2`, `firefox113` | 7,343 B | 7,178 B | −165 B |
+  | es2020 | 7,445 B | 7,719 B | +274 B |
+  | runtime closure (the runtime size gate, es2022) | 10,143 B | 9,970 B | −173 B |
+
+  terser shortens `#private` names too: −160 B at the browser targets. es2020 does not support `#private`, so a build that lowers to it rewrites each member into helper code and grows. Every consumer we know of builds at es2022 or a browser list above it. The members were never part of the API, and `PageManager`'s public methods are unchanged.
+
+**Upgrading:** nothing to do if your build targets es2022 or later, or a browser list that supports class private members (Chrome 84, Safari 15, Firefox 90). If it lowers to es2020, raise the target to keep the saving, or expect about +270 B gzip on core.
+
 ## `@airo-js/core` 0.11.2 — 2026-11-20
 
 The follow-up 0.11.1 named as a known edge. Core alone; cartridge-kit 0.11.3 and runtime 0.11.3 already accept it (`^0.11.1`). The runtime closure grows by 28 B gzip (10,115 → 10,143 B), inside its budget.

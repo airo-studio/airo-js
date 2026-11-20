@@ -15,7 +15,7 @@
  * surface, same framework contract.
  */
 
-import type { PublicationAdapter, SchemaFieldRef } from '@airo-js/cartridge-kit';
+import { defineCrawlerSurfaceAdapter, type PublicationAdapter, type SchemaFieldRef } from '@airo-js/cartridge-kit';
 
 import type { ProductJsonLd, ProductSnapshot, ShopifyConfig } from './types.js';
 import { toProductJsonLd } from './jsonld.js';
@@ -259,3 +259,33 @@ export const merchantCenterXmlAdapter: PublicationAdapter<
     return validateMerchantCenterXml(output);
   },
 };
+
+/**
+ * Canonical, OpenGraph and Twitter Card for the page `<head>`, from the same
+ * snapshot as the JSON-LD and the card. The worker folds it in with
+ * `headFromPublication(adapterResults)` rather than composing a canonical by
+ * hand, so the canonical a crawler reads cannot differ from the `url` in the
+ * JSON-LD (both are `onlineStoreUrl`) and `validate()` still gates it.
+ *
+ * `canonical` is `''` for a product with no storefront URL, and the factory's
+ * `validate()` blocks publish on a missing canonical. The page still renders
+ * (the card does not depend on it); it just carries no canonical and no
+ * OpenGraph, instead of a canonical invented from whichever URL the request
+ * happened to arrive on. An unpublished product has no canonical identity.
+ */
+export const productCrawlerSurfaceAdapter = defineCrawlerSurfaceAdapter<ProductSnapshot, ShopifyConfig>({
+  requires: [
+    { path: 'title', required: 'always' },
+    { path: 'description', required: 'preferred' },
+    { path: 'featuredImageUrl', required: 'preferred' },
+    { path: 'onlineStoreUrl', required: 'preferred' },
+  ],
+  select: {
+    canonical: (p) => p.onlineStoreUrl ?? '',
+    title: (p) => p.title,
+    description: (p) => p.description,
+    siteName: (p) => p.vendor,
+    image: (p) => p.featuredImageUrl ?? p.images[0] ?? undefined,
+    ogType: () => 'product',
+  },
+});
