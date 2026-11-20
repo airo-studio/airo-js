@@ -2,7 +2,8 @@
  * The command, as a function: `run(argv, io)` resolves to an exit code.
  *
  *   0  scaffolded (or `--help` / `--version` / `--dry-run`)
- *   1  could not scaffold — target not empty, a write failed, no templates
+ *   1  could not scaffold — target not empty, a write failed, no templates,
+ *      or a Node too old for the project (see `node-support.ts`)
  *   2  invoked wrongly — unknown flag, unknown template, nothing to prompt with
  *
  * ## Why this writes by default
@@ -24,6 +25,7 @@ import { join, relative } from 'node:path';
 import { type CliArgs, parseCliArgs, UsageError, usage } from './args.js';
 import { VERSION } from './index.js';
 import { deriveNames, nameVars } from './names.js';
+import { isSupportedNode, NODE_ENGINES } from './node-support.js';
 import {
   DEFAULT_TEMPLATES_ROOT,
   isEmptyTarget,
@@ -40,6 +42,8 @@ export interface RunOptions {
   templates?: readonly TemplateInfo[];
   /** Override where template directories are read from. Tests only. */
   templatesRoot?: string;
+  /** Override `process.versions.node`. Tests only. */
+  nodeVersion?: string;
 }
 
 const FALLBACK_NAME = 'airo-app';
@@ -66,6 +70,18 @@ export async function run(argv: readonly string[], io: Io, opts: RunOptions = {}
   }
 
   io.stdout(banner(io));
+
+  // Before anything is chosen or written: the CLI runs on older Node than the
+  // project it scaffolds, so say so now rather than in a failed install.
+  const nodeVersion = opts.nodeVersion ?? process.versions.node;
+  if (!isSupportedNode(nodeVersion)) {
+    io.stderr(
+      `${style(io, 'red', 'error')} Node ${nodeVersion} is too old for the project this scaffolds, ` +
+        `which needs Node ${NODE_ENGINES}.\n` +
+        'Switch to a supported Node (nvm, fnm, or your installer) and run the command again. Nothing was written.\n',
+    );
+    return 1;
+  }
 
   try {
     if (templates.length === 0) {
