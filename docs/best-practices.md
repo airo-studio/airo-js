@@ -608,6 +608,67 @@ class CategoriesRenderer implements PageRenderer<'categories', AppCtx> {
 
 If a future cartridge needs dynamic page-graph composition, the framework adds `findNextEnabledPage(pages, fromId, direction)` to `@airo-js/core` (where `Page<T>` lives). Don't lift dynamic walks into individual cartridges.
 
+### 2.9b State in the URL without a re-render — `applyNavState`
+
+**The trap:** a view that changes in place (a carousel, a variant picker, tabs) has state that belongs in the shareable URL, so a shopper can copy it and a server render can open on it. `ctx.navigate({ item })` puts it there, but a context change on the same page destroys the renderer and renders it again: the transition is cut off, focus falls to `<body>`, and `hydrate` runs again, announcing the selection a second time. The workaround, calling `history.replaceState` from the view, leaves navigation state behind the URL, so `getNavigationState()` and Back/Forward disagree with what the address bar shows, and it re-implements the router's encoding for each router mode.
+
+**The fix:** implement `applyNavState(next, previous)` on the renderer and navigate as usual.
+
+```ts
+class CarouselRenderer implements PageRenderer<'product', AppCtx> {
+  private carousel!: Carousel;
+
+  render(targetEl, ctx) {
+    this.carousel = new Carousel(targetEl, ctx.navState.item);
+    this.carousel.onMove((item) => ctx.navigate({ item }, { history: 'replace' }));
+  }
+
+  applyNavState(next, previous) {
+    if (next.sort !== previous.sort) return false; // a new list: render again
+    this.carousel.show(next.item); // already there after a click; slides on Back
+    return true;
+  }
+
+  destroy() {
+    this.carousel.dispose();
+  }
+}
+```
+
+Four rules:
+
+1. **Return `true` only when the DOM shows `next`.** Take the keys the view can apply in place and decline the rest by returning `false`; the framework then renders the page again, as it does for a renderer without the method. Navigation state, the URL and `navigation:changed` are the same either way, so a declined key costs a render, never a stale URL.
+2. **Back and Forward arrive through the same method.** `next` is the whole history entry: a key the entry does not name is absent from `next`, never carried over from the state being left. Apply it as if the shopper had clicked to it. Its keys came from a URL anyone can write, so use them to look up your data and never write one into the DOM as markup. This path skips the template's escaping.
+3. **`history: 'replace'` for each step, the default push for a choice.** A carousel step that pushes fills the Back button with every slide. Push when Back should undo the change, such as opening a product from a list.
+4. **No `postRender` hook runs after an in-place apply, and `hydrate` does not run again.** Effects from the last render stay in place. A selection event the view emits fires from its own handler, once, not from a re-run of `hydrate`.
+
+**With the renderer factories (§5.2, §5.4a),** pass it as an option. Both `defineSSRSafeRenderer` and `defineHydrateOnlyRenderer` accept `applyNavState(root, next, previous, ctx)`, called with the root the view painted or hydrated. Give the same handler to both halves of a view, as you do with `hydrate`:
+
+```ts
+// hydrate.ts — shared by both halves
+export function applyProduct(root: HTMLElement, next: NavigationState, previous: NavigationState): boolean {
+  if (next.sort !== previous.sort) return false;
+  return slideTo(root, next.item);
+}
+
+factory: defineSSRSafeRenderer({ template: productTemplate, hydrate: hydrateProduct, applyNavState: applyProduct })
+factory: defineHydrateOnlyRenderer({ hydrate: hydrateProduct, applyNavState: applyProduct })
+```
+
+Leave the markup as `template` would paint it for `next`, since a reload at the new URL is rendered from `template`. On a hydrate-only view the option is not an optimisation: a declined same-page navigation renders the page again, and `render` there throws.
+
+A `ctx.navigate` called from inside `render`, `hydrate` or `applyNavState` is a redirect. It is applied after that call returns, and it replaces the history entry the render was for rather than pushing a new one, so Back does not land on a page that redirects again. It still costs a second pass, so resolve a fallback (empty data, an unknown id) in the template rather than by navigating from `render`.
+
+**Count views from what the view announces, not from `navigation:changed` alone.** An in-place step produces two signals in this order. First the view's own selection event fires from its handler, for the shopper's move. Then `navigation:changed` fires with no render behind it. A tracker that reads every `navigation:changed` without a fresh announcement as a new page view counts the step twice, and the second time the product is unknown. Treat a navigation whose only change is the key the view just announced as part of that announcement.
+
+**Keep values you derive out of the URL with `navDefaults`.** Everything in navigation state reaches the URL on the next write. That is right for what the shopper chose and wrong for what the host worked out, such as a region from the visitor's location or a locale from the request. A shared link then carries the sharer's region, and because the URL outranks every other source, it overrides the recipient's. Pass such a key in `navDefaults` (on `mountCartridge` or `createApp`) instead of `initialNavState`:
+
+```ts
+await mountCartridge({ ...opts, navDefaults: { region: regionFromGeo } });
+```
+
+The key holds that value whenever nothing names it, and the router leaves it out of the URL until the shopper changes it. A link with an explicit region still opens on that region, and Back to an entry that does not name it restores the default. On the server, lay the same values under the URL's state in `initialNavState`, so both sides render one state.
+
 ### 2.10 Cartridge metadata vs cartridge state
 
 **Pattern recognised across `Gate.persist`, `DataSource.cacheTtlMs`, `PublicationAdapter.refreshCadence`:** declarative metadata that the *host app* implements behaviourally.
@@ -1067,6 +1128,7 @@ This is §2.5's two-envelope pattern applied to a view instead of a cartridge: `
 | `mode: 'csr'` mount | a shell paints from scratch (a 401 sign-in shell whose gate *allows*) | full renderer for that page in the browser |
 | remount | `update()` / `updatePages()` outside `hotSwapKeys` | full renderer, or accept a server round trip |
 | client-side navigation | a router is enabled and the visitor moves pages | full renderer for every reachable page |
+| same-page context change | `ctx.navigate({ item })` on the page, or Back to such an entry | `applyNavState` on the view (§2.9b), or a full renderer |
 | `csr-only` view | SSR skipped the page by capability | that page was never server-rendered — keep it full |
 | SSR runner | the browser cartridge reached the server by mistake | a bug: pass the server cartridge |
 

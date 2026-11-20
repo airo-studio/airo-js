@@ -137,6 +137,16 @@ Gates run **before** the data fetch: a blocked mount costs no network and no pip
 
 A Gate decides whether to paint; whether to serve is the host's, per request. Bots are never gated. The full contract is in `@airo-js/cartridge-kit`'s `gate.ts` and best-practices §1.5 / §4.9.
 
+## Derived values stay out of the URL: `navDefaults` (0.11.3)
+
+A value the host works out rather than the visitor chooses, such as a region from the visitor's location, goes in `navDefaults`, not `initialNavState`. Seeded through `initialNavState`, it is written into every URL the router writes, and a shared link then pins the sharer's value over the recipient's.
+
+```ts
+await mountCartridge({ ...opts, enableRouter: { mode: 'query', paramPrefix: 'w_' }, navDefaults: { region: regionFromGeo } });
+```
+
+The key holds that value whenever nothing names it. The router leaves it out of the URL until the visitor changes it, and Back to an entry that does not name it restores the default. The URL and `initialNavState` still outrank it. The gates, the transformers and the App see the same state, and a remount after `update()` keeps it. On the server, lay the same values under the URL's state in `initialNavState`. Best practices §2.9b has the reasoning.
+
 ## Migration from inline orchestration
 
 If your host app today does any of:

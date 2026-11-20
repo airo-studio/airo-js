@@ -106,7 +106,8 @@ export class PathRouter implements IRouter {
   replace(state: RouteState): void {
     const url = this.stateToUrl(state);
     try {
-      window.history.replaceState(null, '', url);
+      // Keep the entry's `history.state`: it may be the host page's.
+      window.history.replaceState(window.history.state, '', url);
     } catch (error) {
       log.error('PathRouter replaceState failed', error, { phase: 'router', url });
     }

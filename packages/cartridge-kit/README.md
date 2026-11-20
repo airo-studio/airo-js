@@ -92,6 +92,8 @@ capabilities: [hydrate-only]
 
 `PageManager.hydrateEntry` calls `hydrate()` and never `render()`, so a `mode: hydrate` mount needs nothing else. `render` and `renderSSR` on the browser half throw, naming the page: they are reachable only from a `mode: csr` mount, a remount after `update()`, a client-side navigation, a `csr-only` view, or the browser cartridge reaching the SSR runner by mistake. If your site takes one of those paths, give that page a full renderer in the browser too, or leave it out of `views[]` and load one through `resolveView` / the chunk mailbox.
 
+A navigation that stays on the page and changes its context (`ctx.navigate({ item })`, or Back to such an entry) renders the page again too, and so throws on the browser half. A view that changes in place takes it with `applyNavState(root, next, previous, ctx)`, which both factories accept. Write it once and give it to both halves, as with `hydrate`. Return `true` when the markup shows `next`. Best practices §2.9b has the rules.
+
 ### errorPolicy on Transformers
 
 Each Transformer can declare `errorPolicy: 'fail-render' | 'skip'`. Default is `'fail-render'` — when a transform throws, the render breaks. Pick `'skip'` only for transforms whose absence degrades gracefully (sort, enrichment). **Never** use `'skip'` for filters whose absence widens visibility past a tenant's configured scope.

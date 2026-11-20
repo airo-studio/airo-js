@@ -295,6 +295,20 @@ export interface MountCartridgeOptions<
   initialNavState?: Partial<NavigationState>;
 
   /**
+   * The value each listed context key holds whenever nothing names it,
+   * kept out of the URL while it holds that value. For state the host
+   * derives rather than the visitor chooses, such as a region from the
+   * visitor's location: seeded through `initialNavState` it lands in every
+   * URL the router writes, so a shared link pins the sharer's region.
+   * Listed here, the URL carries it only once the visitor changes it, and
+   * Back to an entry that does not name it restores the default. Held for
+   * the mount's lifetime, remounts included. A server render reaches the
+   * same state by laying these under its `initialNavState`.
+   * See `AppDeps.navDefaults` in `@airo-js/core`.
+   */
+  navDefaults?: Readonly<Record<string, string>>;
+
+  /**
    * Skip `dataSource.fetch` and use this data directly. Use when the host
    * app has cached / SSR-prefetched / studio-preloaded data.
    */
@@ -980,6 +994,7 @@ export async function mountCartridge<
       pages: currentPages,
       enableRouter: opts.enableRouter,
       initialNavState: navState,
+      navDefaults: opts.navDefaults,
     });
 
     // Phase 4 — gates. BEFORE data: a sign-in gate must be able to stop the
@@ -1032,6 +1047,7 @@ export async function mountCartridge<
       pages: currentPages,
       enableRouter: opts.enableRouter,
       initialNavState: navState,
+      navDefaults: opts.navDefaults,
     });
     if (entry.page && afterGates.page && afterGates.page.id !== entry.page.id) {
       log.warn(
@@ -1144,6 +1160,7 @@ export async function mountCartridge<
           // repainting instead of re-hydrating an empty root.
           hydrate: mode === 'hydrate' && initial,
           initialNavState: navState,
+          navDefaults: opts.navDefaults,
           registry: opts.registry,
           // 0.7.1 — forward `hostUpdate` through to `RenderContext.update`
           // so renderers can fire config delta updates from inside listener
