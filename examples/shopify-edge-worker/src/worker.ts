@@ -31,16 +31,15 @@
  */
 
 import { parseHTML } from 'linkedom';
-import { renderAppWithPublication, renderDocument, runPublicationAdapters } from '@airo-js/ssr';
+import { headFromPublication, renderAppWithPublication, renderDocument, runPublicationAdapters } from '@airo-js/ssr';
+import type { AdapterRunResult } from '@airo-js/ssr';
 import { buildToolManifest, dispatchTool } from '@airo-js/mcp';
 import type { PublicationContext } from '@airo-js/cartridge-kit';
 
 import { shopifyProductCartridge } from './shopify/cartridge.js';
-import { toProductJsonLd } from './shopify/jsonld.js';
 import type { ProductSnapshot, ShopifyConfig } from './shopify/types.js';
 
 import { wpPostCartridge } from './wp/cartridge.js';
-import { toArticleJsonLd } from './wp/jsonld.js';
 import type { PostSnapshot, WpConfig } from './wp/types.js';
 
 import {
@@ -233,21 +232,30 @@ function buildWpPublicationCtx(config: WpConfig): PublicationContext<WpConfig> {
  * Note what stays here: `DEMO_CSS` and the viewport string. Both are this
  * example's choices, passed in as caller values. The framework authors no
  * CSS and has no opinion about viewport policy.
+ *
+ * The canonical, OpenGraph and Twitter Card come from the cartridge's
+ * crawler-surface adapter through `headFromPublication(adapterResults)`, not
+ * from the snapshot by hand: a canonical composed here could disagree with
+ * the one the adapter validated, and `included: false` output must never
+ * reach the `<head>`. `title` and `lang` stay explicit — `lang` is required
+ * and the framework will not guess a locale; the page title is this demo's
+ * own ("… — airo-js edge demo"), not the crawler title. The patch is spread
+ * first so those two always win.
  */
 function htmlDoc(
   title: string,
   locale: string,
-  canonical: string,
+  adapterResults: readonly AdapterRunResult[],
   meta: Record<string, string>,
   widgetHtml: string,
   blockedNote: string,
 ): string {
   return renderDocument({
     head: {
+      ...headFromPublication(adapterResults),
       lang: locale,
       title,
       viewport: 'width=device-width, initial-scale=1',
-      canonical,
       meta: Object.entries(meta).map(([name, content]) => ({ name, content })),
       inlineStyles: [DEMO_CSS],
       raw: blockedNote,
@@ -279,7 +287,7 @@ async function handleShopifyHome(url: URL, req: Request, env: Env): Promise<Resp
   const doc = htmlDoc(
     `${snapshot.title} — airo-js edge demo`,
     config.locale,
-    snapshot.onlineStoreUrl ?? url.toString(),
+    adapterResults,
     {
       description: truncate(snapshot.description, 160),
       'airo:snapshot-id': snapshot.snapshotId,
@@ -303,8 +311,56 @@ async function handleShopifyHome(url: URL, req: Request, env: Env): Promise<Resp
 async function handleShopifySchemaJson(url: URL, req: Request, env: Env): Promise<Response> {
   const config = await loadShopifyConfig(env);
   const snapshot = await fetchShopifySnapshot(url, req, env, config);
-  const jsonLd = toProductJsonLd(snapshot);
-  return new Response(JSON.stringify(jsonLd, null, 2), {
+  return serveJsonLd(shopifyProductCartridge, 'product-json-ld', snapshot, buildShopifyPublicationCtx(config));
+}
+
+/**
+ * Serve one JSON-LD adapter's output on its own route, through the same
+ * runner the inline render uses. Calling the mapper directly (as this route
+ * once did) skipped the adapter's `requires` and `validate()`, so a product
+ * with no price was served here as a valid-looking Offer while the inline
+ * JSON-LD on the HTML page had been withheld. One publication decision per
+ * adapter, honoured on every route that serves its output.
+ *
+ *   - skipped (`required: 'always'` paths absent): the data this document
+ *     is about is not there, so there is no such document — 404.
+ *   - ran but blocked by `validate()`: the data exists but is not publishable.
+ *     500, not 422, matching `/shopify/feed.xml`: the request is fine, the
+ *     fault is the upstream catalogue, and a crawler treats a 5xx as "try
+ *     again later" (the merchant can fix the price) where it may treat a 4xx
+ *     as permanent. The body names the validation errors; the output is
+ *     never sent.
+ */
+async function serveJsonLd<TData extends { snapshotId: string }, TConfig>(
+  cartridge: Parameters<typeof runPublicationAdapters<TData, TConfig>>[0],
+  adapterId: string,
+  snapshot: TData,
+  ctx: PublicationContext<TConfig>,
+): Promise<Response> {
+  const [result] = await runPublicationAdapters(cartridge, snapshot, ctx, { adapterIds: [adapterId] });
+  if (!result) {
+    return new Response(JSON.stringify({ error: 'jsonld_adapter_missing', adapterId }), {
+      status: 500,
+      headers: { 'content-type': CONTENT_TYPE_JSON },
+    });
+  }
+  if (result.skipped) {
+    return new Response(
+      JSON.stringify({ error: 'not_found', message: 'required data is missing', missing: result.skipped.missing }),
+      { status: 404, headers: { 'content-type': CONTENT_TYPE_JSON } },
+    );
+  }
+  if (!result.included) {
+    return new Response(
+      JSON.stringify({
+        error: 'jsonld_validation_failed',
+        snapshotId: snapshot.snapshotId,
+        validation: result.validation,
+      }),
+      { status: 500, headers: { 'content-type': CONTENT_TYPE_JSON } },
+    );
+  }
+  return new Response(JSON.stringify(result.output, null, 2), {
     headers: {
       'content-type': CONTENT_TYPE_JSONLD,
       'cache-control': 'no-store',
@@ -422,7 +478,7 @@ async function handleWpHome(url: URL, req: Request, env: Env): Promise<Response>
   const doc = htmlDoc(
     `${snapshot.title} — airo-js edge demo`,
     config.locale,
-    snapshot.link,
+    adapterResults,
     {
       description: truncate(snapshot.excerpt, 160),
       'airo:snapshot-id': snapshot.snapshotId,
@@ -446,14 +502,7 @@ async function handleWpHome(url: URL, req: Request, env: Env): Promise<Response>
 async function handleWpSchemaJson(url: URL, req: Request, env: Env): Promise<Response> {
   const config = await loadWpConfig(env);
   const snapshot = await fetchWpSnapshot(url, req, env, config);
-  const jsonLd = toArticleJsonLd(snapshot);
-  return new Response(JSON.stringify(jsonLd, null, 2), {
-    headers: {
-      'content-type': CONTENT_TYPE_JSONLD,
-      'cache-control': 'no-store',
-      'x-airo-snapshot-id': snapshot.snapshotId,
-    },
-  });
+  return serveJsonLd(wpPostCartridge, 'post-json-ld', snapshot, buildWpPublicationCtx(config));
 }
 
 function handleWpMcpManifest(): Response {

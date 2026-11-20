@@ -122,7 +122,7 @@ async function smokeShopify() {
   const attrMatch = widgetHtml.match(/data-snapshot-id="([^"]+)"/);
   assert(attrMatch && attrMatch[1] === snapshotId, 'shopify', `data-snapshot-id attr mismatch`);
 
-  // Direct adapter run — exercises ALL adapters (json-ld + merchant-center xml)
+  // Direct adapter run — exercises ALL adapters (json-ld + crawler-surface + merchant-center xml)
   const direct = await runPublicationAdapters(
     shopifyProductCartridge,
     snapshot,
@@ -133,7 +133,7 @@ async function smokeShopify() {
       currency: 'USD',
     },
   );
-  assert(direct.length === 2, 'shopify', `expected 2 adapters, got ${direct.length}`);
+  assert(direct.length === 3, 'shopify', `expected 3 adapters, got ${direct.length}`);
 
   const jsonLdResult = direct.find((r) => r.adapterId === 'product-json-ld');
   assert(jsonLdResult?.validation.valid, 'shopify', `JSON-LD validation failed`);
