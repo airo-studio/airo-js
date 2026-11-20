@@ -113,7 +113,7 @@ export interface PageManagerOptions<
   enableRouter?: RouterOption;
   /**
    * Mount-time navigation state. The host (or `decodeNavHint`) supplies
-   * this; PageManager seeds `navState` with it BEFORE the router parses
+   * this; PageManager seeds `#navState` with it BEFORE the router parses
    * the URL. Precedence ladder: URL > `initialNavState` > default entry.
    *
    * Three legitimate sources:
@@ -149,7 +149,7 @@ export interface PageManagerOptions<
   /**
    * Host-supplied live config-delta dispatcher (forwarded from
    * `AppDeps.hostUpdate`). When set, every `RenderContext` built by
-   * `swapRenderer` / `hydrateEntry` includes `ctx.update` wired to
+   * `#swapRenderer` / `hydrateEntry` includes `ctx.update` wired to
    * this function. Renderers fire delta updates from listeners
    * without holding the host's mount handle.
    *
@@ -185,83 +185,90 @@ export class PageManager<
   TPageType extends string = string,
   TAppContext = unknown,
 > {
-  private readonly opts: PageManagerOptions<TPageType, TAppContext>;
-  private readonly isGatePage: (pageType: TPageType) => boolean;
+  // Every member below is `#private`, not TypeScript `private` (core
+  // 0.11.3). A minifier may shorten a `#name` but must keep a property name
+  // whole, and this class is on the path every mount pays for: the switch
+  // took about 165 B gzip off core for builds at es2022 or modern browser
+  // targets. A build that lowers to es2020 turns each field into helper code
+  // and pays about 270 B instead, so target es2022 or later. Keep new members
+  // `#private` for the same reason.
+  readonly #opts: PageManagerOptions<TPageType, TAppContext>;
+  readonly #isGatePage: (pageType: TPageType) => boolean;
   /**
    * The active page graph. Mirrors `opts.pages` at construction time so
    * `replacePages` can swap the reference without forcing every read site
-   * back through `opts`. The runtime's `MountCartridgeResult.updatePages()`
+   * back through `#opts`. The runtime's `MountCartridgeResult.updatePages()`
    * drives this — hot-swapping per-page state (componentSettings / styles /
    * slot props) without a full mount cycle.
    */
-  private pages: Page<TPageType>[];
-  private navState: NavigationState;
-  private appContext: TAppContext;
-  private activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
-  private activeRendererPageId: PageId | null = null;
+  #pages: Page<TPageType>[];
+  #navState: NavigationState;
+  #appContext: TAppContext;
+  #activeRenderer: PageRenderer<TPageType, TAppContext> | null = null;
+  #activeRendererPageId: PageId | null = null;
   /**
    * The `RenderContext` the active renderer was handed. An in-place apply
    * (`applyNavState` returned `true`) sets its `navState`, so the renderer
    * reads the state it is now showing.
    */
-  private activeCtx: RenderContext<TPageType, TAppContext> | null = null;
-  private router: IRouter | null = null;
+  #activeCtx: RenderContext<TPageType, TAppContext> | null = null;
+  #router: IRouter | null = null;
   /**
    * Renderer calls in progress: `render`, `hydrate`, `applyNavState`. A
    * `navigate` requested inside one is a redirect, so it defaults to
    * `history: 'replace'` (see `navigate`).
    */
-  private rendererCallDepth = 0;
+  #rendererCallDepth = 0;
   /**
-   * Navigations in progress (`runNavigation`). A `navigate` requested
+   * Navigations in progress (`#runNavigation`). A `navigate` requested
    * while this is above zero, from a renderer, a subpage activation, a
    * `postRender` hook or a `navigation:changed` listener, is queued in
-   * `deferred` and applied in order once the current one completes.
-   * Applying it re-entrantly ran before `activeRendererPageId` was
+   * `#deferred` and applied in order once the current one completes.
+   * Applying it re-entrantly ran before `#activeRendererPageId` was
    * recorded, so a renderer that navigated to its own page from `render`
    * was rendered again without bound, and a later request could be
    * overtaken by an earlier queued one.
    */
-  private navigationDepth = 0;
+  #navigationDepth = 0;
   /**
    * Queued navigations. `state` is copied when queued, so a caller that
    * reuses or mutates its object does not change what runs. `history:
    * 'none'` marks a router-driven entry, which replaces the state instead
    * of merging into it.
    */
-  private deferred: Array<{ state: Partial<NavigationState>; history: RouterWrite }> = [];
-  private draining = false;
-  private destroyed = false;
+  #deferred: Array<{ state: Partial<NavigationState>; history: RouterWrite }> = [];
+  #draining = false;
+  #destroyed = false;
   /**
    * The last render or hydrate found no renderer for its page type: the
    * page is waiting for its chunk, and `'renderer:missing'` has gone out
    * for it. The router's echo of that navigation must not ask again (see
    * `onRouterNavigate`); the recovery that follows the chunk paints it.
    */
-  private awaitingChunk = false;
+  #awaitingChunk = false;
   /** Teardown returned by the most recent `postRender` invocation, if any. */
-  private postRenderTeardown: (() => void) | null = null;
+  #postRenderTeardown: (() => void) | null = null;
 
   constructor(opts: PageManagerOptions<TPageType, TAppContext>) {
-    this.opts = opts;
-    this.pages = opts.pages;
-    this.appContext = opts.appContext;
-    this.isGatePage = opts.isGatePage ?? (() => false);
+    this.#opts = opts;
+    this.#pages = opts.pages;
+    this.#appContext = opts.appContext;
+    this.#isGatePage = opts.isGatePage ?? (() => false);
     // Seed precedence: default entry → host-supplied initialNavState → URL
     // state. Last write wins, so URL beats host config beats default —
     // matches the v3 contract. One implementation (`resolveMountEntry`),
     // shared with the runtime's gate phase, so the page the gates were
     // scoped against is the page that mounts.
-    this.navState = resolveMountEntry({
-      pages: this.pages,
-      isGatePage: this.isGatePage,
+    this.#navState = resolveMountEntry({
+      pages: this.#pages,
+      isGatePage: this.#isGatePage,
       enableRouter: opts.enableRouter,
       initialNavState: opts.initialNavState,
       navDefaults: opts.navDefaults,
     }).navState;
 
     if (opts.enableRouter) {
-      this.initRouter();
+      this.#initRouter();
     }
   }
 
@@ -271,10 +278,10 @@ export class PageManager<
    * `destroy()`. Throwing teardowns are logged and swallowed: a hook that
    * fails while unwinding must not abort the render that follows it.
    */
-  private firePostRenderTeardown(): void {
-    const teardown = this.postRenderTeardown;
+  #firePostRenderTeardown(): void {
+    const teardown = this.#postRenderTeardown;
     if (!teardown) return;
-    this.postRenderTeardown = null;
+    this.#postRenderTeardown = null;
     try {
       teardown();
     } catch (err) {
@@ -291,28 +298,28 @@ export class PageManager<
    * A throwing hook is logged and swallowed — post-render effects are
    * decoration (analytics, ARIA live regions, focus, scroll). Letting one
    * escape would unwind a render that already succeeded and leave the DOM
-   * on screen with `activeRenderer` bookkeeping half-applied.
+   * on screen with `#activeRenderer` bookkeeping half-applied.
    */
-  private runPostRender(): void {
-    if (!this.opts.postRender) return;
-    this.firePostRenderTeardown();
+  #runPostRender(): void {
+    if (!this.#opts.postRender) return;
+    this.#firePostRenderTeardown();
     try {
-      const teardown = this.opts.postRender({
-        container: this.opts.container,
-        navState: this.navState,
-        events: this.opts.events,
+      const teardown = this.#opts.postRender({
+        container: this.#opts.container,
+        navState: this.#navState,
+        events: this.#opts.events,
       });
-      this.postRenderTeardown = typeof teardown === 'function' ? teardown : null;
+      this.#postRenderTeardown = typeof teardown === 'function' ? teardown : null;
     } catch (err) {
       log.error('postRender hook threw; render is unaffected.', err, {
         phase: 'post-render',
       });
-      this.postRenderTeardown = null;
+      this.#postRenderTeardown = null;
     }
   }
 
   getNavigationState(): NavigationState {
-    return { ...this.navState };
+    return { ...this.#navState };
   }
 
   setNavigationState(state: NavigationState): void {
@@ -328,7 +335,7 @@ export class PageManager<
    * the URL, fires the event.
    *
    * Back/Forward does not come through here: a history entry is the whole
-   * state, so the router path replaces rather than merges (`initRouter`).
+   * state, so the router path replaces rather than merges (`#initRouter`).
    *
    * Called while another navigation is in progress (from a renderer, a
    * subpage activation, a `postRender` hook or a `navigation:changed`
@@ -340,17 +347,17 @@ export class PageManager<
    * return to and redirect again.
    */
   navigate(state: Partial<NavigationState>, opts?: NavigateOptions): void {
-    if (this.destroyed) return;
-    if (this.navigationDepth > 0) {
-      this.deferred.push({
+    if (this.#destroyed) return;
+    if (this.#navigationDepth > 0) {
+      this.#deferred.push({
         state: { ...state },
-        history: opts?.history ?? (this.rendererCallDepth > 0 ? 'replace' : 'push'),
+        history: opts?.history ?? (this.#rendererCallDepth > 0 ? 'replace' : 'push'),
       });
       log.debug('navigate: queued', { phase: 'navigate' });
       return;
     }
     const history = opts?.history ?? 'push';
-    this.runNavigation(() => this.applyNavigation({ ...this.navState, ...state }, history));
+    this.#runNavigation(() => this.#applyNavigation({ ...this.#navState, ...state }, history));
   }
 
   /**
@@ -358,15 +365,15 @@ export class PageManager<
    * navigation requested by a step that failed must not be applied after
    * an unrelated later one.
    */
-  private step(run: () => void): void {
-    this.navigationDepth++;
+  #step(run: () => void): void {
+    this.#navigationDepth++;
     try {
       run();
     } catch (err) {
-      this.deferred.length = 0;
+      this.#deferred.length = 0;
       throw err;
     } finally {
-      this.navigationDepth--;
+      this.#navigationDepth--;
     }
   }
 
@@ -375,30 +382,30 @@ export class PageManager<
    * order. Each queued navigation is a step of its own, so what it queues
    * runs after it. Bounded: see `MAX_DEFERRED_NAVIGATIONS`.
    */
-  private runNavigation(run: () => void): void {
-    this.step(run);
-    if (this.draining || this.navigationDepth > 0) return;
-    this.draining = true;
+  #runNavigation(run: () => void): void {
+    this.#step(run);
+    if (this.#draining || this.#navigationDepth > 0) return;
+    this.#draining = true;
     try {
-      for (let n = 0; this.deferred.length > 0 && !this.destroyed; n++) {
+      for (let n = 0; this.#deferred.length > 0 && !this.#destroyed; n++) {
         if (n === MAX_DEFERRED_NAVIGATIONS) {
           // A renderer that navigates to a new state on every render.
           log.error(`navigate: ${n} queued in a row; dropping the rest`, undefined, {
             phase: 'navigate',
           });
-          this.deferred.length = 0;
+          this.#deferred.length = 0;
           break;
         }
-        const { state, history } = this.deferred.shift()!;
-        this.step(() =>
-          this.applyNavigation(
-            (history === 'none' ? state : { ...this.navState, ...state }) as NavigationState,
+        const { state, history } = this.#deferred.shift()!;
+        this.#step(() =>
+          this.#applyNavigation(
+            (history === 'none' ? state : { ...this.#navState, ...state }) as NavigationState,
             history,
           ),
         );
       }
     } finally {
-      this.draining = false;
+      this.#draining = false;
     }
   }
 
@@ -407,10 +414,10 @@ export class PageManager<
    * navigation (merged state) and the router (replaced state); `history`
    * says whether and how to write the URL.
    */
-  private applyNavigation(next: NavigationState, history: RouterWrite): void {
-    next = withNavDefaults(next, this.opts.navDefaults);
+  #applyNavigation(next: NavigationState, history: RouterWrite): void {
+    next = withNavDefaults(next, this.#opts.navDefaults);
     let targetPage = next.page
-      ? this.pages.find((p) => p.id === next.page)
+      ? this.#pages.find((p) => p.id === next.page)
       : undefined;
 
     if (next.page && !targetPage) {
@@ -420,58 +427,58 @@ export class PageManager<
       });
     }
 
-    if (!targetPage?.enabled || this.isGatePage(targetPage.type)) {
-      const entry = findEntryPage(this.pages, this.isGatePage);
+    if (!targetPage?.enabled || this.#isGatePage(targetPage.type)) {
+      const entry = findEntryPage(this.#pages, this.#isGatePage);
       if (!entry) return;
       targetPage = entry;
       next.page = entry.id;
     }
 
     if (targetPage.parent) {
-      const parent = this.pages.find((p) => p.id === targetPage!.parent);
+      const parent = this.#pages.find((p) => p.id === targetPage!.parent);
       if (!parent) return;
-      if (parent.id !== this.activeRendererPageId) {
-        this.applyNavigation({ ...next, page: parent.id }, history);
+      if (parent.id !== this.#activeRendererPageId) {
+        this.#applyNavigation({ ...next, page: parent.id }, history);
       } else {
-        this.navState = next;
+        this.#navState = next;
       }
       const subpage: SubpageActivation<TPageType> = {
         type: targetPage.type,
         id: targetPage.id,
         parent: parent.id,
         page: targetPage,
-        ...this.contextOnly(next),
+        ...this.#contextOnly(next),
       };
-      this.activeRenderer?.activateSubpage?.(subpage);
+      this.#activeRenderer?.activateSubpage?.(subpage);
       log.debug(`navigation: subpage "${targetPage.id}" on "${parent.id}" (subpage)`, {
         pageId: targetPage.id,
         pageType: targetPage.type,
         phase: 'subpage',
       });
-      this.opts.events.emit('navigation:changed', this.navState);
+      this.#opts.events.emit('navigation:changed', this.#navState);
       return;
     }
 
     const anchor = targetPage;
-    const samePage = anchor.id === this.activeRendererPageId;
-    const sameContext = this.contextEqual(this.navState, next);
+    const samePage = anchor.id === this.#activeRendererPageId;
+    const sameContext = this.#contextEqual(this.#navState, next);
 
-    const previous = this.navState;
-    this.navState = next;
+    const previous = this.#navState;
+    this.#navState = next;
 
     let inPlace = false;
     if (!samePage) {
-      this.swapRenderer(anchor);
-    } else if (!sameContext && this.activeRenderer) {
-      inPlace = this.applyInPlace(this.activeRenderer, previous);
+      this.#swapRenderer(anchor);
+    } else if (!sameContext && this.#activeRenderer) {
+      inPlace = this.#applyInPlace(this.#activeRenderer, previous);
       // swapRenderer unwinds post-render effects, then destroys the
       // active renderer, in that order.
-      if (!inPlace) this.swapRenderer(anchor);
+      if (!inPlace) this.#swapRenderer(anchor);
     }
 
-    if (this.router && history !== 'none') {
+    if (this.#router && history !== 'none') {
       try {
-        this.router[history](this.urlState());
+        this.#router[history](this.#urlState());
       } catch (err) {
         log.warn(`PageManager router.${history} failed`, { err, phase: 'router' });
       }
@@ -484,33 +491,33 @@ export class PageManager<
       pageType: anchor.type,
       phase: 'navigate',
     });
-    this.opts.events.emit('navigation:changed', this.navState);
+    this.#opts.events.emit('navigation:changed', this.#navState);
   }
 
   showSubpage(subpage: SubpageActivation<TPageType>): void {
-    if (this.destroyed) return;
-    this.runNavigation(() => this.activeRenderer?.activateSubpage?.(subpage));
+    if (this.#destroyed) return;
+    this.#runNavigation(() => this.#activeRenderer?.activateSubpage?.(subpage));
   }
 
   /**
-   * Mount the initial page based on current `navState` + page config.
+   * Mount the initial page based on current `#navState` + page config.
    *
    * This is the single entry-resolution site for the App. Reads from
-   * `this.navState.page` (URL-decoded, host-supplied, or default-seeded
+   * `this.#navState.page` (URL-decoded, host-supplied, or default-seeded
    * at construction), validates that the page is enabled and not a
    * subpage / gate, and either hydrates SSR DOM (`hydrate: true`) or
    * renders fresh (`hydrate: false`). Falls back to the default entry
    * via `findEntryPage` on any validation miss.
    *
    * Replaces the pre-v3 `createApp` entry-resolution block that didn't
-   * consult `navState`, leaving URL-deeplinked pages stranded.
+   * consult `#navState`, leaving URL-deeplinked pages stranded.
    */
   mountInitial(opts: { hydrate: boolean }): void {
-    if (this.destroyed) return;
+    if (this.#destroyed) return;
     const entry = resolveEntryPage(
-      this.pages,
-      this.isGatePage,
-      this.navState.page,
+      this.#pages,
+      this.#isGatePage,
+      this.#navState.page,
     );
     if (!entry) return;
     if (opts.hydrate) {
@@ -527,13 +534,13 @@ export class PageManager<
    * re-rendering.
    */
   hydrateEntry(pageId: PageId): void {
-    if (this.destroyed) return;
-    this.runNavigation(() => this.hydrateNow(pageId));
+    if (this.#destroyed) return;
+    this.#runNavigation(() => this.#hydrateNow(pageId));
   }
 
-  private hydrateNow(pageId: PageId): void {
-    const targetPage = this.pages.find((p) => p.id === pageId);
-    if (!targetPage?.enabled || this.isGatePage(targetPage.type)) return;
+  #hydrateNow(pageId: PageId): void {
+    const targetPage = this.#pages.find((p) => p.id === pageId);
+    if (!targetPage?.enabled || this.#isGatePage(targetPage.type)) return;
 
     // Idempotency contract — repeat calls for the same already-hydrated
     // page are a no-op. Without this guard, a recovery path that races
@@ -543,14 +550,14 @@ export class PageManager<
     // never `destroy()`-ed, so its hydrate cleanup never runs and its
     // event-bus listeners + component instances orphan — visible as
     // duplicated DOM, double-fired handlers, "ghost" subscribers.
-    if (this.activeRenderer && this.activeRendererPageId === pageId) {
+    if (this.#activeRenderer && this.#activeRendererPageId === pageId) {
       return;
     }
 
-    const factory = this.opts.resolveRenderer(targetPage.type);
-    this.awaitingChunk = !factory;
+    const factory = this.#opts.resolveRenderer(targetPage.type);
+    this.#awaitingChunk = !factory;
     if (!factory) {
-      emitRendererMissing(this.opts.events, {
+      emitRendererMissing(this.#opts.events, {
         pageType: targetPage.type,
         pageId: targetPage.id,
         phase: 'hydrate',
@@ -562,47 +569,47 @@ export class PageManager<
 
     // Same ordering rule as swapRenderer: unwind before the incoming
     // render touches the tree.
-    this.firePostRenderTeardown();
+    this.#firePostRenderTeardown();
 
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      pages: this.pages,
-      app: this.appContext,
-      events: this.opts.events,
-      navState: this.navState,
+      pages: this.#pages,
+      app: this.#appContext,
+      events: this.#opts.events,
+      navState: this.#navState,
       navigate: (s, o) => this.navigate(s, o),
-      update: this.opts.hostUpdate,
+      update: this.#opts.hostUpdate,
     };
 
-    this.inRenderer(() => {
+    this.#inRenderer(() => {
       if (typeof renderer.hydrate === 'function') {
-        renderer.hydrate(this.opts.container, ctx);
+        renderer.hydrate(this.#opts.container, ctx);
       } else {
         log.warn(
           `renderer for "${targetPage.type}" does not implement hydrate(). Falling back to render() — the SSR HTML is being regenerated client-side.`,
           { pageType: targetPage.type, phase: 'hydrate' },
         );
-        renderer.render(this.opts.container, ctx);
+        renderer.render(this.#opts.container, ctx);
       }
     });
 
-    this.activeRenderer = renderer;
-    this.activeCtx = ctx;
-    this.activeRendererPageId = targetPage.id;
-    this.navState = { ...this.navState, page: targetPage.id };
+    this.#activeRenderer = renderer;
+    this.#activeCtx = ctx;
+    this.#activeRendererPageId = targetPage.id;
+    this.#navState = { ...this.#navState, page: targetPage.id };
     log.debug(`navigation: page "${targetPage.id}" (hydrate)`, {
       pageId: targetPage.id,
       pageType: targetPage.type,
       phase: 'hydrate',
     });
-    this.runPostRender();
-    this.opts.events.emit('navigation:changed', this.navState);
+    this.#runPostRender();
+    this.#opts.events.emit('navigation:changed', this.#navState);
   }
 
   applyPageStyles(pageId: PageId, styles: Record<string, string | number>): void {
-    if (pageId !== this.activeRendererPageId) return;
-    this.activeRenderer?.applyPageStyles?.(styles);
+    if (pageId !== this.#activeRendererPageId) return;
+    this.#activeRenderer?.applyPageStyles?.(styles);
   }
 
   applyComponentStyles(
@@ -610,28 +617,28 @@ export class PageManager<
     componentId: string,
     styles: Record<string, string | number>,
   ): void {
-    if (pageId !== this.activeRendererPageId) return;
-    this.activeRenderer?.applyComponentStyles?.(componentId, styles);
+    if (pageId !== this.#activeRendererPageId) return;
+    this.#activeRenderer?.applyComponentStyles?.(componentId, styles);
   }
 
   destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    this.deferred.length = 0;
-    this.firePostRenderTeardown();
-    if (this.activeRenderer) {
-      this.activeRenderer.destroy();
-      this.activeRenderer = null;
-      this.activeCtx = null;
-      this.activeRendererPageId = null;
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+    this.#deferred.length = 0;
+    this.#firePostRenderTeardown();
+    if (this.#activeRenderer) {
+      this.#activeRenderer.destroy();
+      this.#activeRenderer = null;
+      this.#activeCtx = null;
+      this.#activeRendererPageId = null;
     }
-    if (this.router) {
-      this.router.stop();
-      this.router = null;
+    if (this.#router) {
+      this.#router.stop();
+      this.#router = null;
     }
   }
 
-  private contextOnly(state: NavigationState): Record<string, string | undefined> {
+  #contextOnly(state: NavigationState): Record<string, string | undefined> {
     const out: Record<string, string | undefined> = {};
     for (const [k, v] of Object.entries(state)) {
       if (k !== 'page') out[k] = v;
@@ -639,9 +646,9 @@ export class PageManager<
     return out;
   }
 
-  private contextEqual(a: NavigationState, b: NavigationState): boolean {
-    const ac = this.contextOnly(a);
-    const bc = this.contextOnly(b);
+  #contextEqual(a: NavigationState, b: NavigationState): boolean {
+    const ac = this.#contextOnly(a);
+    const bc = this.#contextOnly(b);
     const keys = new Set([...Object.keys(ac), ...Object.keys(bc)]);
     for (const k of keys) {
       if (ac[k] !== bc[k]) return false;
@@ -649,15 +656,15 @@ export class PageManager<
     return true;
   }
 
-  private initRouter(): void {
-    const opt = this.opts.enableRouter;
+  #initRouter(): void {
+    const opt = this.#opts.enableRouter;
     if (!opt) return;
 
-    const validPages = validPagesFor(this.pages, this.isGatePage);
+    const validPages = validPagesFor(this.#pages, this.#isGatePage);
     const mode: 'hash' | 'path' | 'query' = opt === true ? 'hash' : opt.mode;
 
     const onRouterNavigate = (state: RouteState): void => {
-      if (this.destroyed) return;
+      if (this.#destroyed) return;
       // Nothing to do when the URL names the state already showing. That is
       // every hash-mode `push`: assigning `location.hash` fires
       // `hashchange`, which came back here and fired `navigation:changed` a
@@ -669,8 +676,8 @@ export class PageManager<
       // another try.
       // A key the URL leaves out because it holds its default is compared,
       // and restored, as that default (`navDefaults`).
-      const entry = withNavDefaults({ ...state } as NavigationState, this.opts.navDefaults);
-      if ((this.activeRenderer || this.awaitingChunk) && sameRouteState(entry, this.navState)) {
+      const entry = withNavDefaults({ ...state } as NavigationState, this.#opts.navDefaults);
+      if ((this.#activeRenderer || this.#awaitingChunk) && sameRouteState(entry, this.#navState)) {
         return;
       }
       // A history entry is the whole state at that point, so restoring it
@@ -679,23 +686,23 @@ export class PageManager<
       // name must not survive from the state being left. That holds because
       // every entry is complete: each write is the whole state less its
       // `navDefaults` values, and the mount rewrites its own entry to
-      // include what `initialNavState` added (`initRouter`). A base of
+      // include what `initialNavState` added (`#initRouter`). A base of
       // `initialNavState` here would also replay a runtime remount's
       // snapshot, which arrives as `initialNavState`, on every later Back;
       // `navDefaults` is the base that is meant to hold on every entry.
-      if (this.navigationDepth > 0) {
-        this.deferred.push({ state: entry, history: 'none' });
+      if (this.#navigationDepth > 0) {
+        this.#deferred.push({ state: entry, history: 'none' });
         return;
       }
-      this.runNavigation(() => this.applyNavigation(entry, 'none'));
+      this.#runNavigation(() => this.#applyNavigation(entry, 'none'));
     };
 
     try {
       // One router factory, shared with `resolveMountEntry`'s parse-only
-      // use, so the URL the constructor folded into `navState` is decoded
+      // use, so the URL the constructor folded into `#navState` is decoded
       // by the same code that will drive navigation from here on.
-      this.router = createRouter(opt, onRouterNavigate, validPages);
-      this.router.start();
+      this.#router = createRouter(opt, onRouterNavigate, validPages);
+      this.#router.start();
       // The constructor already applied the URL via `resolveMountEntry`.
       // Unless the URL already names exactly the state showing, rewrite the
       // current entry with it: when the URL named no state, so the address
@@ -704,32 +711,32 @@ export class PageManager<
       // holds the whole state, which is what lets Back/Forward restore an
       // entry exactly (see `onRouterNavigate`). Keys at their `navDefaults`
       // value are left out of it.
-      const fromUrl = this.router.parseCurrent();
-      const own = this.urlState();
+      const fromUrl = this.#router.parseCurrent();
+      const own = this.#urlState();
       if (!fromUrl || !sameRouteState(fromUrl as NavigationState, own as NavigationState)) {
-        this.router.replace(own);
+        this.#router.replace(own);
       }
     } catch (err) {
       log.warn(`Router (${mode}) init failed; URL routing disabled.`, { err, phase: 'router' });
-      this.router?.stop();
-      this.router = null;
+      this.#router?.stop();
+      this.#router = null;
     }
   }
 
-  private swapRenderer(targetPage: Page<TPageType>): void {
+  #swapRenderer(targetPage: Page<TPageType>): void {
     // Unwind post-render effects BEFORE the subtree they decorate is
     // destroyed, so a hook holding DOM can still see its own nodes.
-    this.firePostRenderTeardown();
-    if (this.activeRenderer) {
-      this.activeRenderer.destroy();
-      this.activeRenderer = null;
-      this.activeRendererPageId = null;
+    this.#firePostRenderTeardown();
+    if (this.#activeRenderer) {
+      this.#activeRenderer.destroy();
+      this.#activeRenderer = null;
+      this.#activeRendererPageId = null;
     }
 
-    const factory = this.opts.resolveRenderer(targetPage.type);
-    this.awaitingChunk = !factory;
+    const factory = this.#opts.resolveRenderer(targetPage.type);
+    this.#awaitingChunk = !factory;
     if (!factory) {
-      emitRendererMissing(this.opts.events, {
+      emitRendererMissing(this.#opts.events, {
         pageType: targetPage.type,
         pageId: targetPage.id,
         phase: 'navigate',
@@ -742,38 +749,38 @@ export class PageManager<
     const renderer = factory();
     const ctx: RenderContext<TPageType, TAppContext> = {
       page: targetPage,
-      pages: this.pages,
-      app: this.appContext,
-      events: this.opts.events,
-      navState: this.navState,
+      pages: this.#pages,
+      app: this.#appContext,
+      events: this.#opts.events,
+      navState: this.#navState,
       navigate: (s, o) => this.navigate(s, o),
-      update: this.opts.hostUpdate,
+      update: this.#opts.hostUpdate,
     };
-    this.inRenderer(() => renderer.render(this.opts.container, ctx));
+    this.#inRenderer(() => renderer.render(this.#opts.container, ctx));
 
-    this.activeRenderer = renderer;
-    this.activeCtx = ctx;
-    this.activeRendererPageId = targetPage.id;
-    this.runPostRender();
+    this.#activeRenderer = renderer;
+    this.#activeCtx = ctx;
+    this.#activeRendererPageId = targetPage.id;
+    this.#runPostRender();
   }
 
   /**
    * Run a renderer call (`render`, `hydrate`, `applyNavState`). A
    * `navigate` from inside one is a redirect (see `navigate`).
    */
-  private inRenderer<T>(call: () => T): T {
-    this.rendererCallDepth++;
+  #inRenderer<T>(call: () => T): T {
+    this.#rendererCallDepth++;
     try {
       return call();
     } finally {
-      this.rendererCallDepth--;
+      this.#rendererCallDepth--;
     }
   }
 
   /** The state as the URL carries it: keys at their `navDefaults` value left out. */
-  private urlState(): RouteState {
-    const out: RouteState = { ...this.navState };
-    const defaults = this.opts.navDefaults;
+  #urlState(): RouteState {
+    const out: RouteState = { ...this.#navState };
+    const defaults = this.#opts.navDefaults;
     for (const k in defaults) if (k !== 'page' && out[k] === defaults[k]) delete out[k];
     return out;
   }
@@ -782,9 +789,9 @@ export class PageManager<
    * Offer a same-page context change to the active renderer
    * (`PageRenderer.applyNavState`). True when it applied it; false when it
    * has no such method, declined, or threw, and the page must be rendered
-   * again. `this.navState` is already `next`.
+   * again. `this.#navState` is already `next`.
    */
-  private applyInPlace(
+  #applyInPlace(
     renderer: PageRenderer<TPageType, TAppContext>,
     previous: NavigationState,
   ): boolean {
@@ -793,14 +800,14 @@ export class PageManager<
     let applied = false;
     try {
       applied =
-        this.inRenderer(() => apply.call(renderer, { ...this.navState }, { ...previous })) === true;
+        this.#inRenderer(() => apply.call(renderer, { ...this.#navState }, { ...previous })) === true;
     } catch (err) {
       // The page is rendered again, so the throw goes no further, but what
       // the failed call queued is dropped all the same.
-      this.deferred.length = 0;
+      this.#deferred.length = 0;
       log.error('applyNavState threw; rendering again', err, { phase: 'navigate' });
     }
-    if (applied && this.activeCtx) this.activeCtx.navState = this.navState;
+    if (applied && this.#activeCtx) this.#activeCtx.navState = this.#navState;
     return applied;
   }
 
@@ -820,12 +827,12 @@ export class PageManager<
    * with state to refresh.
    */
   replaceAppContext(newAppContext: TAppContext): void {
-    if (this.destroyed) return;
-    this.appContext = newAppContext;
-    if (!this.activeRendererPageId) return;
-    const activePage = this.pages.find((p) => p.id === this.activeRendererPageId);
+    if (this.#destroyed) return;
+    this.#appContext = newAppContext;
+    if (!this.#activeRendererPageId) return;
+    const activePage = this.#pages.find((p) => p.id === this.#activeRendererPageId);
     if (!activePage) return;
-    this.runNavigation(() => this.swapRenderer(activePage));
+    this.#runNavigation(() => this.#swapRenderer(activePage));
   }
 
   /**
@@ -850,20 +857,20 @@ export class PageManager<
    * runtime classifier prevents this case under correct use).
    */
   replacePages(newPages: Page<TPageType>[]): void {
-    if (this.destroyed) return;
-    this.pages = newPages;
-    if (!this.activeRendererPageId) return;
-    const activePage = newPages.find((p) => p.id === this.activeRendererPageId);
+    if (this.#destroyed) return;
+    this.#pages = newPages;
+    if (!this.#activeRendererPageId) return;
+    const activePage = newPages.find((p) => p.id === this.#activeRendererPageId);
     if (!activePage) {
       // Defensive — runtime should have classified this as structural.
       // Tear down the stranded renderer rather than leaving stale DOM up.
-      this.activeRenderer?.destroy();
-      this.activeRenderer = null;
-      this.activeCtx = null;
-      this.activeRendererPageId = null;
+      this.#activeRenderer?.destroy();
+      this.#activeRenderer = null;
+      this.#activeCtx = null;
+      this.#activeRendererPageId = null;
       return;
     }
-    this.runNavigation(() => this.swapRenderer(activePage));
+    this.#runNavigation(() => this.#swapRenderer(activePage));
   }
 }
 
