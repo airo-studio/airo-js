@@ -148,6 +148,19 @@ const noPost = await call({ name: 'get_section', arguments: { id: 'x' } });
 check('get_section without a post is refused', noPost.status === 400, `got ${noPost.status}`);
 check('…and says what was missing', noPost.json.error?.code === 'missing-required-fields', JSON.stringify(noPost.json));
 
+// An agent must not read what the page route and the sitemap refuse to publish.
+// The tools see a snapshot, and the snapshot of `unfinished` exists; only the
+// server's publish decision keeps it out of an agent's hands.
+const draftSection = await call({ name: 'get_section', arguments: { id: 'todo' }, slug: 'unfinished' });
+check('get_section on the unpublished post is a 404', draftSection.status === 404, `got ${draftSection.status}: ${JSON.stringify(draftSection.json)}`);
+check('…and does not hand over its text', !JSON.stringify(draftSection.json).includes('Nothing here yet'));
+check('…and says there is no such page', draftSection.json.error?.code === 'not-found', JSON.stringify(draftSection.json));
+const draftList = await call({ name: 'list_posts', slug: 'unfinished' });
+check('list_posts scoped to the unpublished post is a 404', draftList.status === 404, `got ${draftList.status}`);
+const ghostSection = await call({ name: 'get_section', arguments: { id: 'x' }, slug: 'nope' });
+check('get_section on a post that does not exist is a 404', ghostSection.status === 404, `got ${ghostSection.status}`);
+check('list_posts never names the unpublished post', !JSON.stringify(listed.json).includes('unfinished'));
+
 const unknown = await call({ name: 'no_such_tool' });
 check('an unknown tool is a 400, not a 500', unknown.status === 400 && unknown.json.error?.code === 'unknown-tool');
 

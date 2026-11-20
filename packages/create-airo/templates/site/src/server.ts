@@ -97,6 +97,37 @@ export async function snapshotFor(initialNavState?: Partial<NavigationState>): P
   });
 }
 
+/**
+ * Whether this site withholds the page a request names: it is a post that
+ * does not exist, or its `crawler-surface` adapter refused to publish it.
+ *
+ * The decision is made once, here, and every surface asks it: the page route
+ * (which already holds the adapter results from rendering), the sitemap,
+ * llms.txt and `/mcp/call`. A surface that decides for itself leaks. The
+ * agent tools did exactly that: `get_section` never checks `isPublished`, so
+ * the draft's text was one POST away while its url answered 404.
+ */
+function withheld(
+  state: Partial<NavigationState> | undefined,
+  snapshot: SiteData,
+  adapterResults: ReadonlyArray<{ adapterId: string; included: boolean }>,
+): boolean {
+  const missingPost = state?.page === 'post' && !snapshot.post;
+  const refused = adapterResults.some((r) => r.adapterId === 'crawler-surface' && !r.included);
+  return missingPost || refused;
+}
+
+/**
+ * The snapshot for a page, or `undefined` when the site withholds it. For
+ * the surfaces that do not render the page themselves (`/mcp/call`): they
+ * get data only for a page a visitor could load.
+ */
+async function publishableSnapshot(state: Partial<NavigationState> | undefined): Promise<SiteData | undefined> {
+  const snapshot = await snapshotFor(state);
+  const results = await runPublicationAdapters(cartridge, snapshot, publicationCtx, { adapterIds: ['crawler-surface'] });
+  return withheld(state, snapshot, results) ? undefined : snapshot;
+}
+
 type HeadPatch = Partial<Parameters<typeof renderDocument>[0]['head']>;
 
 /**
@@ -209,7 +240,8 @@ app.get('/mcp/tools', (_req, res) => {
 
 /**
  * Call a tool: `{ "name": "get_section", "arguments": { "id": "…" }, "slug": "hello" }`.
- * The tool reads the same snapshot `/post/hello` renders.
+ * The tool reads the same snapshot `/post/hello` renders, and a `slug` the
+ * site withholds (an unfinished or unknown post) is a 404, as its url is.
  */
 app.post('/mcp/call', async (req, res) => {
   const { name, arguments: args, slug } = (req.body ?? {}) as { name?: unknown; arguments?: unknown; slug?: unknown };
@@ -218,7 +250,14 @@ app.post('/mcp/call', async (req, res) => {
     return;
   }
   const state = typeof slug === 'string' ? { page: 'post', [PATH_CONTEXT_KEY]: slug } : undefined;
-  const out = await dispatchTool(cartridge, name, args ?? {}, await snapshotFor(state), { config });
+  // Same answer as the page route gives for this url, so a draft is as
+  // absent to an agent as it is to a search engine.
+  const snapshot = await publishableSnapshot(state);
+  if (!snapshot) {
+    res.status(404).json({ ok: false, error: { code: 'not-found', message: 'no such page' } });
+    return;
+  }
+  const out = await dispatchTool(cartridge, name, args ?? {}, snapshot, { config });
 
   if (!out.ok) {
     // A bad call from an agent is a 400, not a 500 — `dispatchTool` returns
@@ -277,9 +316,11 @@ const renderPage: express.RequestHandler = async (req, res) => {
   }
 
   // A post that does not exist, or that its crawler adapter refused to
-  // publish, is also missing as far as this site is concerned.
-  const unpublished = result.adapterResults.some((r) => r.adapterId === 'crawler-surface' && !r.included);
-  if ((initialNavState?.page === 'post' && !snapshot.post) || unpublished) {
+  // publish, is also missing as far as this site is concerned. This is
+  // decided after rendering on purpose: the renderer has just produced the
+  // verdict, and asking `publishableSnapshot` first would run the adapter a
+  // second time on every successful request.
+  if (withheld(initialNavState, snapshot, result.adapterResults)) {
     notFound(res, req.path);
     return;
   }
