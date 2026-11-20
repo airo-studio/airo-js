@@ -9,6 +9,8 @@ touches:
   - packages/core/src/router.ts
   - packages/cartridge-kit/src/define-ssr-safe-renderer.ts
   - packages/cartridge-kit/src/define-hydrate-only-renderer.ts
+  - packages/core/src/mount-entry.ts
+  - packages/runtime/src/mount-cartridge.ts
 ---
 
 ## Decided
@@ -19,6 +21,8 @@ touches:
 - Routers' `replace` keeps `window.history.state`. It can belong to the host's router.
 - QueryRouter erasing un-decoded prefixed params on its first write is intended. It is kept, and the comment is fixed.
 
+- `navDefaults` (2026-11-20, from the consumer's test build) IS a base for router entries, and that does not contradict the line above. It is a separate, fixed option: a remount passes the same `navDefaults` again and passes its snapshot as `initialNavState`, so nothing replays. Keys listed there are left out of every URL write while they hold their default (`urlState`), and filled back in when an entry, the mount or `navigate` leaves them empty (`withNavDefaults` in mount-entry.ts, applied in `applyNavigation` and the router echo check). For values the host derives (a region from geo), which in `initialNavState` leaked into shared links. A mount-only opt-out would not have fixed it: every write encodes the whole state, so the first navigation wrote the key anyway.
+- The size cost (+726 B gzip in core) is logic in `PageManager`, not log strings: shortening messages and folding the drain loop saved about 14 B. `#private` fields save about 155 B at es2022 but cost about 490 B when a consumer's build lowers to es2020, so they were rejected.
 - Both cartridge-kit renderer factories (`defineSSRSafeRenderer`, `defineHydrateOnlyRenderer`) take `applyNavState(root, next, previous, ctx)` as an option, because only the factory holds root and ctx. A new optional `PageRenderer` hook needs the same treatment in both factories, or a factory-built view cannot use it. On a hydrate-only view a declined same-page navigation reaches `render`, which throws.
 
 ## Tried and ruled out
