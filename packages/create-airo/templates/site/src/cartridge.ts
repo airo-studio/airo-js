@@ -19,7 +19,7 @@
  */
 
 import {
-  defineSSRSafeRenderer,
+  defineHydrateOnlyRenderer,
   type Cartridge,
   type CartridgeAppContext,
   type DataSource,
@@ -27,9 +27,9 @@ import {
   type Transformer,
   type ViewDefinition,
 } from '@airo-js/cartridge-kit';
-import { escapeAttr, escapeHtml } from '@airo-js/core';
 
-import { COPY, POSTS, SITE, findPost, type Post, type Section, type Site } from './content.js';
+import { POSTS, SITE, findPost, type Post, type Section, type Site } from './content.js';
+import { hydrateHome, hydratePost } from './hydrate.js';
 
 // ─────────────────────────── types ───────────────────────────
 
@@ -174,94 +174,45 @@ const anchorIds: Transformer<SiteData, SiteConfig> = {
 
 // ─────────────────────────── views ───────────────────────────
 //
-// `defineSSRSafeRenderer` builds all three render paths — browser render,
-// server render, hydrate — from one `template` and one `hydrate`, so they
-// cannot drift apart. Two rules keep that true:
+// This site renders every page on the server and only HYDRATES it in the
+// browser: `client.ts` always mounts with `mode: 'hydrate'`, the links are
+// plain `<a href>` (a full page load, not a client-side navigation), and no
+// view is `csr-only`. So the browser never calls a view's `render`, and
+// shipping its `template` would put markup code in `client.js` that never
+// runs.
 //
-//   1. `template` is pure. No `Date.now()`, no `Math.random()`, no DOM reads.
-//      The same data must produce the same string on the server and in the
-//      browser, or hydration adopts markup that does not match.
-//   2. Listeners go in `hydrate`, never in `template`.
+// Each view is therefore built twice from one shared `hydrate` handler:
 //
-// Its type arguments cannot be inferred, so pass them explicitly.
+//   - here, for the browser: `defineHydrateOnlyRenderer({ hydrate })`. It
+//     holds listeners and no template, and `capabilities: ['hydrate-only']`
+//     says so in the page graph;
+//   - in `cartridge.server.ts`, for the server: `defineSSRSafeRenderer({
+//     template, hydrate })`, with the pure templates in `markup.server.ts`.
+//
+// Both import the handler from `hydrate.ts`, so the listeners a server-
+// rendered page gets cannot drift from the ones the browser expects. The
+// price: a browser path that DOES need a render now throws, naming the page
+// (best-practices §5.4a). Those are a `mode: 'csr'` mount, a client-side
+// navigation, and a `csr-only` view. If you add one, give that view a full
+// `defineSSRSafeRenderer` here too. Its `template` must stay pure: no
+// `Date.now()`, no `Math.random()`, no DOM reads.
 
-type Ctx = CartridgeAppContext<SiteData, SiteConfig>;
+export type Ctx = CartridgeAppContext<SiteData, SiteConfig>;
 
-const page = (inner: string) => `<div class="site-page">${inner}</div>`;
-
-const homeView: ViewDefinition<SiteData, SiteConfig> = {
+export const homeView: ViewDefinition<SiteData, SiteConfig> = {
   id: 'home-view',
   displayName: 'Index',
   pageType: 'home' satisfies PageType,
-  capabilities: ['ssr-safe', 'hydratable'],
-  factory: defineSSRSafeRenderer<PageType, Ctx>({
-    template(ctx) {
-      const { site, posts } = ctx.app.data;
-      const items = posts
-        .filter(isPublished)
-        .map(
-          (p) => `
-        <li class="site-card">
-          <a class="site-card__link" href="/post/${escapeAttr(p.slug)}">${escapeHtml(p.title)}</a>
-          <p class="site-card__desc">${escapeHtml(p.description)}</p>
-        </li>`,
-        )
-        .join('');
-      return page(`
-      <header>
-        <h1 class="site-title">${escapeHtml(site.name)}</h1>
-        <p class="site-tagline">${escapeHtml(site.tagline)}</p>
-      </header>
-      <ul class="site-list">${items}</ul>
-    `);
-    },
-    hydrate(root) {
-      // An example listener, attached identically after a server render and a
-      // browser render. It records which card was clicked; replace it with
-      // your own behaviour.
-      root.addEventListener('click', (e) => {
-        const link = (e.target as Element).closest('a.site-card__link');
-        if (link) root.setAttribute('data-last-click', link.textContent ?? '');
-      });
-    },
-  }),
+  capabilities: ['hydrate-only'],
+  factory: defineHydrateOnlyRenderer<PageType, Ctx>({ hydrate: hydrateHome }),
 };
 
-const postView: ViewDefinition<SiteData, SiteConfig> = {
+export const postView: ViewDefinition<SiteData, SiteConfig> = {
   id: 'post-view',
   displayName: 'Post',
   pageType: 'post' satisfies PageType,
-  capabilities: ['ssr-safe', 'hydratable'],
-  factory: defineSSRSafeRenderer<PageType, Ctx>({
-    template(ctx) {
-      const { post } = ctx.app.data;
-      if (!post) return page(`<p class="site-empty">${escapeHtml(COPY.notFound)}</p>`);
-      const toc = post.sections
-        .map((s) => `<li><a href="#${escapeAttr(s.id)}">${escapeHtml(s.title)}</a></li>`)
-        .join('');
-      const body = post.sections
-        .map(
-          (s) => `
-        <section class="site-section" id="${escapeAttr(s.id)}">
-          <h${s.depth}>${escapeHtml(s.title)}</h${s.depth}>
-          ${s.html}
-        </section>`,
-        )
-        .join('');
-      return page(`
-      <article>
-        <a class="site-back" href="/">${escapeHtml(COPY.backToIndex)}</a>
-        <h1 class="site-title">${escapeHtml(post.title)}</h1>
-        <p class="site-tagline">${escapeHtml(post.description)}</p>
-        <nav class="site-toc"><ol>${toc}</ol></nav>
-        ${body}
-      </article>
-    `);
-    },
-    hydrate() {
-      // Plain links, nothing to attach. Keeping the handler keeps both render paths symmetric.
-    },
-  }),
+  capabilities: ['hydrate-only'],
+  factory: defineHydrateOnlyRenderer<PageType, Ctx>({ hydrate: hydratePost }),
 };
 
 // ─────────────────────────── template ───────────────────────────

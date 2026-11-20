@@ -1,10 +1,11 @@
 /**
  * Your cartridge — the server half.
  *
- * The browser cartridge plus two things browsers never need: publication
- * adapters (what search engines and assistants read) and MCP tools (what AI
- * agents call). Only `server.ts` imports this file, so none of it reaches
- * `client.js`.
+ * The browser cartridge plus three things browsers never need: the page
+ * templates (the server renders every page; the browser only hydrates),
+ * publication adapters (what search engines and assistants read) and MCP
+ * tools (what AI agents call). Only `server.ts` imports this file, so none of
+ * it reaches `client.js`.
  *
  * Everything here reads the same snapshot the views render. That is the
  * point: the page, its metadata and an agent's answer cannot disagree.
@@ -21,13 +22,26 @@
 
 import {
   defineCrawlerSurfaceAdapter,
+  defineSSRSafeRenderer,
   type Cartridge,
   type McpToolDefinition,
   type PublicationAdapter,
   type ValidationResult,
+  type ViewDefinition,
 } from '@airo-js/cartridge-kit';
 
-import { isPublished, siteCartridge, type SiteConfig, type SiteData } from './cartridge.js';
+import {
+  homeView,
+  isPublished,
+  postView,
+  siteCartridge,
+  type Ctx,
+  type PageType,
+  type SiteConfig,
+  type SiteData,
+} from './cartridge.js';
+import { hydrateHome, hydratePost } from './hydrate.js';
+import { homeMarkup, postMarkup } from './markup.server.js';
 
 function pageUrl(data: SiteData): string {
   const base = data.site.url.replace(/\/$/, '');
@@ -172,10 +186,34 @@ const getSection: McpToolDefinition<SiteData, SiteConfig> = {
   },
 };
 
+// ───────────────────────── server views ─────────────────────────
+
+/**
+ * The browser's views hold listeners and no template (see `cartridge.ts`).
+ * These are the same views with the template added, so the server can render
+ * them. `defineSSRSafeRenderer` builds render, server render and hydrate from
+ * one `template` and one `hydrate`; the `hydrate` is the very function the
+ * browser's view uses, from `hydrate.ts`. Its type arguments cannot be
+ * inferred, so pass them explicitly.
+ */
+const serverViews: ViewDefinition<SiteData, SiteConfig>[] = [
+  {
+    ...homeView,
+    capabilities: ['ssr-safe', 'hydratable'],
+    factory: defineSSRSafeRenderer<PageType, Ctx>({ template: homeMarkup, hydrate: hydrateHome }),
+  },
+  {
+    ...postView,
+    capabilities: ['ssr-safe', 'hydratable'],
+    factory: defineSSRSafeRenderer<PageType, Ctx>({ template: postMarkup, hydrate: hydratePost }),
+  },
+];
+
 // ─────────────────────────── cartridge ───────────────────────────
 
 export const siteServerCartridge: Cartridge<SiteData, SiteConfig> = {
   ...siteCartridge,
+  views: serverViews,
   publicationAdapters: [jsonLd, crawlerSurface, llmsTxt],
   mcpTools: [listPosts, getSection],
 };

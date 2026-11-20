@@ -41,8 +41,10 @@ npm run verify       # typecheck, tests, build and the smoke, in one go
 | File | What it is |
 |---|---|
 | `src/content.ts` | Your content. Replace it with your CMS, markdown or database |
-| `src/cartridge.ts` | How the site renders: data shape, data source, views, page graph, CSS. This is the browser half |
-| `src/cartridge.server.ts` | Search-engine metadata, JSON-LD, `llms.txt`, and the tools agents can call. Server only |
+| `src/cartridge.ts` | The data shape, data source, page graph, CSS and the views as the browser needs them: listeners, no template. This is the browser half |
+| `src/hydrate.ts` | What each view does once its markup is on the page. Shared by both halves |
+| `src/markup.server.ts` | What each page looks like, as HTML. Server only |
+| `src/cartridge.server.ts` | The server views (templates plus the shared listeners), search-engine metadata, JSON-LD, `llms.txt`, and the tools agents can call. Server only |
 | `src/server.ts` | Express. Every route, and how status codes are decided |
 | `src/client.ts` | The browser entry |
 
@@ -91,8 +93,14 @@ spot say why.
   would never run on page renders.
 - Only fields an adapter truly cannot do without are `required: 'always'`.
   Over-declaring one silently stops that adapter publishing.
-- Adapters and agent tools live in `cartridge.server.ts`, so browsers never
-  download them. The smoke checks the bundle for their names.
+- Adapters, agent tools and the page templates live in `cartridge.server.ts`
+  and `markup.server.ts`, so browsers never download them. The server renders
+  every page and the browser only hydrates it, so the browser's views are
+  built with `defineHydrateOnlyRenderer`. The smoke checks the bundle for
+  their names. A browser path that needs a render (a client-side navigation,
+  a `csr-only` view) throws; give that view a full renderer there.
+- `POST /mcp/call` answers 404 for a post the site withholds, the same as its
+  url, so an agent cannot read a draft.
 - The browser bundle is minified, and the smoke fails if it grows past
   `CLIENT_JS_GZIP_BUDGET` (15 kB gzipped; about 11 kB as scaffolded).
 - Every visible string, including the 404 page, is in `content.ts`.

@@ -109,9 +109,12 @@ check(
   bundleGzip <= CLIENT_JS_GZIP_BUDGET,
   `${bundleGzip} B gzipped`,
 );
-// `cartridge.server.ts` never reaches the browser. If one of these shows up,
-// something in `client.ts`'s import graph now imports the server half.
-for (const serverOnly of ['list_posts', 'llms-txt', 'schema-org-jsonld', 'dispatchTool']) {
+// `cartridge.server.ts` and `markup.server.ts` never reach the browser: the
+// browser hydrates server markup and renders no page, so its views carry no
+// template. If one of these shows up, something in `client.ts`'s import graph
+// now imports a server file. `site-toc` and `site-section` are classes only
+// the post template writes (and the CSS, which also stays on the server).
+for (const serverOnly of ['list_posts', 'llms-txt', 'schema-org-jsonld', 'dispatchTool', 'site-toc', 'site-section']) {
   check(`/client.js does not contain server-only "${serverOnly}"`, !bundle.body.includes(serverOnly));
 }
 
